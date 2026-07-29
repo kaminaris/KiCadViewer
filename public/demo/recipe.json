@@ -1,0 +1,51 @@
+﻿{
+  "schemaVersion": 1,
+  "ic": {
+    "bomItemId": 0,
+    "mpn": "DEMO-IC",
+    "ref": "U1",
+    "pins": { "VIN": "1", "GND": "2", "VOUT": "3", "EN": "4" },
+    "pinList": [
+      { "number": "1", "name": "VIN" },
+      { "number": "2", "name": "GND" },
+      { "number": "3", "name": "VOUT" },
+      { "number": "4", "name": "EN" }
+    ]
+  },
+  "constraints": { "constraintsText": "Demo buck converter" },
+  "components": [
+    {
+      "role": "Cin",
+      "ref": "C1",
+      "type": "capacitor",
+      "value": "10uF",
+      "nets": ["VIN", "GND"],
+      "pinNets": { "1": "VIN", "2": "GND" }
+    },
+    {
+      "role": "Cout",
+      "ref": "C2",
+      "type": "capacitor",
+      "value": "22uF",
+      "nets": ["VOUT", "GND"],
+      "pinNets": { "1": "VOUT", "2": "GND" }
+    },
+    {
+      "role": "Rpull",
+      "ref": "R1",
+      "type": "resistor",
+      "value": "100k",
+      "nets": ["EN", "VIN"],
+      "pinNets": { "1": "EN", "2": "VIN" }
+    }
+  ],
+  "nets": [
+    { "name": "VIN", "members": ["U1.1", "C1.1", "R1.2"] },
+    { "name": "GND", "members": ["U1.2", "C1.2", "C2.2"] },
+    { "name": "VOUT", "members": ["U1.3", "C2.1"] },
+    { "name": "EN", "members": ["U1.4", "R1.1"] }
+  ],
+  "calculations": {},
+  "notes": ["Bundled demo for KiCadViewer SPA"],
+  "confidence": "high"
+}

@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "baseUrl": ".",
+    "paths": {
+      "@kicad-io/*": ["../../shared/kicad-io/src/*"],
+      "@kicad-render/*": ["../../shared/kicad-render/*"],
+      "@kicad-layout/*": ["../../shared/kicad-layout/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "../../shared/kicad-layout/**/*.ts", "../../shared/kicad-render/**/*.ts", "../../shared/kicad-io/src/**/*.ts"]
+}

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>KiCad Viewer</title>
+	<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+	<header class="top">
+		<div class="brand">KiCad Viewer</div>
+		<nav class="modes">
+			<button type="button" id="mode-view" class="active">Open file</button>
+			<button type="button" id="mode-circuit">Circuit layout</button>
+		</nav>
+		<div class="actions" id="view-actions">
+			<label class="file-btn">
+				Open .kicad_sch / .kicad_pcb
+				<input type="file" id="file-input" accept=".kicad_sch,.kicad_pcb,.kicad_pro" hidden />
+			</label>
+		</div>
+		<div class="actions hidden" id="circuit-actions">
+			<label class="file-btn">
+				Open .kicad_sch
+				<input type="file" id="circuit-file-input" accept=".kicad_sch" hidden />
+			</label>
+			<button type="button" id="btn-demo">Load demo</button>
+			<label class="file-btn">
+				Recipe JSON
+				<input type="file" id="recipe-input" accept=".json,application/json" hidden />
+			</label>
+			<label class="file-btn">
+				IC .kicad_sym
+				<input type="file" id="symbol-input" accept=".kicad_sym,.kicad_sch" hidden />
+			</label>
+			<button type="button" id="btn-place">Place</button>
+			<button type="button" id="btn-autowire">Auto wire</button>
+			<button type="button" id="btn-clear-wires">Clear wires</button>
+			<button type="button" id="btn-export">Export .kicad_sch</button>
+		</div>
+	</header>
+	<main>
+		<aside class="side">
+			<p id="status">Drop a KiCad schematic or board, or switch to Circuit layout for the drag/rewire demo.</p>
+			<p class="hint" id="hint">Wheel zoom · drag pan · Circuit mode: drag parts, R rotate</p>
+			<pre id="score" class="score"></pre>
+		</aside>
+		<div class="stage" id="stage">
+			<canvas id="canvas2d"></canvas>
+		</div>
+	</main>
+	<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
