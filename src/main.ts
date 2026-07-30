@@ -6,9 +6,7 @@ import {
 	isEditablePowerPlacement,
 	lockNetlistFromSchematic,
 	placeFromInputs,
-	rewireMovedComponent,
-	rewireMovedLabel,
-	rerouteLockedSchematic,
+	rewireSchematic,
 	wrapFullSchematic,
 	type CircuitDesignRecipe,
 	type CircuitPlacement,
@@ -24,6 +22,7 @@ const DEBUG = true;
 const statusEl = document.getElementById('status')!;
 const scoreEl = document.getElementById('score')!;
 const hintEl = document.getElementById('hint')!;
+const lockedNetsEl = document.getElementById('locked-nets')!;
 const stage = document.getElementById('stage')!;
 const canvas = document.getElementById('canvas2d') as HTMLCanvasElement;
 const modeViewBtn = document.getElementById('mode-view')!;
@@ -48,8 +47,8 @@ let rerouting = false;
 let draggingPan = false;
 let dragStart = new Vec2(0, 0);
 let dragRef: string | null = null;
+/** Global / hierarchical label being dragged (local labels are regenerated). */
 let dragLabelId: string | null = null;
-let dragLabelNet: string | null = null;
 let dragOffset = new Vec2(0, 0);
 let dragMoved = false;
 let dragStartPose: { x: number; y: number; rotation: number } | null = null;
@@ -66,6 +65,17 @@ function setStatus(msg: string): void {
 
 function setScore(text: string): void {
 	scoreEl.textContent = text;
+}
+
+function updateLockedNets(): void {
+	if (!lockedNetlist) {
+		lockedNetsEl.textContent = 'No schematic netlist locked.';
+		return;
+	}
+	const rows = Object.entries(lockedNetlist.pinNetsByRef)
+		.flatMap(([ref, pins]) => Object.entries(pins).map(([pin, net]) => `${ref}.${pin}  →  ${net}`))
+		.sort((a, b) => a.localeCompare(b));
+	lockedNetsEl.textContent = `${lockedNetlist.summary.netCount} nets · ${rows.length} locked pins\n\n${rows.join('\n')}`;
 }
 
 function snap(n: number): number {
@@ -102,9 +112,11 @@ function lockNetlistFromText(text: string, force = false): void {
 		if (lockedNetlist.warnings.length) {
 			setScore(lockedNetlist.warnings.join('\n'));
 		}
+		updateLockedNets();
 	}
 	catch (err) {
 		lockedNetlist = null;
+		updateLockedNets();
 		dbg('lockNetlist failed', err);
 		setScore(err instanceof Error ? err.message : String(err));
 	}
@@ -158,7 +170,7 @@ function updateCircuitHint(): void {
 		return;
 	}
 	if (canLockedAutoroute()) {
-		hintEl.textContent = `Edit on · ${n} parts · drag / R · netlist locked · local rewire on drop`;
+		hintEl.textContent = `Edit on · ${n} parts · drag / R · netlist locked · full rewire on drop`;
 		return;
 	}
 	if (canRecipeAutoroute()) {
@@ -316,6 +328,7 @@ function runPlace(): void {
 	try {
 		// Recipe Place owns rewire via emitFragment — clear any file-locked netlist.
 		lockedNetlist = null;
+		updateLockedNets();
 		const result = placeFromInputs({
 			recipe,
 			icSymbolText,
@@ -339,69 +352,26 @@ function runPlace(): void {
 	}
 }
 
-async function commitLocalRewire(
-	movedRef: string,
-	previousPose: { x: number; y: number; rotation: number }
-): Promise<void> {
-	if (!canLockedAutoroute() || rerouting) {
-		if (canRecipeAutoroute()) {
-			await commitReroute('autoroute');
-		}
-		return;
+/** Status/score after a locked rewire — invalid (red) nets are the to-do list. */
+function reportRewire(
+	invalidNets: string[],
+	breakdown: string,
+	warnings: string[],
+	connectivity: 'autoroute' | 'clear-wires'
+): void {
+	if (connectivity === 'clear-wires') {
+		setStatus('Wires cleared — every pin flagged with a net label.');
 	}
-	rerouting = true;
-	setStatus(`Rewiring ${movedRef}…`);
-	try {
-		const schText = ensureSession().getSchematicText() || lastFullSch;
-		if (!lockedNetlist) {
-			setStatus('No locked netlist — reopen the schematic in Circuit layout.');
-			return;
-		}
-		const result = rewireMovedComponent({
-			schematicText: schText,
-			placements,
-			movedRef,
-			previousPose,
-			locked: lockedNetlist,
-		});
-		// Never replace lockedNetlist — pin↔net map is frozen for the session.
-		placements = result.placements;
-		lastFullSch = result.kicadSchFull;
-		placedFragment = result.kicadSchFull;
-		await ensureSession().loadSchematicText(result.kicadSchFull, {
-			filename: 'circuit-local-rewire.kicad_sch',
-			sheetPath: '/',
-			showDrawingSheet: false,
-			preserveView: true,
-		});
-		syncPlacementsFromSession();
-		restoreSelection();
-		const msg = `Rewired ${movedRef} (ripped ${result.rippedCount}, added ${result.addedCount}).`;
-		setStatus(msg);
-		setScore(
-			result.score.breakdown
-			+ (result.warnings.length ? `\n${result.warnings.join('\n')}` : '')
+	else if (invalidNets.length) {
+		setStatus(
+			`Rewired — ${ invalidNets.length } net(s) need attention (red): `
+			+ `${ invalidNets.join(', ') }. Move parts apart to clear.`
 		);
-		dbg('local rewire', {
-			movedRef,
-			ripped: result.rippedCount,
-			added: result.addedCount,
-			pinRoutes: result.pinRoutes,
-			repairedNets: result.repairedNets,
-			warnings: result.warnings,
-			schTextSource: schText === lastFullSch ? 'lastFullSch' : 'session.write',
-			wiresInText: (schText.match(/\(wire\b/g) || []).length,
-			wiresOutText: (result.kicadSchFull.match(/\(wire\b/g) || []).length,
-			wiresAfterReload: (ensureSession().getSchematicText().match(/\(wire\b/g) || []).length,
-		});
-		updateCircuitHint();
 	}
-	catch (err) {
-		setStatus(err instanceof Error ? err.message : String(err));
+	else {
+		setStatus('Rewired — all nets clean.');
 	}
-	finally {
-		rerouting = false;
-	}
+	setScore(breakdown + (warnings.length ? `\n${ warnings.join('\n') }` : ''));
 }
 
 async function commitReroute(connectivity: 'autoroute' | 'clear-wires' = 'autoroute'): Promise<void> {
@@ -413,32 +383,36 @@ async function commitReroute(connectivity: 'autoroute' | 'clear-wires' = 'autoro
 		return;
 	}
 	rerouting = true;
-	setStatus(connectivity === 'clear-wires' ? 'Clearing wires…' : 'Autorouting…');
+	setStatus(connectivity === 'clear-wires' ? 'Clearing wires…' : 'Rewiring…');
 	try {
 		// Prefer locked netlist when present (opened schematic). Recipe Place clears the lock.
 		const useLocked = canLockedAutoroute();
 		if (useLocked) {
 			const schText = ensureSession().getSchematicText() || lastFullSch;
-			const result = rerouteLockedSchematic({
+			const result = rewireSchematic({
 				schematicText: schText,
 				placements,
 				locked: lockedNetlist ?? undefined,
 				connectivity,
 			});
-			// Keep the session lock frozen even if full reroute returns a copy.
+			// Keep the session lock frozen — the pin↔net map is the source of truth.
 			placements = result.placements;
 			lastFullSch = result.kicadSchFull;
 			placedFragment = result.kicadSchFull;
 			await ensureSession().loadSchematicText(result.kicadSchFull, {
-				filename: 'circuit-locked-reroute.kicad_sch',
+				filename: 'circuit-rewire.kicad_sch',
 				sheetPath: '/',
 				showDrawingSheet: false,
 				preserveView: true,
 			});
 			syncPlacementsFromSession();
 			restoreSelection();
-			setStatus(connectivity === 'clear-wires' ? 'Wires cleared.' : 'Rewired (full locked netlist).');
-			setScore(result.score.breakdown + (result.warnings.length ? `\n${result.warnings.join('\n')}` : ''));
+			reportRewire(result.invalidNets, result.score.breakdown, result.warnings, connectivity);
+			dbg('rewire', {
+				invalidNets: result.invalidNets,
+				segments: result.segments.length,
+				warnings: result.warnings,
+			});
 		}
 		else {
 			const result = reroute({
@@ -519,18 +493,9 @@ async function rotateSelected(): Promise<void> {
 		setStatus('GND orientation is locked');
 		return;
 	}
-	const previousPose = {
-		x: placement.x,
-		y: placement.y,
-		rotation: placement.rotation,
-	};
 	placement.rotation = (placement.rotation + 90) % 360;
-	placements = placements.filter(p => p.ownerRef !== placement.ref);
 	session.moveSymbolByRef(placement.ref, placement.x, placement.y, placement.rotation);
-	if (canLockedAutoroute()) {
-		await commitLocalRewire(placement.ref, previousPose);
-	}
-	else if (canRecipeAutoroute()) {
+	if (canAutoroute()) {
 		await commitReroute('autoroute');
 	}
 	else {
@@ -609,51 +574,6 @@ canvas.addEventListener('wheel', (e) => {
 	ensureSession().zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15);
 }, { passive: false });
 
-async function commitLabelRewire(
-	labelNet: string,
-	previousPose: { x: number; y: number; rotation: number }
-): Promise<void> {
-	if (!canLockedAutoroute() || rerouting || !lockedNetlist) {
-		return;
-	}
-	rerouting = true;
-	setStatus(`Rewiring label ${labelNet}…`);
-	try {
-		const schText = ensureSession().getSchematicText() || lastFullSch;
-		const result = rewireMovedLabel({
-			schematicText: schText,
-			placements,
-			locked: lockedNetlist,
-			labelNet,
-			previousPose,
-		});
-		placements = result.placements;
-		lastFullSch = result.kicadSchFull;
-		placedFragment = result.kicadSchFull;
-		await ensureSession().loadSchematicText(result.kicadSchFull, {
-			filename: 'circuit-label-rewire.kicad_sch',
-			sheetPath: '/',
-			showDrawingSheet: false,
-			preserveView: true,
-		});
-		syncPlacementsFromSession();
-		setStatus(`Label ${labelNet} rewired (repaired: ${result.repairedNets.join(', ') || 'none'}).`);
-		dbg('label rewire', {
-			labelNet,
-			ripped: result.rippedCount,
-			added: result.addedCount,
-			pinRoutes: result.pinRoutes,
-			repairedNets: result.repairedNets,
-		});
-	}
-	catch (err) {
-		setStatus(err instanceof Error ? err.message : String(err));
-	}
-	finally {
-		rerouting = false;
-	}
-}
-
 canvas.addEventListener('mousedown', (e) => {
 	const s = ensureSession();
 	const screenPos = screenPosFromEvent(e);
@@ -667,20 +587,19 @@ canvas.addEventListener('mousedown', (e) => {
 			e.preventDefault();
 			return;
 		}
+		// Global / hierarchical labels are real terminals — draggable. Local
+		// labels are regenerated each rewire, so they are not.
 		const labelHit = s.hitTestLabelAtScreen(screenPos);
-		if (labelHit?.id && labelHit.labelName) {
+		if (labelHit?.id && labelHit.labelKind && labelHit.labelKind !== 'local') {
 			selectedRef = null;
 			s.select(labelHit.id);
 			const world = s.screenToWorld(screenPos);
-			// Label attach point ≈ item element origin; use world click offset.
 			const el = (s as any).schScene?.hitTestItems?.find((it: any) => it.id === labelHit.id)?.element;
 			const origin = el?.getOrigin?.() ?? { x: world.x, y: world.y, rotation: 0 };
 			dragLabelId = labelHit.id;
-			dragLabelNet = labelHit.labelName;
 			dragMoved = false;
 			dragStartPose = { x: origin.x, y: origin.y, rotation: origin.rotation ?? 0 };
 			dragOffset = new Vec2(world.x - origin.x, world.y - origin.y);
-			dbg('beginLabelDrag', { id: labelHit.id, net: labelHit.labelName, origin });
 			e.preventDefault();
 			return;
 		}
@@ -711,8 +630,6 @@ function onPointerMove(e: MouseEvent): void {
 		const worldPos = s.screenToWorld(pos);
 		const nx = snap(worldPos.x - dragOffset.x);
 		const ny = snap(worldPos.y - dragOffset.y);
-		const dx = nx - placement.x;
-		const dy = ny - placement.y;
 		placement.x = nx;
 		placement.y = ny;
 		if (isEditablePowerPlacement(placement)) {
@@ -722,15 +639,6 @@ function onPointerMove(e: MouseEvent): void {
 			dragMoved = true;
 		}
 		s.moveSymbolByRef(placement.ref, placement.x, placement.y, placement.rotation);
-		if (!isEditablePowerPlacement(placement) && (dx !== 0 || dy !== 0)) {
-			for (const g of placements) {
-				if (g.ownerRef !== placement.ref) continue;
-				g.x = snap(g.x + dx);
-				g.y = snap(g.y + dy);
-				g.rotation = 0;
-				s.moveSymbolByRef(g.ref, g.x, g.y, 0);
-			}
-		}
 		return;
 	}
 	if (!draggingPan) return;
@@ -741,18 +649,14 @@ function onPointerMove(e: MouseEvent): void {
 function onPointerUp(): void {
 	const finishingSym = dragRef;
 	const finishingLabel = dragLabelId;
-	const finishingLabelNet = dragLabelNet;
 	const moved = dragMoved;
-	const prev = dragStartPose;
 	dragRef = null;
 	dragLabelId = null;
-	dragLabelNet = null;
 	draggingPan = false;
-	if (mode === 'circuit' && editMode && finishingLabel && finishingLabelNet && moved && prev) {
-		void commitLabelRewire(finishingLabelNet, prev);
-	}
-	else if (mode === 'circuit' && editMode && finishingSym && moved && prev) {
-		void commitLocalRewire(finishingSym, prev);
+	// Any symbol OR global/hier label move → full net-locked rewire (the single
+	// edit path; the moved label/rail is preserved and wires re-route to it).
+	if (mode === 'circuit' && editMode && (finishingSym || finishingLabel) && moved) {
+		void commitReroute('autoroute');
 	}
 	dragMoved = false;
 	dragStartPose = null;

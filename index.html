@@ -43,6 +43,11 @@
 		<aside class="side">
 			<p id="status">Drop a KiCad schematic or board, or switch to Circuit layout for the drag/rewire demo.</p>
 			<p class="hint" id="hint">Wheel zoom · drag pan · Circuit mode: drag parts, R rotate</p>
+			<p class="hint legend"><span class="wire-invalid">■</span> Red wire = forced connection that couldn't route cleanly — still connected, move parts apart to clear it.</p>
+			<section class="debug-nets">
+				<h2>Locked pin → net map</h2>
+				<pre id="locked-nets">No schematic netlist locked.</pre>
+			</section>
 			<pre id="score" class="score"></pre>
 		</aside>
 		<div class="stage" id="stage">

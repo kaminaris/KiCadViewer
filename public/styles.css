@@ -83,10 +83,34 @@ main {
 	font-size: 0.85rem;
 }
 
+.legend {
+	margin-top: 0.25rem;
+}
+
+.wire-invalid {
+	color: rgb(255, 0, 0);
+	font-weight: bold;
+}
+
 .score {
 	font-size: 0.75rem;
 	white-space: pre-wrap;
 	color: var(--muted);
+}
+
+.debug-nets h2 {
+	margin: 1rem 0 0.4rem;
+	font-size: 0.78rem;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--muted);
+}
+
+#locked-nets {
+	margin: 0;
+	font: 0.72rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+	white-space: pre-wrap;
+	color: #b7d9ff;
 }
 
 .stage {
