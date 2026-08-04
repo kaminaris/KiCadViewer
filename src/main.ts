@@ -1611,6 +1611,12 @@ function handleEditModeMouseDown(e: MouseEvent, s: KicadRenderSession, screenPos
 	const samePoint = (a: Vec2, b: Vec2) => a.x === b.x && a.y === b.y;
 
 	if (editTool === 'select') {
+		// Selection and drag start are primary-button actions only. Returning
+		// false lets middle-button input continue to the canvas pan path and
+		// prevents it from unexpectedly changing selection under the cursor.
+		if (e.button !== 0) {
+			return false;
+		}
 		const hit = s.hitTestAtScreen(screenPos);
 		if (hit?.kind === 'symbol' && hit.refDesignator) {
 			selectedRef = hit.refDesignator;
