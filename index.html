@@ -61,6 +61,7 @@
 		<div class="stage" id="stage">
 			<canvas id="canvas2d"></canvas>
 			<input type="text" id="edit-text-input" class="edit-text-input hidden" placeholder="Text…" autocomplete="off" />
+			<textarea id="edit-text-box-input" class="edit-text-input edit-text-box-input hidden" placeholder="Text…" autocomplete="off" rows="4"></textarea>
 			<div class="context-menu hidden" id="context-menu"></div>
 		</div>
 		<aside class="tool-panel hidden" id="tool-panel">
@@ -115,7 +116,7 @@
 			<button type="button" class="tool-btn" data-tool="text" title="Text">
 				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M6 6 H18 M12 6 V18"/></svg>
 			</button>
-			<button type="button" class="tool-btn" data-tool="text-box" title="Draw Text Box — not yet implemented" disabled>
+			<button type="button" class="tool-btn" data-tool="text-box" title="Draw Text Box">
 				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14"/><path d="M7 9 H17 M7 12.5 H17 M7 16 H13"/></svg>
 			</button>
 			<button type="button" class="tool-btn" data-tool="table" title="Draw Table — not yet implemented" disabled>

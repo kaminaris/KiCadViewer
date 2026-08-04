@@ -90,6 +90,12 @@ html, body {
 
 .edit-text-input.hidden { display: none; }
 
+.edit-text-box-input {
+	min-width: 14rem;
+	min-height: 5rem;
+	resize: both;
+}
+
 .file-btn { display: inline-block; }
 
 main {

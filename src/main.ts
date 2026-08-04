@@ -1,4 +1,13 @@
-import { KicadRenderSession, type EditPreviewState, type KicadGlobalLabelShape, type KicadDirectiveLabelShape } from '@kicad-render/KicadRenderSession';
+import {
+	KicadRenderSession,
+	type EditPreviewState,
+	type KicadGlobalLabelShape,
+	type KicadDirectiveLabelShape,
+	type ResizeHandle,
+	type SelectionResizeBox,
+	type CurveAnchor,
+	type SelectionCurveAnchors,
+} from '@kicad-render/KicadRenderSession';
 import { Vec2 } from '@kicad-render/math/Vec2';
 import { FINE_GRID_MM } from '@kicad-layout/Geometry';
 import {
@@ -19,7 +28,7 @@ import { reroute } from '@kicad-layout/Reroute';
 type AppMode = 'view' | 'circuit' | 'edit';
 type EditTool =
 	| 'select' | 'wire' | 'bus' | 'bus-entry' | 'junction' | 'no-connect' | 'line' | 'rect' | 'circle' | 'arc' | 'text'
-	| 'label' | 'directive-label' | 'global-label' | 'hier-label' | 'power' | 'delete';
+	| 'text-box' | 'label' | 'directive-label' | 'global-label' | 'hier-label' | 'power' | 'delete';
 
 /** Edit-mode tool-switch hotkeys. R/T are already rotate/tidy, so Rect and
  *  Text have no letter here — toolbar-button only for those two. Local
@@ -131,6 +140,7 @@ const editActions = document.getElementById('edit-actions')!;
 const toolPanel = document.getElementById('tool-panel')!;
 const mainEl = document.querySelector('main')!;
 const editTextInput = document.getElementById('edit-text-input') as HTMLInputElement;
+const editTextBoxInput = document.getElementById('edit-text-box-input') as HTMLTextAreaElement;
 const contextMenuEl = document.getElementById('context-menu') as HTMLDivElement;
 const editToolButtons = Array.from(
 	document.querySelectorAll<HTMLButtonElement>('#tool-panel [data-tool]')
@@ -166,18 +176,25 @@ let dragStartPose: { x: number; y: number; rotation: number } | null = null;
 let editTool: EditTool = 'select';
 /** Wire/bus tools: last committed chain point (world, snapped), or null if no chain in progress. */
 let lineChainStart: Vec2 | null = null;
-/** Line/rect/circle tools: first-click anchor, or null before it. */
+/** Line/rect/circle/text-box tools: first-click anchor, or null before it. */
 let shapeAnchor: Vec2 | null = null;
 /** Arc tool: 0, 1 ([start]), or 2 ([start, end]) points clicked so far. */
 let arcPoints: Vec2[] = [];
 /** Select tool: non-symbol element (wire/junction/no-connect/graphic/text) being dragged. */
 let editDragId: string | null = null;
 let editDragLastPos: Vec2 | null = null;
+/** An outer selection handle is being dragged. The center handle uses the
+ * ordinary editDrag path, since its contract is exactly "move this item". */
+let resizeDrag: { id: string; handle: Exclude<ResizeHandle, 'center'>; original: SelectionResizeBox } | null = null;
+let curveDrag: { id: string; anchor: CurveAnchor } | null = null;
 /** Select tool: paint-item id/kind of whatever's currently selected (for Delete-key policy). */
 let editSelectedId: string | null = null;
 let editSelectedKind: string | null = null;
 /** Text tool: world position of the pending (not-yet-committed) text. */
 let pendingTextAnchor: Vec2 | null = null;
+/** Bounds captured by Draw Text Box's two-click gesture while its multiline
+ * editor is open. */
+let pendingTextBoxBounds: { x: number; y: number; width: number; height: number } | null = null;
 /** Set when the floating text input is editing an EXISTING label's text
  *  (via the context menu's "Edit Text…") rather than placing a new one —
  *  commitTextInput() checks this first, since editTool could be anything
@@ -217,6 +234,69 @@ function updateLockedNets(): void {
 
 function snap(n: number): number {
 	return Math.round(n / PLACE_GRID) * PLACE_GRID;
+}
+
+const RESIZE_HANDLE_ORDER: readonly ResizeHandle[] = ['nw', 'n', 'ne', 'w', 'center', 'e', 'sw', 's', 'se'];
+
+function resizeHandleAtScreen(s: KicadRenderSession, screenPos: Vec2): {
+	handle: ResizeHandle;
+	box: SelectionResizeBox;
+} | null {
+	const box = s.getSelectionResizeBox();
+	if (!box) {
+		return null;
+	}
+	const x2 = box.x + box.width;
+	const y2 = box.y + box.height;
+	const cx = box.x + box.width / 2;
+	const cy = box.y + box.height / 2;
+	const points = [
+		new Vec2(box.x, box.y), new Vec2(cx, box.y), new Vec2(x2, box.y),
+		new Vec2(box.x, cy), new Vec2(cx, cy), new Vec2(x2, cy),
+		new Vec2(box.x, y2), new Vec2(cx, y2), new Vec2(x2, y2),
+	];
+	const hitRadius = 9 * (window.devicePixelRatio || 1);
+	let closest: { handle: ResizeHandle; distance: number } | null = null;
+	for (let i = 0; i < points.length; i++) {
+		const point = s.camera.worldToScreen(points[i]!);
+		const distance = Math.hypot(point.x - screenPos.x, point.y - screenPos.y);
+		if (distance <= hitRadius && (!closest || distance < closest.distance)) {
+			closest = { handle: RESIZE_HANDLE_ORDER[i]!, distance };
+		}
+	}
+	return closest ? { handle: closest.handle, box } : null;
+}
+
+function resizedBoundsFromHandle(box: SelectionResizeBox, handle: Exclude<ResizeHandle, 'center'>, cursor: Vec2): SelectionResizeBox {
+	let left = box.x;
+	let right = box.x + box.width;
+	let top = box.y;
+	let bottom = box.y + box.height;
+	if (handle.includes('w')) left = Math.min(cursor.x, right - PLACE_GRID);
+	if (handle.includes('e')) right = Math.max(cursor.x, left + PLACE_GRID);
+	if (handle.includes('n')) top = Math.min(cursor.y, bottom - PLACE_GRID);
+	if (handle.includes('s')) bottom = Math.max(cursor.y, top + PLACE_GRID);
+	return { id: box.id, x: left, y: top, width: right - left, height: bottom - top };
+}
+
+function curveAnchorAtScreen(s: KicadRenderSession, screenPos: Vec2): {
+	anchor: CurveAnchor;
+	curve: SelectionCurveAnchors;
+} | null {
+	const curve = s.getSelectionCurveAnchors();
+	if (!curve) {
+		return null;
+	}
+	const hitRadius = 9 * (window.devicePixelRatio || 1);
+	let closest: { anchor: CurveAnchor; distance: number } | null = null;
+	for (const anchor of curve.anchors) {
+		const point = s.camera.worldToScreen(new Vec2(anchor.x, anchor.y));
+		const distance = Math.hypot(point.x - screenPos.x, point.y - screenPos.y);
+		if (distance <= hitRadius && (!closest || distance < closest.distance)) {
+			closest = { anchor: anchor.kind, distance };
+		}
+	}
+	return closest ? { anchor: closest.anchor, curve } : null;
 }
 
 function canRecipeAutoroute(): boolean {
@@ -969,6 +1049,23 @@ function onPointerMove(e: MouseEvent): void {
 		updateEditPreview(s, new Vec2(snap(worldPos.x), snap(worldPos.y)));
 		return;
 	}
+	if (mode === 'edit' && curveDrag) {
+		const worldPos = s.screenToWorld(pos);
+		if (s.moveCurveAnchorById(curveDrag.id, curveDrag.anchor, snap(worldPos.x), snap(worldPos.y))) {
+			dragMoved = true;
+		}
+		return;
+	}
+	if (mode === 'edit' && resizeDrag) {
+		const worldPos = s.screenToWorld(pos);
+		const bounds = resizedBoundsFromHandle(
+			resizeDrag.original, resizeDrag.handle, new Vec2(snap(worldPos.x), snap(worldPos.y))
+		);
+		if (s.resizeElementBoundsById(resizeDrag.id, bounds.x, bounds.y, bounds.width, bounds.height)) {
+			dragMoved = true;
+		}
+		return;
+	}
 	if (mode === 'edit' && editDragId) {
 		const worldPos = s.screenToWorld(pos);
 		const snapped = new Vec2(snap(worldPos.x), snap(worldPos.y));
@@ -1027,18 +1124,22 @@ function onPointerUp(): void {
 	const finishingSym = dragRef;
 	const finishingLabel = dragLabelId;
 	const finishingEditDrag = editDragId;
+	const finishingResize = resizeDrag;
+	const finishingCurve = curveDrag;
 	const moved = dragMoved;
 	dragRef = null;
 	dragLabelId = null;
 	editDragId = null;
 	editDragLastPos = null;
+	resizeDrag = null;
+	curveDrag = null;
 	draggingPan = false;
 	// Any symbol OR global/hier label move → full net-locked rewire (the single
 	// edit path; the moved label/rail is preserved and wires re-route to it).
 	if (mode === 'circuit' && circuitDragMode && (finishingSym || finishingLabel) && moved) {
 		void commitReroute('autoroute');
 	}
-	else if (mode === 'edit' && (finishingSym || finishingEditDrag) && moved && session) {
+	else if (mode === 'edit' && (finishingSym || finishingEditDrag || finishingResize || finishingCurve) && moved && session) {
 		// Manual move, no rewire — just persist the mutated AST text.
 		lastFullSch = session.getSchematicText() || lastFullSch;
 	}
@@ -1209,6 +1310,8 @@ function resetEditToolState(): void {
 	currentDirectiveLabelShape = 'round';
 	editDragId = null;
 	editDragLastPos = null;
+	resizeDrag = null;
+	curveDrag = null;
 	hideTextInput();
 	closeContextMenu();
 	session?.setEditPreview(null);
@@ -1227,7 +1330,10 @@ function setEditTool(tool: EditTool): void {
 function hideTextInput(): void {
 	editTextInput.classList.add('hidden');
 	editTextInput.value = '';
+	editTextBoxInput.classList.add('hidden');
+	editTextBoxInput.value = '';
 	pendingTextAnchor = null;
+	pendingTextBoxBounds = null;
 	editingLabelId = null;
 }
 
@@ -1252,6 +1358,13 @@ function previewForPendingText(anchor: Vec2, text: string): EditPreviewState | n
 		default:
 			return null;
 	}
+}
+
+function previewForPendingTextBox(text: string): EditPreviewState | null {
+	if (!pendingTextBoxBounds) {
+		return null;
+	}
+	return { kind: 'text-box', ...pendingTextBoxBounds, text };
 }
 
 /** Shared positioning/show logic for the floating text input, used by both
@@ -1279,6 +1392,19 @@ function showTextInputAt(worldAnchor: Vec2, clientX: number, clientY: number, pl
 
 function showTextInput(worldAnchor: Vec2, e: MouseEvent): void {
 	showTextInputAt(worldAnchor, e.clientX, e.clientY, TEXT_INPUT_PLACEHOLDERS[editTool] ?? '', '');
+}
+
+function showTextBoxInput(first: Vec2, second: Vec2, e: MouseEvent): void {
+	pendingTextBoxBounds = {
+		x: Math.min(first.x, second.x), y: Math.min(first.y, second.y),
+		width: Math.abs(second.x - first.x), height: Math.abs(second.y - first.y),
+	};
+	const stageRect = stage.getBoundingClientRect();
+	editTextBoxInput.style.left = `${e.clientX - stageRect.left}px`;
+	editTextBoxInput.style.top = `${e.clientY - stageRect.top}px`;
+	editTextBoxInput.classList.remove('hidden');
+	editTextBoxInput.focus();
+	session?.setEditPreview(previewForPendingTextBox(''));
 }
 
 /** Context menu's "Edit Text…" — reuses the floating text input to rename
@@ -1352,6 +1478,18 @@ function commitTextInput(): void {
 	session.setEditPreview(null);
 }
 
+function commitTextBoxInput(): void {
+	const value = editTextBoxInput.value.trim();
+	const bounds = pendingTextBoxBounds;
+	if (value && bounds && session) {
+		session.addGraphicTextBox(bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height, value);
+		lastFullSch = session.getSchematicText() || lastFullSch;
+		setStatus('Added text box.');
+	}
+	hideTextInput();
+	session?.setEditPreview(null);
+}
+
 editTextInput.addEventListener('input', () => {
 	if (pendingTextAnchor) {
 		session?.setEditPreview(previewForPendingText(pendingTextAnchor, editTextInput.value));
@@ -1402,6 +1540,28 @@ editTextInput.addEventListener('blur', () => {
 		hideTextInput();
 		session?.setEditPreview(null);
 	}
+});
+
+editTextBoxInput.addEventListener('input', () => {
+	session?.setEditPreview(previewForPendingTextBox(editTextBoxInput.value));
+});
+editTextBoxInput.addEventListener('keydown', (e) => {
+	e.stopPropagation();
+	if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+		e.preventDefault();
+		commitTextBoxInput();
+	}
+	else if (e.key === 'Escape') {
+		e.preventDefault();
+		hideTextInput();
+		session?.setEditPreview(null);
+	}
+});
+editTextBoxInput.addEventListener('blur', () => {
+	if (editTextBoxInput.classList.contains('hidden')) {
+		return;
+	}
+	commitTextBoxInput();
 });
 
 // ---- Edit mode: right-click context menu ----
@@ -1584,6 +1744,14 @@ function updateEditPreview(s: KicadRenderSession, cursor: Vec2): void {
 		case 'circle':
 			preview = { kind: editTool, anchor: shapeAnchor, cursor };
 			break;
+		case 'text-box':
+			preview = shapeAnchor
+				? {
+					kind: 'text-box', x: Math.min(shapeAnchor.x, cursor.x), y: Math.min(shapeAnchor.y, cursor.y),
+					width: Math.abs(cursor.x - shapeAnchor.x), height: Math.abs(cursor.y - shapeAnchor.y), text: '',
+				}
+				: null;
+			break;
 		case 'arc':
 			preview = { kind: 'arc', points: arcPoints, cursor };
 			break;
@@ -1616,6 +1784,35 @@ function handleEditModeMouseDown(e: MouseEvent, s: KicadRenderSession, screenPos
 		// prevents it from unexpectedly changing selection under the cursor.
 		if (e.button !== 0) {
 			return false;
+		}
+		const curveAnchor = curveAnchorAtScreen(s, screenPos);
+		if (curveAnchor) {
+			selectedRef = null;
+			editSelectedId = curveAnchor.curve.id;
+			editSelectedKind = 'curve';
+			s.pushUndoSnapshot();
+			curveDrag = { id: curveAnchor.curve.id, anchor: curveAnchor.anchor };
+			e.preventDefault();
+			return true;
+		}
+		// Resize handles belong to the existing selection and sit above ordinary
+		// hit-testing. The center handle deliberately routes through the same
+		// delta-based drag used by every movable edit object.
+		const resizeHandle = resizeHandleAtScreen(s, screenPos);
+		if (resizeHandle) {
+			selectedRef = null;
+			editSelectedId = resizeHandle.box.id;
+			editSelectedKind = 'resize-box';
+			s.pushUndoSnapshot();
+			if (resizeHandle.handle === 'center') {
+				editDragId = resizeHandle.box.id;
+				editDragLastPos = snapped;
+			}
+			else {
+				resizeDrag = { id: resizeHandle.box.id, handle: resizeHandle.handle, original: resizeHandle.box };
+			}
+			e.preventDefault();
+			return true;
 		}
 		const hit = s.hitTestAtScreen(screenPos);
 		if (hit?.kind === 'symbol' && hit.refDesignator) {
@@ -1691,7 +1888,7 @@ function handleEditModeMouseDown(e: MouseEvent, s: KicadRenderSession, screenPos
 		return true;
 	}
 
-	if (editTool === 'line' || editTool === 'rect' || editTool === 'circle') {
+	if (editTool === 'line' || editTool === 'rect' || editTool === 'circle' || editTool === 'text-box') {
 		if (!shapeAnchor) {
 			shapeAnchor = snapped;
 		}
@@ -1700,7 +1897,12 @@ function handleEditModeMouseDown(e: MouseEvent, s: KicadRenderSession, screenPos
 			s.setEditPreview(null);
 		}
 		else {
-			if (editTool === 'line') {
+			if (editTool === 'text-box') {
+				const anchor = shapeAnchor;
+				shapeAnchor = null;
+				showTextBoxInput(anchor, snapped, e);
+			}
+			else if (editTool === 'line') {
 				s.addGraphicLine(shapeAnchor.x, shapeAnchor.y, snapped.x, snapped.y);
 			}
 			else if (editTool === 'rect') {
