@@ -12,7 +12,12 @@
 		<nav class="modes">
 			<button type="button" id="mode-view" class="active">Open file</button>
 			<button type="button" id="mode-circuit">Circuit layout</button>
+			<button type="button" id="mode-edit">Edit</button>
 		</nav>
+		<div class="actions" id="history-actions">
+			<button type="button" id="btn-undo" title="Undo (Ctrl+Z)">Undo</button>
+			<button type="button" id="btn-redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+		</div>
 		<div class="actions" id="view-actions">
 			<label class="file-btn">
 				Open .kicad_sch / .kicad_pcb
@@ -38,6 +43,9 @@
 			<button type="button" id="btn-clear-wires">Clear wires</button>
 			<button type="button" id="btn-export">Export .kicad_sch</button>
 		</div>
+		<div class="actions hidden" id="edit-actions">
+			<button type="button" id="btn-export-edit">Export .kicad_sch</button>
+		</div>
 	</header>
 	<main>
 		<aside class="side">
@@ -52,7 +60,95 @@
 		</aside>
 		<div class="stage" id="stage">
 			<canvas id="canvas2d"></canvas>
+			<input type="text" id="edit-text-input" class="edit-text-input hidden" placeholder="Text…" autocomplete="off" />
+			<div class="context-menu hidden" id="context-menu"></div>
 		</div>
+		<aside class="tool-panel hidden" id="tool-panel">
+			<button type="button" class="tool-btn active" data-tool="select" title="Select (S)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M6 3 L6 19 L10 15.5 L13 21 L15.5 19.7 L12.5 14.2 L18 14.2 Z"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="highlight-net" title="Highlight Net — not yet implemented" disabled>
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 16 H20"/><path d="M14 4 V10 M11 7 H17 M12 5 L16 9 M16 5 L12 9"/></svg>
+			</button>
+
+			<div class="tool-sep"></div>
+
+			<button type="button" class="tool-btn" data-tool="place-symbol" title="Place Symbol — not yet implemented" disabled>
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="7" y="6" width="10" height="12"/><path d="M4 9 H7 M4 15 H7 M17 9 H20 M17 15 H20 M9 6 V4 M15 6 V4 M9 18 V20 M15 18 V20"/></svg>
+			</button>
+			<button type="button" class="tool-btn cyclable" data-tool="power" id="btn-power-tool" title="Power symbol — right-click to cycle GND/PWR_FLAG/rail">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M12 4 V10"/><path d="M7 10 H17 M8.5 13 H15.5 M10.5 16 H13.5"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="wire" title="Wire (W)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 18 L20 6"/><circle cx="4" cy="18" r="1.6" fill="currentColor" stroke="none"/><circle cx="20" cy="6" r="1.6" fill="currentColor" stroke="none"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="bus" title="Bus">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 19 L18 7"/><path d="M6 21 L20 9"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="bus-entry" title="Wire to Bus Entry">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 12 H12 L16 8"/><path d="M16 4 L20 20"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="no-connect" title="No-connect (X)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M6 6 L18 18 M18 6 L6 18"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="junction" title="Junction (J)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>
+			</button>
+			<button type="button" class="tool-btn cyclable" data-tool="label" id="btn-label-tool" title="Label: Local — right-click to cycle Local/Directive/Global/Hierarchical">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 8 H15 L19 12 L15 16 H4 Z"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="rule-area" title="Rule Area — not yet implemented" disabled>
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" stroke-dasharray="3 2"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="hier-sheet" title="Hierarchical Sheet — not yet implemented" disabled>
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 4 H15 L19 8 V20 H5 Z M15 4 V8 H19"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="sheet-pin" title="Place Pins from Sheet — not yet implemented" disabled>
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="5" y="7" width="10" height="10"/><path d="M15 12 H20 M17 9 L20 12 L17 15"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="sync-sheet-pins" title="Sync All Sheet Pins — not yet implemented" disabled>
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M18 8 A7 7 0 1 0 19 15"/><path d="M14 4 L18 8 L14 9"/></svg>
+			</button>
+
+			<div class="tool-sep"></div>
+
+			<button type="button" class="tool-btn" data-tool="text" title="Text">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M6 6 H18 M12 6 V18"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="text-box" title="Draw Text Box — not yet implemented" disabled>
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14"/><path d="M7 9 H17 M7 12.5 H17 M7 16 H13"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="table" title="Draw Table — not yet implemented" disabled>
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16"/><path d="M4 12 H20 M12 4 V20"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="rect" title="Rectangle">
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="5" y="6" width="14" height="12"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="circle" title="Circle (C)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="ellipse" title="Draw Ellipse — not yet implemented" disabled>
+				<svg class="tool-icon" viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8" ry="5"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="arc" title="Arc (A)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 16 A10 10 0 0 1 19 10"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="elliptical-arc" title="Draw Elliptical Arc — not yet implemented" disabled>
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 14 A10 5 0 0 1 20 9"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="bezier" title="Draw Bezier Curve — not yet implemented" disabled>
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 18 C 8 6, 16 18, 20 6"/><circle cx="8" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="16" cy="18" r="1.3" fill="currentColor" stroke="none"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="line" title="Line (L)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 18 L11 8 L14 13 L20 5"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="image" title="Place Image — not yet implemented" disabled>
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17 L10 12 L14 15 L20 10 V19 H4 Z"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="delete" title="Interactive Delete Tool">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 7 H19 M9 7 V5 H15 V7 M7 7 L8 20 H16 L17 7"/><path d="M10 10 V17 M14 10 V17"/></svg>
+			</button>
+		</aside>
 	</main>
 	<script type="module" src="/src/main.ts"></script>
 </body>

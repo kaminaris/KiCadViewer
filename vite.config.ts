@@ -1,9 +1,12 @@
 import { defineConfig } from 'vite';
 import path from 'node:path';
 
- const shared = path.resolve(__dirname, '../../shared');
+const shared = path.resolve(__dirname, '../../shared');
 
-export default defineConfig({
+// Production (GitHub Pages): https://kaminaris.github.io/KiCadViewer/
+// Dev server keeps base '/' so localhost:5173 still works.
+export default defineConfig(({ command }) => ({
+	base: command === 'build' ? '/KiCadViewer/' : '/',
 	root: '.',
 	publicDir: 'public',
 	server: { port: 5173 },
@@ -17,4 +20,4 @@ export default defineConfig({
 	optimizeDeps: {
 		exclude: ['@kicad-io', '@kicad-render', '@kicad-layout'],
 	},
-});
+}));
