@@ -261,8 +261,47 @@ function updateEditSidebar(): void {
 	}
 	else {
 		const hit = session.activeScene?.hitTestItems.find(item => item.id === selected);
-    editPropertiesEl.textContent = hit ? `${hit.kind}\nID: ${hit.id}` : 'No objects selected';
-    if (hit && (hit as any).element?.name === 'symbol') renderSymbolProperties((hit as any).element, hit.kind, hit.id);
+		const element = (hit as any)?.element;
+		if (!hit || !element) {
+			editPropertiesEl.textContent = 'No objects selected';
+		}
+		else {
+			const labelKind = (hit as any).labelKind as string | undefined;
+			switch (hit.kind) {
+				case 'symbol':
+					renderSymbolProperties(element, hit.kind, hit.id);
+					break;
+				case 'symbol-graphic':
+					renderShapeProperties(element, hit.kind, hit.id);
+					break;
+				case 'wire':
+				case 'bus':
+					renderWireBusProperties(element, hit.kind, hit.id);
+					break;
+				case 'junction':
+					renderJunctionProperties(element, hit.id);
+					break;
+				case 'text':
+					// kind:'text' also covers table cells (KicadElementTableCell),
+					// which have a wholly different property surface (row/col
+					// span, per-cell margins, …) real KiCad exposes through its
+					// own separate DIALOG_TABLECELL_PROPERTIES — out of scope
+					// here, so they fall through to the generic display below
+					// rather than getting a mismatched text/font panel.
+					if (element.name === 'text' || element.name === 'text_box') {
+						renderTextProperties(element, hit.id);
+					}
+					else {
+						editPropertiesEl.textContent = `${hit.kind}\nID: ${hit.id}`;
+					}
+					break;
+				case 'label':
+					renderLabelProperties(element, labelKind, hit.id);
+					break;
+				default:
+					editPropertiesEl.textContent = `${hit.kind}\nID: ${hit.id}`;
+			}
+		}
 	}
 	const sheets = session.currentSheets;
 	editHierarchyEl.innerHTML = sheets.length
@@ -2264,37 +2303,354 @@ stage.addEventListener('drop', (e) => {
 	void openKiCadFile(file);
 });
 
-function renderSymbolProperties(symbol: any, kind: string, id: string): void {
-  editPropertiesEl.innerHTML = '';
-  const section = (title: string) => { const s = document.createElement('section'); s.className = 'property-section'; const h = document.createElement('div'); h.className = 'property-section-title'; h.textContent = title; s.appendChild(h); editPropertiesEl.appendChild(s); return s; };
-  const row = (s: HTMLElement, label: string, value: string, edit = false, save?: (v: string) => void) => { const r = document.createElement('div'); r.className = 'property-row'; const l = document.createElement('div'); l.className = 'property-label'; l.textContent = label; const c = document.createElement('div'); c.className = 'property-value'; if (edit) { const i = document.createElement('input'); i.className = 'property-input'; i.value = value; const commit = () => { if (i.value !== value) { value = i.value; save?.(value); } }; i.addEventListener('change', commit); i.addEventListener('keydown', e => { if (e.key === 'Enter') { commit(); i.blur(); } }); c.appendChild(i); } else c.textContent = value; r.append(l, c); s.appendChild(r); };
-  const selectRow = (s: HTMLElement, label: string, value: string, options: string[], save: (v: string) => void) => { const r = document.createElement('div'); r.className = 'property-row'; const l = document.createElement('div'); l.className = 'property-label'; l.textContent = label; const c = document.createElement('div'); c.className = 'property-value'; const select = document.createElement('select'); select.className = 'property-input'; for (const option of options) { const item = document.createElement('option'); item.value = option; item.textContent = `${option}°`; select.appendChild(item); } select.value = options.includes(value) ? value : options[0]!; select.addEventListener('change', () => save(select.value)); c.appendChild(select); r.append(l, c); s.appendChild(r); };
-  const check = (s: HTMLElement, label: string, checked: boolean, save: (v: boolean) => void) => { const r = document.createElement('div'); r.className = 'property-row'; const l = document.createElement('div'); l.className = 'property-label'; l.textContent = label; const c = document.createElement('div'); c.className = 'property-value'; const i = document.createElement('input'); i.type = 'checkbox'; i.className = 'property-check'; i.checked = checked; i.addEventListener('change', () => save(i.checked)); c.appendChild(i); r.append(l, c); s.appendChild(r); };
-  const mutate = (fn: (currentSymbol: any) => void) => {
+// ---- Property panel: shared DOM builder helpers (module scope so every
+// render*Properties function below can reuse them, not just symbols) ----
+
+function propertySection(title: string): HTMLElement {
+  const s = document.createElement('section'); s.className = 'property-section';
+  const h = document.createElement('div'); h.className = 'property-section-title'; h.textContent = title;
+  s.appendChild(h); editPropertiesEl.appendChild(s); return s;
+}
+
+function propertyRow(s: HTMLElement, label: string, value: string, edit = false, save?: (v: string) => void): void {
+  const r = document.createElement('div'); r.className = 'property-row';
+  const l = document.createElement('div'); l.className = 'property-label'; l.textContent = label;
+  const c = document.createElement('div'); c.className = 'property-value';
+  if (edit) {
+    const i = document.createElement('input'); i.className = 'property-input'; i.value = value;
+    const commit = () => { if (i.value !== value) { value = i.value; save?.(value); } };
+    i.addEventListener('change', commit);
+    i.addEventListener('keydown', e => { if (e.key === 'Enter') { commit(); i.blur(); } });
+    c.appendChild(i);
+  }
+  else {
+    c.textContent = value;
+  }
+  r.append(l, c); s.appendChild(r);
+}
+
+function propertySelectRow(s: HTMLElement, label: string, value: string, options: { value: string, label: string }[], save: (v: string) => void): void {
+  const r = document.createElement('div'); r.className = 'property-row';
+  const l = document.createElement('div'); l.className = 'property-label'; l.textContent = label;
+  const c = document.createElement('div'); c.className = 'property-value';
+  const select = document.createElement('select'); select.className = 'property-input';
+  for (const option of options) {
+    const item = document.createElement('option'); item.value = option.value; item.textContent = option.label;
+    select.appendChild(item);
+  }
+  select.value = options.some(o => o.value === value) ? value : (options[0]?.value ?? '');
+  select.addEventListener('change', () => save(select.value));
+  c.appendChild(select); r.append(l, c); s.appendChild(r);
+}
+
+/** Convenience wrapper for the common case (angle dropdowns etc.) where the
+ *  option's displayed label is just the raw value. */
+function propertyOrientationRow(s: HTMLElement, label: string, value: string, options: string[], save: (v: string) => void): void {
+  propertySelectRow(s, label, value, options.map(o => ({ value: o, label: `${o}°` })), save);
+}
+
+function propertyCheckRow(s: HTMLElement, label: string, checked: boolean, save: (v: boolean) => void): void {
+  const r = document.createElement('div'); r.className = 'property-row';
+  const l = document.createElement('div'); l.className = 'property-label'; l.textContent = label;
+  const c = document.createElement('div'); c.className = 'property-value';
+  const i = document.createElement('input'); i.type = 'checkbox'; i.className = 'property-check'; i.checked = checked;
+  i.addEventListener('change', () => save(i.checked));
+  c.appendChild(i); r.append(l, c); s.appendChild(r);
+}
+
+/** `value` is a resolved CSS color string (e.g. from an rgba(…) getter) or
+ *  null/undefined for "no explicit color set" (shown as a neutral gray
+ *  swatch — native <input type=color> has no true "unset" state). Native
+ *  color inputs have no alpha channel either, so a pick always commits full
+ *  opacity — an accepted v1 scope cut rather than building a custom
+ *  alpha-slider widget; nothing in this app's own rendering currently
+ *  relies on partial alpha for these fields anyway. */
+function propertyColorRow(s: HTMLElement, label: string, value: string | null | undefined, save: (hex: string) => void): void {
+  const r = document.createElement('div'); r.className = 'property-row';
+  const l = document.createElement('div'); l.className = 'property-label'; l.textContent = label;
+  const c = document.createElement('div'); c.className = 'property-value';
+  const i = document.createElement('input'); i.type = 'color'; i.className = 'property-input';
+  i.value = cssColorToHex(value) ?? '#808080';
+  i.addEventListener('change', () => save(i.value));
+  c.appendChild(i); r.append(l, c); s.appendChild(r);
+}
+
+/** Parses 'rgb(r,g,b)'/'rgba(r,g,b,a)' into a '#rrggbb' hex string for
+ *  <input type=color>. Returns null for anything else (unset/unparseable)
+ *  so callers can fall back to a neutral placeholder instead of black. */
+function cssColorToHex(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const m = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(value);
+  if (!m) return null;
+  const toHex = (n: string) => Math.max(0, Math.min(255, Number(n))).toString(16).padStart(2, '0');
+  return `#${toHex(m[1]!)}${toHex(m[2]!)}${toHex(m[3]!)}`;
+}
+
+/** '#rrggbb' -> the 0-255 int triple every kicad-io setColor(r,g,b,a) call
+ *  expects (alpha always 1 — see propertyColorRow's doc comment). */
+function hexToRgb255(hex: string): [number, number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255, 1];
+}
+
+/** Shared "commit an edit, refresh undo pane, leave the DOM alone" tail —
+ *  every property-panel field handler ends with this. Not rebuilding the
+ *  panel from inside its own event handler is deliberate: doing so would
+ *  replace the focused input/checkbox before the browser finishes the
+ *  interaction (e.g. losing focus mid-keystroke) — the next selection
+ *  change reads the new live model instead. */
+function makeSymbolMutator(id: string): (fn: (symbol: any) => void) => void {
+  return (fn) => {
     const s = session;
     if (!s?.mutateSymbolByPaintId(id, fn)) return;
     lastFullSch = s.getSchematicText() || lastFullSch;
     updateUndoStackPane();
-    // Do not rebuild this DOM panel from its own event handler: doing that
-    // replaces the focused input/checkbox before the browser can finish the
-    // interaction. The next selection reads the new live model.
   };
+}
+
+/** Same contract as makeSymbolMutator, for every non-symbol element kind. */
+function makeElementMutator(id: string): (fn: (element: any) => void) => void {
+  return (fn) => {
+    const s = session;
+    if (!s?.mutateElementByPaintId(id, fn)) return;
+    lastFullSch = s.getSchematicText() || lastFullSch;
+    updateUndoStackPane();
+  };
+}
+
+const LINE_STYLE_OPTIONS = [
+  { value: 'default', label: 'Default' }, { value: 'solid', label: 'Solid' }, { value: 'dash', label: 'Dashed' },
+  { value: 'dot', label: 'Dotted' }, { value: 'dash_dot', label: 'Dash-Dot' }, { value: 'dash_dot_dot', label: 'Dash-Dot-Dot' },
+];
+
+const FILL_TYPE_OPTIONS = [
+  { value: 'none', label: 'None' }, { value: 'color', label: 'Custom Color' },
+  { value: 'outline', label: 'Same As Border' }, { value: 'background', label: 'Body Background' },
+];
+
+function renderSymbolProperties(symbol: any, kind: string, id: string): void {
+  editPropertiesEl.innerHTML = '';
+  const mutate = makeSymbolMutator(id);
   const origin = symbol.getOrigin?.();
-  const basic = section('Basic Properties');
-  check(basic, 'Pin numbers', !symbol.arePinNumbersHidden?.(), v => mutate(current => current.togglePinNumbers(v)));
-  check(basic, 'Pin names', !symbol.arePinNameLabelsHidden?.(), v => mutate(current => current.togglePinNames(v)));
-  row(basic, 'Position X (mm)', origin ? origin.x.toFixed(2) : '—', !!origin, v => { if (origin) mutate(current => { const live = current.getOrigin(); current.setOrigin(Number(v) || 0, live.y, live.rotation ?? 0); }); });
-  row(basic, 'Position Y (mm)', origin ? origin.y.toFixed(2) : '—', !!origin, v => { if (origin) mutate(current => { const live = current.getOrigin(); current.setOrigin(live.x, Number(v) || 0, live.rotation ?? 0); }); });
-  if (origin) { const rotation = ((Math.round(Number(origin.rotation ?? 0) / 90) * 90) % 360 + 360) % 360; selectRow(basic, 'Orientation', String(rotation), ['0', '90', '180', '270'], v => mutate(current => { const live = current.getOrigin(); current.setOrigin(live.x, live.y, Number(v)); })); }
-  row(basic, 'Object', `${kind} (${id.slice(0, 8)})`);
-  const fields = section('Fields');
-  for (const p of symbol.getProperties?.() ?? []) { const n = String(p.propertyName ?? ''); if (n) row(fields, n, String(p.propertyValue ?? ''), true, v => mutate(current => current.setProperty(n, v))); }
-  const attrs = section('Attributes');
-  check(attrs, 'Exclude From Simulation', !!symbol.findFirstChildByName?.('exclude_from_sim')?.value, v => mutate(current => current.setExcludeFromSim(v)));
-  check(attrs, 'Exclude From BOM', symbol.findFirstChildByName?.('in_bom')?.value === false, v => mutate(current => current.setInBom(!v)));
-  check(attrs, 'Exclude From Board', symbol.findFirstChildByName?.('on_board')?.value === false, v => mutate(current => current.setOnBoard(!v)));
-  check(attrs, 'Exclude From Position Files', symbol.findFirstChildByName?.('in_pos_files')?.value === false, v => mutate(current => current.setInPosFiles(!v)));
-  const pin = section('Pin Display'); check(pin, 'Show Pin Number', !symbol.arePinNumbersHidden?.(), v => mutate(current => current.togglePinNumbers(v))); check(pin, 'Show Pin Name', !symbol.arePinNameLabelsHidden?.(), v => mutate(current => current.togglePinNames(v))); const pinNames = symbol.findFirstChildByName?.('pin_names'); row(pin, 'Pin Name Offset (mm)', Number(pinNames?.getOffset?.() ?? 0).toFixed(2), true, v => mutate(current => current.setPinNameOffset(Number(v) || 0)));
+  const basic = propertySection('Basic Properties');
+  propertyCheckRow(basic, 'Pin numbers', !symbol.arePinNumbersHidden?.(), v => mutate(current => current.togglePinNumbers(v)));
+  propertyCheckRow(basic, 'Pin names', !symbol.arePinNameLabelsHidden?.(), v => mutate(current => current.togglePinNames(v)));
+  propertyRow(basic, 'Position X (mm)', origin ? origin.x.toFixed(2) : '—', !!origin, v => { if (origin) mutate(current => { const live = current.getOrigin(); current.setOrigin(Number(v) || 0, live.y, live.rotation ?? 0); }); });
+  propertyRow(basic, 'Position Y (mm)', origin ? origin.y.toFixed(2) : '—', !!origin, v => { if (origin) mutate(current => { const live = current.getOrigin(); current.setOrigin(live.x, Number(v) || 0, live.rotation ?? 0); }); });
+  if (origin) { const rotation = ((Math.round(Number(origin.rotation ?? 0) / 90) * 90) % 360 + 360) % 360; propertyOrientationRow(basic, 'Orientation', String(rotation), ['0', '90', '180', '270'], v => mutate(current => { const live = current.getOrigin(); current.setOrigin(live.x, live.y, Number(v)); })); }
+  propertyRow(basic, 'Object', `${kind} (${id.slice(0, 8)})`);
+  const fields = propertySection('Fields');
+  for (const p of symbol.getProperties?.() ?? []) { const n = String(p.propertyName ?? ''); if (n) propertyRow(fields, n, String(p.propertyValue ?? ''), true, v => mutate(current => current.setProperty(n, v))); }
+  const attrs = propertySection('Attributes');
+  propertyCheckRow(attrs, 'Exclude From Simulation', !!symbol.findFirstChildByName?.('exclude_from_sim')?.value, v => mutate(current => current.setExcludeFromSim(v)));
+  propertyCheckRow(attrs, 'Do Not Populate', !!symbol.isDnp?.(), v => mutate(current => current.setDnp(v)));
+  propertyCheckRow(attrs, 'Exclude From BOM', symbol.findFirstChildByName?.('in_bom')?.value === false, v => mutate(current => current.setInBom(!v)));
+  propertyCheckRow(attrs, 'Exclude From Board', symbol.findFirstChildByName?.('on_board')?.value === false, v => mutate(current => current.setOnBoard(!v)));
+  propertyCheckRow(attrs, 'Exclude From Position Files', symbol.findFirstChildByName?.('in_pos_files')?.value === false, v => mutate(current => current.setInPosFiles(!v)));
+  const pin = propertySection('Pin Display'); propertyCheckRow(pin, 'Show Pin Number', !symbol.arePinNumbersHidden?.(), v => mutate(current => current.togglePinNumbers(v))); propertyCheckRow(pin, 'Show Pin Name', !symbol.arePinNameLabelsHidden?.(), v => mutate(current => current.togglePinNames(v))); const pinNames = symbol.findFirstChildByName?.('pin_names'); propertyRow(pin, 'Pin Name Offset (mm)', Number(pinNames?.getOffset?.() ?? 0).toFixed(2), true, v => mutate(current => current.setPinNameOffset(Number(v) || 0)));
+}
+
+/** Graphic shapes: line/rectangle/circle/arc/polygon/bezier, plus rule
+ *  areas (a wrapper around a nested polyline that actually carries the
+ *  stroke/fill — see KicadElementRuleArea's doc comment; DNP/exclude flags
+ *  live on the wrapper itself, everything else targets the nested
+ *  polyline). Border width/style/color + fill type/color mirror real
+ *  KiCad's DIALOG_SHAPE_PROPERTIES (eeschema/dialogs/dialog_shape_
+ *  properties.cpp) — one dialog class for every shape type there too. */
+function renderShapeProperties(element: any, kind: string, id: string): void {
+  editPropertiesEl.innerHTML = '';
+  const mutate = makeElementMutator(id);
+  const isRuleArea = typeof element.getPolyline === 'function';
+  const strokeTarget = isRuleArea ? element.getPolyline() : element;
+  // mutate() re-looks-up the element fresh by paint id on every call (never
+  // reuses the `element`/`strokeTarget` closed-over references past this
+  // render) — this resolves the SAME nested-polyline indirection on the
+  // freshly-found instance, mirroring strokeTarget above exactly.
+  const freshTarget = (current: any) => (isRuleArea ? current.getPolyline() : current);
+
+  const basic = propertySection('Basic Properties');
+  propertyRow(basic, 'Object', `${kind === 'symbol-graphic' ? (element.name ?? 'shape') : kind} (${id.slice(0, 8)})`);
+
+  if (strokeTarget && typeof strokeTarget.getStroke === 'function') {
+    const border = propertySection('Border');
+    const stroke = strokeTarget.getStroke();
+    propertyRow(border, 'Width (mm)', stroke.width.toFixed(2), true, v => {
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) mutate(current => { const t = freshTarget(current); t.setStroke(n, t.getStroke().type); });
+    });
+    propertySelectRow(border, 'Style', stroke.type, LINE_STYLE_OPTIONS, v => mutate(current => { const t = freshTarget(current); t.setStroke(t.getStroke().width, v); }));
+    propertyColorRow(border, 'Color', strokeTarget.getStrokeColorOverride?.(), hex => mutate(current => freshTarget(current).setStrokeColor(...hexToRgb255(hex))));
+  }
+
+  // Bezier composes WithFill at the data level (round-trips a stored fill
+  // losslessly) but the renderer never draws one filled (buildSchBezier
+  // hardcodes shape.filled:false, unlike every other shape type) — showing
+  // fill controls here would be a control that silently does nothing
+  // visually, so it's deliberately excluded.
+  if (strokeTarget && typeof strokeTarget.getFill === 'function' && strokeTarget.name !== 'bezier') {
+    const fill = propertySection('Fill');
+    const fillType = strokeTarget.getFill();
+    propertySelectRow(fill, 'Type', fillType, FILL_TYPE_OPTIONS, v => mutate(current => freshTarget(current).setFill(v)));
+    propertyColorRow(fill, 'Color', strokeTarget.getFillColorOverride?.(), hex => mutate(current => freshTarget(current).setFillColor(...hexToRgb255(hex))));
+  }
+
+  if (isRuleArea) {
+    const ruleArea = propertySection('Rule Area');
+    propertyCheckRow(ruleArea, 'Do Not Populate', !!element.isDnp?.(), v => mutate(current => current.setDnp(v)));
+    propertyCheckRow(ruleArea, 'Exclude From Simulation', !!element.isExcludedFromSim?.(), v => mutate(current => current.setExcludedFromSim(v)));
+    propertyCheckRow(ruleArea, 'Exclude From BOM', !element.isInBom?.(), v => mutate(current => current.setInBom(!v)));
+    propertyCheckRow(ruleArea, 'Exclude From Board', !element.isOnBoard?.(), v => mutate(current => current.setOnBoard(!v)));
+  }
+}
+
+/** Wire/bus/bus-entry (all share kind:'wire' except plain buses, kind:'bus')
+ *  — width/style/color, mirrors real KiCad's DIALOG_WIRE_BUS_PROPERTIES
+ *  (eeschema/dialogs/dialog_wire_bus_properties.cpp). No fill (these are
+ *  pure lines, not closed shapes). */
+function renderWireBusProperties(element: any, kind: string, id: string): void {
+  editPropertiesEl.innerHTML = '';
+  const mutate = makeElementMutator(id);
+  const basic = propertySection('Basic Properties');
+  propertyRow(basic, 'Object', `${kind === 'bus' ? 'Bus' : (typeof element.getSize === 'function' ? 'Bus Entry' : 'Wire')} (${id.slice(0, 8)})`);
+
+  const line = propertySection('Line');
+  const stroke = element.getStroke();
+  propertyRow(line, 'Width (mm)', stroke.width.toFixed(2), true, v => {
+    const n = Number(v);
+    if (Number.isFinite(n) && n >= 0) mutate(current => current.setStroke(n, current.getStroke().type));
+  });
+  propertySelectRow(line, 'Style', stroke.type, LINE_STYLE_OPTIONS, v => mutate(current => current.setStroke(current.getStroke().width, v)));
+  propertyColorRow(line, 'Color', element.getStrokeColorOverride?.(), hex => mutate(current => current.setStrokeColor(...hexToRgb255(hex))));
+}
+
+/** Mirrors real KiCad's DIALOG_JUNCTION_PROPS (eeschema/dialogs/
+ *  dialog_junction_props.cpp) — diameter + color only, no line style (a
+ *  junction is a filled dot, not a stroked shape). */
+function renderJunctionProperties(junction: any, id: string): void {
+  editPropertiesEl.innerHTML = '';
+  const mutate = makeElementMutator(id);
+  const basic = propertySection('Basic Properties');
+  propertyRow(basic, 'Object', `Junction (${id.slice(0, 8)})`);
+  const props = propertySection('Junction');
+  propertyRow(props, 'Diameter (mm)', junction.getDiameter().toFixed(2), true, v => {
+    const n = Number(v);
+    if (Number.isFinite(n) && n >= 0) mutate(current => current.setDiameter(n));
+  });
+  propertyColorRow(props, 'Color', junction.getColorOverride?.(), hex => mutate(current => current.setColor(...hexToRgb255(hex))));
+}
+
+/** Standalone text and text boxes — mirrors real KiCad's
+ *  DIALOG_TEXT_PROPERTIES (eeschema/dialogs/dialog_text_properties.cpp):
+ *  content, size, bold/italic, color; a text box additionally gets its own
+ *  border/fill (identical shape to renderShapeProperties' Border/Fill
+ *  sections — real KiCad's dialog literally shows the same border/fill
+ *  controls for a text box as for any other closed shape). Hyperlink and
+ *  per-unit "common to all units" (symbol-editor only) are out of scope —
+ *  neither applies to a plain schematic-root text item. */
+function renderTextProperties(element: any, id: string): void {
+  editPropertiesEl.innerHTML = '';
+  const mutate = makeElementMutator(id);
+  const isTextBox = element.name === 'text_box';
+  const basic = propertySection('Basic Properties');
+  propertyRow(basic, 'Object', `${isTextBox ? 'Text Box' : 'Text'} (${id.slice(0, 8)})`);
+  propertyRow(basic, 'Text', String(element.value ?? ''), true, v => mutate(current => { current.value = v; }));
+
+  const font = propertySection('Font');
+  const fontInfo = typeof element.getFont === 'function' ? element.getFont() : { width: 1.27, height: 1.27, bold: false, italic: false, thickness: undefined };
+  propertyRow(font, 'Size (mm)', (fontInfo.height || 1.27).toFixed(2), true, v => {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) mutate(current => { const f = current.getFont(); current.setFont(n, n, f.italic, f.bold, f.thickness); });
+  });
+  propertyCheckRow(font, 'Bold', !!fontInfo.bold, v => mutate(current => { const f = current.getFont(); current.setFont(f.width || 1.27, f.height || 1.27, f.italic, v, f.thickness); }));
+  propertyCheckRow(font, 'Italic', !!fontInfo.italic, v => mutate(current => { const f = current.getFont(); current.setFont(f.width || 1.27, f.height || 1.27, v, f.bold, f.thickness); }));
+  propertyColorRow(font, 'Color', element.getFontColorOverride?.(), hex => mutate(current => current.setFontColor(...hexToRgb255(hex))));
+
+  if (isTextBox) {
+    const border = propertySection('Border');
+    const stroke = element.getStroke();
+    propertyRow(border, 'Width (mm)', stroke.width.toFixed(2), true, v => {
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) mutate(current => current.setStroke(n, current.getStroke().type));
+    });
+    propertySelectRow(border, 'Style', stroke.type, LINE_STYLE_OPTIONS, v => mutate(current => current.setStroke(current.getStroke().width, v)));
+    propertyColorRow(border, 'Color', element.getStrokeColorOverride?.(), hex => mutate(current => current.setStrokeColor(...hexToRgb255(hex))));
+
+    const fill = propertySection('Fill');
+    propertySelectRow(fill, 'Type', element.getFill(), FILL_TYPE_OPTIONS, v => mutate(current => current.setFill(v)));
+    propertyColorRow(fill, 'Color', element.getFillColorOverride?.(), hex => mutate(current => current.setFillColor(...hexToRgb255(hex))));
+  }
+}
+
+const GLOBAL_HIER_SHAPE_OPTIONS = [
+  { value: 'input', label: 'Input' }, { value: 'output', label: 'Output' },
+  { value: 'bidirectional', label: 'Bidirectional' }, { value: 'tri_state', label: 'Tri-State' },
+  { value: 'passive', label: 'Passive' },
+];
+const DIRECTIVE_SHAPE_OPTIONS = [
+  { value: 'dot', label: 'Dot' }, { value: 'round', label: 'Circle' },
+  { value: 'diamond', label: 'Diamond' }, { value: 'rectangle', label: 'Rectangle' },
+];
+
+/** Local/global/hierarchical/directive labels — mirrors real KiCad's
+ *  DIALOG_LABEL_PROPERTIES (eeschema/dialogs/dialog_label_properties.cpp):
+ *  text, shape (electrical direction for global/hier, glyph style for
+ *  directive — none for local, which has no shape concept at all), pin
+ *  length (directive only — real KiCad reuses its text-size field for this
+ *  when editing a directive label, an odd but confirmed dual-purpose UI
+ *  quirk; kept as its own separate row here instead since this app's font-
+ *  size field already means something else), font size/bold/italic/color.
+ *  Renaming/shape-cycling reuse the session's existing renameLabel/
+ *  setLabelShape (already used by the right-click context menu's Edit
+ *  Text…/Cycle Shape actions) rather than a raw mutate(), since those
+ *  already handle each label kind's own storage quirk (e.g. directive
+ *  labels keep their text in a "Netclass" property, not a top-level
+ *  attribute — see KicadElementNetclassFlag's doc comment). */
+function renderLabelProperties(element: any, labelKind: string | undefined, id: string): void {
+  editPropertiesEl.innerHTML = '';
+  const mutate = makeElementMutator(id);
+  const kindLabel = labelKind === 'local' ? 'Local Label' : labelKind === 'global' ? 'Global Label'
+    : labelKind === 'hier' ? 'Hierarchical Label' : labelKind === 'directive' ? 'Directive Label' : 'Label';
+  const basic = propertySection('Basic Properties');
+  propertyRow(basic, 'Object', `${kindLabel} (${id.slice(0, 8)})`);
+
+  const currentName = typeof element.getName === 'function' ? element.getName() : String(element.value ?? '');
+  propertyRow(basic, 'Text', currentName, true, v => {
+    const s = session;
+    if (!s?.renameLabel(id, v)) return;
+    lastFullSch = s.getSchematicText() || lastFullSch;
+    updateUndoStackPane();
+  });
+
+  if (labelKind === 'global' || labelKind === 'hier') {
+    propertySelectRow(basic, 'Shape', element.getShape?.() ?? 'input', GLOBAL_HIER_SHAPE_OPTIONS, v => {
+      const s = session;
+      if (!s?.setLabelShape(id, v as KicadGlobalLabelShape)) return;
+      lastFullSch = s.getSchematicText() || lastFullSch;
+      updateUndoStackPane();
+    });
+  }
+  else if (labelKind === 'directive') {
+    propertySelectRow(basic, 'Shape', element.getShape?.() ?? 'round', DIRECTIVE_SHAPE_OPTIONS, v => {
+      const s = session;
+      if (!s?.setLabelShape(id, v as KicadDirectiveLabelShape)) return;
+      lastFullSch = s.getSchematicText() || lastFullSch;
+      updateUndoStackPane();
+    });
+    propertyRow(basic, 'Pin Length (mm)', Number(element.getPinLength?.() ?? 2.54).toFixed(2), true, v => {
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) mutate(current => current.setPinLength(n));
+    });
+  }
+
+  const font = propertySection('Font');
+  const fontInfo = typeof element.getFont === 'function' ? element.getFont() : { width: 1.27, height: 1.27, bold: false, italic: false, thickness: undefined };
+  propertyRow(font, 'Size (mm)', (fontInfo.height || 1.27).toFixed(2), true, v => {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) mutate(current => { const f = current.getFont(); current.setFont(n, n, f.italic, f.bold, f.thickness); });
+  });
+  propertyCheckRow(font, 'Bold', !!fontInfo.bold, v => mutate(current => { const f = current.getFont(); current.setFont(f.width || 1.27, f.height || 1.27, f.italic, v, f.thickness); }));
+  propertyCheckRow(font, 'Italic', !!fontInfo.italic, v => mutate(current => { const f = current.getFont(); current.setFont(f.width || 1.27, f.height || 1.27, v, f.bold, f.thickness); }));
+  propertyColorRow(font, 'Color', element.getFontColorOverride?.(), hex => mutate(current => current.setFontColor(...hexToRgb255(hex))));
 }
 
 setMode('view');
