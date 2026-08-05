@@ -49,6 +49,7 @@
 	</header>
 	<main>
 		<aside class="side">
+			<div id="general-side-content">
 			<p id="status">Drop a KiCad schematic or board, or switch to Circuit layout for the drag/rewire demo.</p>
 			<p class="hint" id="hint">Wheel zoom · drag pan · Circuit mode: drag parts, R rotate</p>
 			<p class="hint legend"><span class="wire-invalid">■</span> Red wire = forced connection that couldn't route cleanly — still connected, move parts apart to clear it.</p>
@@ -57,11 +58,48 @@
 				<pre id="locked-nets">No schematic netlist locked.</pre>
 			</section>
 			<pre id="score" class="score"></pre>
+			</div>
+			<div id="edit-left-pane" class="edit-left-pane hidden">
+				<section class="edit-pane" data-pane="properties">
+					<header>Properties <button type="button" aria-label="Close">×</button></header>
+					<div id="edit-properties" class="edit-pane-body">No objects selected</div>
+				</section>
+				<div class="pane-splitter" data-before="properties"></div>
+				<section class="edit-pane" data-pane="hierarchy">
+					<header>Schematic Hierarchy <button type="button" aria-label="Close">×</button></header>
+					<div id="edit-hierarchy" class="edit-pane-body">No hierarchy loaded</div>
+				</section>
+				<div class="pane-splitter" data-before="hierarchy"></div>
+				<section class="edit-pane" data-pane="undo-stack">
+					<header>Undo Stack <button type="button" aria-label="Close">×</button></header>
+					<div id="edit-undo-stack" class="edit-pane-body">No history</div>
+				</section>
+				<div class="pane-splitter" data-before="undo-stack"></div>
+				<section class="edit-pane" data-pane="filter">
+					<header>Selection Filter <button type="button" aria-label="Close">×</button></header>
+					<div class="edit-filter-grid">
+						<label><input type="checkbox" checked> All items</label><label><input type="checkbox" checked> Rule Areas</label>
+						<label><input type="checkbox" checked> Symbols</label><label><input type="checkbox" checked> Pins</label>
+						<label><input type="checkbox" checked> Wires</label><label><input type="checkbox" checked> Labels</label>
+						<label><input type="checkbox" checked> Graphics</label><label><input type="checkbox" checked> Images</label>
+						<label><input type="checkbox" checked> Text</label><label><input type="checkbox" checked> Other items</label>
+					</div>
+				</section>
+			</div>
 		</aside>
 		<div class="stage" id="stage">
 			<canvas id="canvas2d"></canvas>
 			<input type="text" id="edit-text-input" class="edit-text-input hidden" placeholder="Text…" autocomplete="off" />
 			<textarea id="edit-text-box-input" class="edit-text-input edit-text-box-input hidden" placeholder="Text…" autocomplete="off" rows="4"></textarea>
+			<div class="table-modal hidden" id="table-modal">
+				<h3>Insert table</h3>
+				<label>Rows <input id="table-rows" type="number" min="1" max="30" value="2" /></label>
+				<label>Columns <input id="table-columns" type="number" min="1" max="20" value="2" /></label>
+				<label>Cell data (tab-separated columns, newline-separated rows)
+					<textarea id="table-data" rows="6" placeholder="Header 1&#9;Header 2&#10;Value 1&#9;Value 2"></textarea>
+				</label>
+				<div class="table-modal-actions"><button type="button" id="table-cancel">Cancel</button><button type="button" id="table-insert">Insert</button></div>
+			</div>
 			<div class="context-menu hidden" id="context-menu"></div>
 		</div>
 		<aside class="tool-panel hidden" id="tool-panel">
@@ -98,7 +136,7 @@
 			<button type="button" class="tool-btn cyclable" data-tool="label" id="btn-label-tool" title="Label: Local — right-click to cycle Local/Directive/Global/Hierarchical">
 				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 8 H15 L19 12 L15 16 H4 Z"/></svg>
 			</button>
-			<button type="button" class="tool-btn" data-tool="rule-area" title="Rule Area — not yet implemented" disabled>
+			<button type="button" class="tool-btn" data-tool="rule-area" title="Rule Area">
 				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" stroke-dasharray="3 2"/></svg>
 			</button>
 			<button type="button" class="tool-btn" data-tool="hier-sheet" title="Hierarchical Sheet — not yet implemented" disabled>
@@ -119,29 +157,11 @@
 			<button type="button" class="tool-btn" data-tool="text-box" title="Draw Text Box">
 				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14"/><path d="M7 9 H17 M7 12.5 H17 M7 16 H13"/></svg>
 			</button>
-			<button type="button" class="tool-btn" data-tool="table" title="Draw Table — not yet implemented" disabled>
+			<button type="button" class="tool-btn" data-tool="table" title="Draw Table">
 				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16"/><path d="M4 12 H20 M12 4 V20"/></svg>
 			</button>
-			<button type="button" class="tool-btn" data-tool="rect" title="Rectangle">
+			<button type="button" class="tool-btn cyclable" data-tool="rect" id="btn-shape-tool" title="Shapes — right-click to cycle Rectangle/Circle/Arc/Bezier">
 				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="5" y="6" width="14" height="12"/></svg>
-			</button>
-			<button type="button" class="tool-btn" data-tool="circle" title="Circle (C)">
-				<svg class="tool-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg>
-			</button>
-			<button type="button" class="tool-btn" data-tool="ellipse" title="Draw Ellipse — not yet implemented" disabled>
-				<svg class="tool-icon" viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8" ry="5"/></svg>
-			</button>
-			<button type="button" class="tool-btn" data-tool="arc" title="Arc (A)">
-				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 16 A10 10 0 0 1 19 10"/></svg>
-			</button>
-			<button type="button" class="tool-btn" data-tool="elliptical-arc" title="Draw Elliptical Arc — not yet implemented" disabled>
-				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 14 A10 5 0 0 1 20 9"/></svg>
-			</button>
-			<button type="button" class="tool-btn" data-tool="bezier" title="Draw Bezier Curve — not yet implemented" disabled>
-				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 18 C 8 6, 16 18, 20 6"/><circle cx="8" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="16" cy="18" r="1.3" fill="currentColor" stroke="none"/></svg>
-			</button>
-			<button type="button" class="tool-btn" data-tool="line" title="Line (L)">
-				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 18 L11 8 L14 13 L20 5"/></svg>
 			</button>
 			<button type="button" class="tool-btn" data-tool="image" title="Place Image — not yet implemented" disabled>
 				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17 L10 12 L14 15 L20 10 V19 H4 Z"/></svg>
@@ -151,6 +171,11 @@
 			</button>
 		</aside>
 	</main>
+	<footer class="status-bar">
+		<span id="coord-status">X: —  Y: —</span>
+		<span id="grid-status">Grid: 1.27 mm</span>
+		<span id="zoom-status">Zoom: —</span>
+	</footer>
 	<script type="module" src="/src/main.ts"></script>
 </body>
 </html>

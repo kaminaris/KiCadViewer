@@ -28,7 +28,7 @@ import { reroute } from '@kicad-layout/Reroute';
 type AppMode = 'view' | 'circuit' | 'edit';
 type EditTool =
 	| 'select' | 'wire' | 'bus' | 'bus-entry' | 'junction' | 'no-connect' | 'line' | 'rect' | 'circle' | 'arc' | 'text'
-	| 'text-box' | 'label' | 'directive-label' | 'global-label' | 'hier-label' | 'power' | 'delete';
+	| 'text-box' | 'table' | 'rule-area' | 'bezier' | 'label' | 'directive-label' | 'global-label' | 'hier-label' | 'power' | 'delete';
 
 /** Edit-mode tool-switch hotkeys. R/T are already rotate/tidy, so Rect and
  *  Text have no letter here — toolbar-button only for those two. Local
@@ -42,6 +42,7 @@ const EDIT_TOOL_HOTKEYS: Record<string, EditTool> = {
 	l: 'line',
 	c: 'circle',
 	a: 'arc',
+	b: 'bezier',
 	g: 'global-label',
 	h: 'hier-label',
 };
@@ -106,7 +107,17 @@ const LABEL_GROUP: ToolGroupDef = {
 			icon: '<path d="M4 8 L7 12 L4 16 H14 L20 12 L14 8 Z"/>' },
 	],
 };
-const TOOL_GROUPS: ToolGroupDef[] = [LABEL_GROUP];
+const SHAPE_GROUP: ToolGroupDef = {
+	buttonId: 'btn-shape-tool',
+	members: [
+		{ tool: 'line', menuLabel: 'Line (L)', title: 'Line (L)', icon: '<path d="M4 18 L20 6"/>' },
+		{ tool: 'rect', menuLabel: 'Rectangle', title: 'Rectangle', icon: '<rect x="5" y="6" width="14" height="12"/>' },
+		{ tool: 'circle', menuLabel: 'Circle (C)', title: 'Circle (C)', icon: '<circle cx="12" cy="12" r="7"/>' },
+		{ tool: 'arc', menuLabel: 'Arc (A)', title: 'Arc (A)', icon: '<path d="M5 16 A10 10 0 0 1 19 10"/>' },
+		{ tool: 'bezier', menuLabel: 'Bezier Curve (B)', title: 'Bezier Curve (B)', icon: '<path d="M4 18 C 8 6, 16 18, 20 6"/>' },
+	],
+};
+const TOOL_GROUPS: ToolGroupDef[] = [LABEL_GROUP, SHAPE_GROUP];
 
 /** Tools that place via the floating text input (vs. one-click commit).
  *  'power' is a one-click tool UNLESS currentPowerKind === 'rail' — handled
@@ -137,14 +148,33 @@ const modeEditBtn = document.getElementById('mode-edit')!;
 const viewActions = document.getElementById('view-actions')!;
 const circuitActions = document.getElementById('circuit-actions')!;
 const editActions = document.getElementById('edit-actions')!;
+const editLeftPane = document.getElementById('edit-left-pane')!;
+const editPropertiesEl = document.getElementById('edit-properties')!;
+const editHierarchyEl = document.getElementById('edit-hierarchy')!;
+const editUndoStackEl = document.getElementById('edit-undo-stack')!;
 const toolPanel = document.getElementById('tool-panel')!;
 const mainEl = document.querySelector('main')!;
 const editTextInput = document.getElementById('edit-text-input') as HTMLInputElement;
 const editTextBoxInput = document.getElementById('edit-text-box-input') as HTMLTextAreaElement;
+const tableModal = document.getElementById('table-modal') as HTMLDivElement;
+const tableRowsInput = document.getElementById('table-rows') as HTMLInputElement;
+const tableColumnsInput = document.getElementById('table-columns') as HTMLInputElement;
+const tableDataInput = document.getElementById('table-data') as HTMLTextAreaElement;
 const contextMenuEl = document.getElementById('context-menu') as HTMLDivElement;
+const coordStatusEl = document.getElementById('coord-status')!;
+const gridStatusEl = document.getElementById('grid-status')!;
+const zoomStatusEl = document.getElementById('zoom-status')!;
 const editToolButtons = Array.from(
 	document.querySelectorAll<HTMLButtonElement>('#tool-panel [data-tool]')
 );
+
+// The canvas editor listens for pointer gestures higher in the document.
+// Inspector controls must be an interaction island: otherwise a checkbox
+// click is interpreted as a canvas pointer-up, which rebuilds the inspector
+// and immediately steals focus/rolls the control back.
+for (const eventName of ['pointerdown', 'pointerup', 'pointermove', 'mousedown', 'mouseup', 'click', 'dblclick']) {
+	editPropertiesEl.addEventListener(eventName, event => event.stopPropagation());
+}
 
 let mode: AppMode = 'view';
 /** Circuit-mode dragging (auto-rewire on drop). Always on in circuit mode —
@@ -170,6 +200,7 @@ let dragRef: string | null = null;
 let dragLabelId: string | null = null;
 let dragOffset = new Vec2(0, 0);
 let dragMoved = false;
+let dragUndoCaptured = false;
 let dragStartPose: { x: number; y: number; rotation: number } | null = null;
 
 // ---- Edit mode: hand-drawn wires/junctions/no-connects/graphics ----
@@ -180,6 +211,9 @@ let lineChainStart: Vec2 | null = null;
 let shapeAnchor: Vec2 | null = null;
 /** Arc tool: 0, 1 ([start]), or 2 ([start, end]) points clicked so far. */
 let arcPoints: Vec2[] = [];
+/** Bezier tool: 0..4 points (start, control 1, control 2, end). */
+let bezierPoints: Vec2[] = [];
+let ruleAreaPoints: Vec2[] = [];
 /** Select tool: non-symbol element (wire/junction/no-connect/graphic/text) being dragged. */
 let editDragId: string | null = null;
 let editDragLastPos: Vec2 | null = null;
@@ -195,6 +229,8 @@ let pendingTextAnchor: Vec2 | null = null;
 /** Bounds captured by Draw Text Box's two-click gesture while its multiline
  * editor is open. */
 let pendingTextBoxBounds: { x: number; y: number; width: number; height: number } | null = null;
+let pendingTableAnchor: Vec2 | null = null;
+let pendingTableId: string | null = null;
 /** Set when the floating text input is editing an EXISTING label's text
  *  (via the context menu's "Edit Text…") rather than placing a new one —
  *  commitTextInput() checks this first, since editTool could be anything
@@ -217,6 +253,56 @@ function setStatus(msg: string): void {
 	statusEl.textContent = msg;
 }
 
+function updateEditSidebar(): void {
+	if (!session || mode !== 'edit') return;
+	const selected = session.selection;
+	if (!selected) {
+		editPropertiesEl.textContent = 'No objects selected';
+	}
+	else {
+		const hit = session.activeScene?.hitTestItems.find(item => item.id === selected);
+    editPropertiesEl.textContent = hit ? `${hit.kind}\nID: ${hit.id}` : 'No objects selected';
+    if (hit && (hit as any).element?.name === 'symbol') renderSymbolProperties((hit as any).element, hit.kind, hit.id);
+	}
+	const sheets = session.currentSheets;
+	editHierarchyEl.innerHTML = sheets.length
+		? sheets.map(sheet => `<div class="hierarchy-row">● ${sheet.name} (${sheet.file})</div>`).join('')
+		: '<div class="hierarchy-row">● Root schematic</div>';
+	updateUndoStackPane();
+}
+
+function updateUndoStackPane(): void {
+	if (!session) return;
+	const history = session.getUndoStackDebug();
+	editUndoStackEl.innerHTML = history.undo.length || history.redoDepth
+		? `<div class="history-summary">Undo: ${history.undoDepth} · Redo: ${history.redoDepth}</div>`
+			+ history.undo.slice().reverse().map((entry, index) => `<div class="history-row"><span>${index === 0 ? '↶' : '·'}</span> ${entry.label}<small>${entry.bytes} B</small></div>`).join('')
+			+ (history.redoDepth ? `<div class="history-redo">Redo entries: ${history.redoDepth}</div>` : '')
+		: '<div class="history-empty">No undo snapshots</div>';
+}
+
+for (const splitter of Array.from(document.querySelectorAll<HTMLElement>('.pane-splitter'))) {
+	 splitter.addEventListener('pointerdown', (event) => {
+		 event.preventDefault();
+		 const before = splitter.previousElementSibling as HTMLElement | null;
+		 const parent = splitter.parentElement;
+		 if (!before || !parent) return;
+		 const startY = event.clientY;
+		 const startHeight = before.getBoundingClientRect().height;
+		 const move = (moveEvent: PointerEvent) => {
+			 const next = Math.max(60, Math.min(parent.clientHeight - 120, startHeight + moveEvent.clientY - startY));
+			 before.style.flex = 'none';
+			 before.style.height = `${next}px`;
+		 };
+		 const done = () => {
+			 window.removeEventListener('pointermove', move);
+			 window.removeEventListener('pointerup', done);
+		 };
+		 window.addEventListener('pointermove', move);
+		 window.addEventListener('pointerup', done, { once: true });
+	});
+}
+
 function setScore(text: string): void {
 	scoreEl.textContent = text;
 }
@@ -234,6 +320,29 @@ function updateLockedNets(): void {
 
 function snap(n: number): number {
 	return Math.round(n / PLACE_GRID) * PLACE_GRID;
+}
+
+let statusBarFramePending = false;
+let pendingStatusScreenPos: Vec2 | undefined;
+let lastStatusCoord = '';
+let lastStatusGrid = '';
+let lastStatusZoom = '';
+
+function updateStatusBar(screenPos?: Vec2): void {
+	pendingStatusScreenPos = screenPos ?? pendingStatusScreenPos;
+	if (statusBarFramePending) return;
+	statusBarFramePending = true;
+	requestAnimationFrame(() => {
+		statusBarFramePending = false;
+		const s = session;
+		const world = s && pendingStatusScreenPos ? s.screenToWorld(pendingStatusScreenPos) : null;
+		const coord = world ? `X: ${world.x.toFixed(2)}  Y: ${world.y.toFixed(2)}` : lastStatusCoord;
+		const grid = `Grid: ${PLACE_GRID.toFixed(2)} mm`;
+		const zoom = `Zoom: ${s && Number.isFinite(s.camera.zoom) ? `${s.camera.zoom.toFixed(2)}×` : '—'}`;
+		if (coord !== lastStatusCoord) { coordStatusEl.textContent = coord; lastStatusCoord = coord; }
+		if (grid !== lastStatusGrid) { gridStatusEl.textContent = grid; lastStatusGrid = grid; }
+		if (zoom !== lastStatusZoom) { zoomStatusEl.textContent = zoom; lastStatusZoom = zoom; }
+	});
 }
 
 const RESIZE_HANDLE_ORDER: readonly ResizeHandle[] = ['nw', 'n', 'ne', 'w', 'center', 'e', 'sw', 's', 'se'];
@@ -485,6 +594,7 @@ function setMode(next: AppMode): void {
 	viewActions.classList.toggle('hidden', next !== 'view');
 	circuitActions.classList.toggle('hidden', next !== 'circuit');
 	editActions.classList.toggle('hidden', next !== 'edit');
+	editLeftPane.classList.toggle('hidden', next !== 'edit');
 	toolPanel.classList.toggle('hidden', next !== 'edit');
 	mainEl.classList.toggle('edit-mode', next === 'edit');
 	if (next !== 'edit') {
@@ -512,6 +622,7 @@ function setMode(next: AppMode): void {
 		setStatus('Open a .kicad_sch here (or Load demo → Place). Drag needs no recipe.');
 	}
 	updateCircuitHint();
+	updateEditSidebar();
 }
 
 async function loadTextIntoSession(text: string, kind: 'schematic' | 'board', filename: string): Promise<void> {
@@ -549,6 +660,7 @@ async function loadTextIntoSession(text: string, kind: 'schematic' | 'board', fi
 		}
 	}
 	updateCircuitHint();
+	updateEditSidebar();
 }
 
 async function openKiCadFile(file: File): Promise<void> {
@@ -738,7 +850,7 @@ function beginSymbolDrag(ref: string, screenPos: Vec2): void {
 		return;
 	}
 	dbg('beginSymbolDrag', placement);
-	session.pushUndoSnapshot();
+	session.pushUndoSnapshot('Symbol drag');
 	const world = session.screenToWorld(screenPos);
 	dragRef = ref;
 	dragMoved = false;
@@ -757,7 +869,6 @@ function beginEditSymbolDrag(ref: string, screenPos: Vec2): void {
 	if (!pose) {
 		return;
 	}
-	session.pushUndoSnapshot();
 	const world = session.screenToWorld(screenPos);
 	dragRef = ref;
 	dragMoved = false;
@@ -773,10 +884,6 @@ async function rotateSelected(): Promise<void> {
 		const pose = session.getSymbolPose(selectedRef);
 		if (!pose) {
 			setStatus('Nothing selected to rotate — click a symbol first.');
-			return;
-		}
-		if (isEditablePowerPlacement({ libId: pose.libId, ref: selectedRef })) {
-			setStatus('GND orientation is locked');
 			return;
 		}
 		session.pushUndoSnapshot();
@@ -986,6 +1093,7 @@ document.getElementById('btn-redo')!.addEventListener('click', () => void perfor
 canvas.addEventListener('wheel', (e) => {
 	e.preventDefault();
 	ensureSession().zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15);
+	updateStatusBar();
 }, { passive: false });
 
 canvas.addEventListener('mousedown', (e) => {
@@ -1043,6 +1151,7 @@ function onPointerMove(e: MouseEvent): void {
 	const s = session;
 	if (!s) return;
 	const pos = screenPosFromEvent(e);
+	updateStatusBar(pos);
 
 	if (mode === 'edit' && editTool !== 'select') {
 		const worldPos = s.screenToWorld(pos);
@@ -1061,7 +1170,7 @@ function onPointerMove(e: MouseEvent): void {
 		const bounds = resizedBoundsFromHandle(
 			resizeDrag.original, resizeDrag.handle, new Vec2(snap(worldPos.x), snap(worldPos.y))
 		);
-		if (s.resizeElementBoundsById(resizeDrag.id, bounds.x, bounds.y, bounds.width, bounds.height)) {
+		if (s.resizeElementBoundsById(resizeDrag.id, bounds.x, bounds.y, bounds.width, bounds.height, resizeDrag.handle)) {
 			dragMoved = true;
 		}
 		return;
@@ -1098,6 +1207,10 @@ function onPointerMove(e: MouseEvent): void {
 			// Manual move — no placements bookkeeping, no rewire on drop.
 			if (dragStartPose && (nx !== dragStartPose.x || ny !== dragStartPose.y)) {
 				dragMoved = true;
+			}
+			if (dragMoved && !dragUndoCaptured) {
+				s.pushUndoSnapshot('Symbol drag');
+				dragUndoCaptured = true;
 			}
 			s.moveSymbolByRef(dragRef, nx, ny, dragStartPose?.rotation ?? 0);
 			return;
@@ -1144,10 +1257,29 @@ function onPointerUp(): void {
 		lastFullSch = session.getSchematicText() || lastFullSch;
 	}
 	dragMoved = false;
+	dragUndoCaptured = false;
 	dragStartPose = null;
+	updateEditSidebar();
 }
 
-canvas.addEventListener('dblclick', () => {
+canvas.addEventListener('dblclick', (event) => {
+	if (mode === 'edit' && editTool === 'rule-area' && ruleAreaPoints.length >= 3) {
+		const s = ensureSession();
+		s.addRuleArea(ruleAreaPoints.map(point => ({ x: point.x, y: point.y })));
+		lastFullSch = s.getSchematicText() || lastFullSch;
+		ruleAreaPoints = [];
+		s.setEditPreview(null);
+		event.preventDefault();
+		return;
+	}
+	if (mode === 'edit' && editTool === 'select') {
+		const hit = ensureSession().hitTestAtScreen(screenPosFromEvent(event));
+		if (hit?.kind === 'table') {
+			showTableEditModal(hit.id);
+			event.preventDefault();
+			return;
+		}
+	}
 	// Safety net: double-click ends an in-progress wire/bus chain. The mousedown
 	// same-point guard in handleEditModeMouseDown already handles the common
 	// case (both clicks of a dblclick land on the same snapped point), this
@@ -1163,10 +1295,20 @@ window.addEventListener('mouseup', onPointerUp);
 
 /** Undo/redo work identically regardless of mode — one global history. */
 async function performUndo(): Promise<void> {
-	if (!session?.canUndo) {
+	const s = session;
+	if (!s?.canUndo) {
+		setStatus('Nothing to undo.');
 		return;
 	}
-	await session.undo();
+	const restored = await s.undo();
+	if (!restored) {
+		setStatus('Nothing to undo.');
+		return;
+	}
+	// Undo reloads the session's AST. Keep the app-level serialized copy in
+	// lock-step; otherwise the next edit/export can reintroduce the move that
+	// undo just restored.
+	lastFullSch = s.getSchematicText() || lastFullSch;
 	syncPlacementsFromSession();
 	if (mode === 'circuit') {
 		relockNetlistFromLiveText();
@@ -1174,13 +1316,21 @@ async function performUndo(): Promise<void> {
 	restoreSelection();
 	setStatus('Undo.');
 	updateCircuitHint();
+	updateEditSidebar();
 }
 
 async function performRedo(): Promise<void> {
-	if (!session?.canRedo) {
+	const s = session;
+	if (!s?.canRedo) {
+		setStatus('Nothing to redo.');
 		return;
 	}
-	await session.redo();
+	const restored = await s.redo();
+	if (!restored) {
+		setStatus('Nothing to redo.');
+		return;
+	}
+	lastFullSch = s.getSchematicText() || lastFullSch;
 	syncPlacementsFromSession();
 	if (mode === 'circuit') {
 		relockNetlistFromLiveText();
@@ -1188,6 +1338,7 @@ async function performRedo(): Promise<void> {
 	restoreSelection();
 	setStatus('Redo.');
 	updateCircuitHint();
+	updateEditSidebar();
 }
 
 window.addEventListener('keydown', (e) => {
@@ -1223,7 +1374,7 @@ window.addEventListener('keydown', (e) => {
 			if (!contextMenuEl.classList.contains('hidden')) {
 				closeContextMenu();
 			}
-			else if (lineChainStart || shapeAnchor || arcPoints.length) {
+			else if (lineChainStart || shapeAnchor || arcPoints.length || bezierPoints.length) {
 				resetEditToolState();
 			}
 			else {
@@ -1306,6 +1457,11 @@ function resetEditToolState(): void {
 	lineChainStart = null;
 	shapeAnchor = null;
 	arcPoints = [];
+	bezierPoints = [];
+	ruleAreaPoints = [];
+	pendingTableAnchor = null;
+	pendingTableId = null;
+	tableModal.classList.add('hidden');
 	currentLabelShape = 'input';
 	currentDirectiveLabelShape = 'round';
 	editDragId = null;
@@ -1406,6 +1562,64 @@ function showTextBoxInput(first: Vec2, second: Vec2, e: MouseEvent): void {
 	editTextBoxInput.focus();
 	session?.setEditPreview(previewForPendingTextBox(''));
 }
+
+function showTableModal(anchor: Vec2): void {
+	pendingTableId = null;
+	pendingTableAnchor = anchor;
+	tableModal.classList.remove('hidden');
+	tableDataInput.focus();
+}
+
+function showTableEditModal(id: string): void {
+	const table = getHitElement(id);
+	const cellsRoot = table?.findFirstChildByName?.('cells');
+	const cells = cellsRoot?.findChildrenByName?.('table_cell') ?? [];
+	if (!table || !cells.length) return;
+	const columns = Number(table.findFirstChildByName?.('column_count')?.attributes?.[0]?.value) || 1;
+	const rows = Math.max(1, Math.ceil(cells.length / columns));
+	const firstOrigin = cells[0]?.getOrigin?.() ?? { x: 0, y: 0 };
+	tableRowsInput.value = String(rows);
+	tableColumnsInput.value = String(columns);
+	tableDataInput.value = Array.from({ length: rows }, (_, row) =>
+		Array.from({ length: columns }, (_, column) => String(cells[row * columns + column]?.value ?? '')).join('\t')
+	).join('\n');
+	pendingTableId = id;
+	pendingTableAnchor = new Vec2(firstOrigin.x, firstOrigin.y);
+	tableModal.classList.remove('hidden');
+	tableDataInput.focus();
+}
+
+document.getElementById('table-cancel')?.addEventListener('click', () => {
+	pendingTableAnchor = null;
+	pendingTableId = null;
+	tableModal.classList.add('hidden');
+});
+document.getElementById('table-insert')?.addEventListener('click', () => {
+	const anchor = pendingTableAnchor;
+	if (!anchor || !session) return;
+	const rows = Math.max(1, Math.min(30, Number(tableRowsInput.value) || 1));
+	const columns = Math.max(1, Math.min(20, Number(tableColumnsInput.value) || 1));
+	const values = tableDataInput.value.split(/\r?\n/).map(row => row.split('\t'));
+	if (pendingTableId) {
+		session.deleteElements([pendingTableId]);
+	}
+	if (session.addGraphicTable(anchor.x, anchor.y, rows, columns, values)) {
+		lastFullSch = session.getSchematicText() || lastFullSch;
+		setStatus('Added table.');
+	}
+	pendingTableAnchor = null;
+	pendingTableId = null;
+	tableModal.classList.add('hidden');
+});
+tableDataInput.addEventListener('keydown', (event) => {
+	if (event.key !== 'Tab') return;
+	event.preventDefault();
+	const start = tableDataInput.selectionStart;
+	const end = tableDataInput.selectionEnd;
+	const value = tableDataInput.value;
+	tableDataInput.value = value.slice(0, start) + '\t' + value.slice(end);
+	tableDataInput.selectionStart = tableDataInput.selectionEnd = start + 1;
+});
 
 /** Context menu's "Edit Text…" — reuses the floating text input to rename
  *  an EXISTING label in place, pre-filled with its current text, positioned
@@ -1666,7 +1880,7 @@ canvas.addEventListener('contextmenu', (e) => {
 	// chain, line/rect/circle anchor, arc points) ends it, same as Escape —
 	// a context menu popping up mid-chain would be a worse UX than just
 	// stopping, and matches KiCad's own right-click-to-finish convention.
-	if (lineChainStart || shapeAnchor || arcPoints.length) {
+	if (lineChainStart || shapeAnchor || arcPoints.length || bezierPoints.length || ruleAreaPoints.length) {
 		resetEditToolState();
 		return;
 	}
@@ -1754,6 +1968,12 @@ function updateEditPreview(s: KicadRenderSession, cursor: Vec2): void {
 			break;
 		case 'arc':
 			preview = { kind: 'arc', points: arcPoints, cursor };
+			break;
+		case 'bezier':
+			preview = { kind: 'bezier', points: bezierPoints, cursor };
+			break;
+		case 'rule-area':
+			preview = { kind: 'rule-area', points: ruleAreaPoints, cursor };
 			break;
 		case 'power':
 			// One-click gnd/flag get a mouse-follow marker like junction/no-connect;
@@ -1920,6 +2140,12 @@ function handleEditModeMouseDown(e: MouseEvent, s: KicadRenderSession, screenPos
 		return true;
 	}
 
+	if (editTool === 'table') {
+		showTableModal(snapped);
+		e.preventDefault();
+		return true;
+	}
+
 	if (editTool === 'arc') {
 		if (arcPoints.length === 0) {
 			arcPoints = [snapped];
@@ -1939,6 +2165,42 @@ function handleEditModeMouseDown(e: MouseEvent, s: KicadRenderSession, screenPos
 			lastFullSch = s.getSchematicText() || lastFullSch;
 			arcPoints = [];
 			s.setEditPreview(null);
+		}
+		e.preventDefault();
+		return true;
+	}
+
+	if (editTool === 'bezier') {
+		if (bezierPoints.length < 4) {
+			if (bezierPoints.length > 0 && samePoint(snapped, bezierPoints[bezierPoints.length - 1]!)) {
+				bezierPoints = [];
+				s.setEditPreview(null);
+			}
+			else {
+				bezierPoints = [...bezierPoints, snapped];
+				if (bezierPoints.length === 4) {
+					s.addGraphicBezier(bezierPoints.map(point => ({ x: point.x, y: point.y })));
+					lastFullSch = s.getSchematicText() || lastFullSch;
+					bezierPoints = [];
+					s.setEditPreview(null);
+				}
+			}
+		}
+		e.preventDefault();
+		return true;
+	}
+
+	if (editTool === 'rule-area') {
+		if (ruleAreaPoints.length >= 3 && samePoint(snapped, ruleAreaPoints[0]!)) {
+			s.addRuleArea(ruleAreaPoints.map(point => ({ x: point.x, y: point.y })));
+			lastFullSch = s.getSchematicText() || lastFullSch;
+			ruleAreaPoints = [];
+			s.setEditPreview(null);
+		}
+		else {
+			if (!ruleAreaPoints.length || !samePoint(snapped, ruleAreaPoints[ruleAreaPoints.length - 1]!)) {
+				ruleAreaPoints = [...ruleAreaPoints, snapped];
+			}
 		}
 		e.preventDefault();
 		return true;
@@ -2002,6 +2264,40 @@ stage.addEventListener('drop', (e) => {
 	void openKiCadFile(file);
 });
 
+function renderSymbolProperties(symbol: any, kind: string, id: string): void {
+  editPropertiesEl.innerHTML = '';
+  const section = (title: string) => { const s = document.createElement('section'); s.className = 'property-section'; const h = document.createElement('div'); h.className = 'property-section-title'; h.textContent = title; s.appendChild(h); editPropertiesEl.appendChild(s); return s; };
+  const row = (s: HTMLElement, label: string, value: string, edit = false, save?: (v: string) => void) => { const r = document.createElement('div'); r.className = 'property-row'; const l = document.createElement('div'); l.className = 'property-label'; l.textContent = label; const c = document.createElement('div'); c.className = 'property-value'; if (edit) { const i = document.createElement('input'); i.className = 'property-input'; i.value = value; const commit = () => { if (i.value !== value) { value = i.value; save?.(value); } }; i.addEventListener('change', commit); i.addEventListener('keydown', e => { if (e.key === 'Enter') { commit(); i.blur(); } }); c.appendChild(i); } else c.textContent = value; r.append(l, c); s.appendChild(r); };
+  const selectRow = (s: HTMLElement, label: string, value: string, options: string[], save: (v: string) => void) => { const r = document.createElement('div'); r.className = 'property-row'; const l = document.createElement('div'); l.className = 'property-label'; l.textContent = label; const c = document.createElement('div'); c.className = 'property-value'; const select = document.createElement('select'); select.className = 'property-input'; for (const option of options) { const item = document.createElement('option'); item.value = option; item.textContent = `${option}°`; select.appendChild(item); } select.value = options.includes(value) ? value : options[0]!; select.addEventListener('change', () => save(select.value)); c.appendChild(select); r.append(l, c); s.appendChild(r); };
+  const check = (s: HTMLElement, label: string, checked: boolean, save: (v: boolean) => void) => { const r = document.createElement('div'); r.className = 'property-row'; const l = document.createElement('div'); l.className = 'property-label'; l.textContent = label; const c = document.createElement('div'); c.className = 'property-value'; const i = document.createElement('input'); i.type = 'checkbox'; i.className = 'property-check'; i.checked = checked; i.addEventListener('change', () => save(i.checked)); c.appendChild(i); r.append(l, c); s.appendChild(r); };
+  const mutate = (fn: (currentSymbol: any) => void) => {
+    const s = session;
+    if (!s?.mutateSymbolByPaintId(id, fn)) return;
+    lastFullSch = s.getSchematicText() || lastFullSch;
+    updateUndoStackPane();
+    // Do not rebuild this DOM panel from its own event handler: doing that
+    // replaces the focused input/checkbox before the browser can finish the
+    // interaction. The next selection reads the new live model.
+  };
+  const origin = symbol.getOrigin?.();
+  const basic = section('Basic Properties');
+  check(basic, 'Pin numbers', !symbol.arePinNumbersHidden?.(), v => mutate(current => current.togglePinNumbers(v)));
+  check(basic, 'Pin names', !symbol.arePinNameLabelsHidden?.(), v => mutate(current => current.togglePinNames(v)));
+  row(basic, 'Position X (mm)', origin ? origin.x.toFixed(2) : '—', !!origin, v => { if (origin) mutate(current => { const live = current.getOrigin(); current.setOrigin(Number(v) || 0, live.y, live.rotation ?? 0); }); });
+  row(basic, 'Position Y (mm)', origin ? origin.y.toFixed(2) : '—', !!origin, v => { if (origin) mutate(current => { const live = current.getOrigin(); current.setOrigin(live.x, Number(v) || 0, live.rotation ?? 0); }); });
+  if (origin) { const rotation = ((Math.round(Number(origin.rotation ?? 0) / 90) * 90) % 360 + 360) % 360; selectRow(basic, 'Orientation', String(rotation), ['0', '90', '180', '270'], v => mutate(current => { const live = current.getOrigin(); current.setOrigin(live.x, live.y, Number(v)); })); }
+  row(basic, 'Object', `${kind} (${id.slice(0, 8)})`);
+  const fields = section('Fields');
+  for (const p of symbol.getProperties?.() ?? []) { const n = String(p.propertyName ?? ''); if (n) row(fields, n, String(p.propertyValue ?? ''), true, v => mutate(current => current.setProperty(n, v))); }
+  const attrs = section('Attributes');
+  check(attrs, 'Exclude From Simulation', !!symbol.findFirstChildByName?.('exclude_from_sim')?.value, v => mutate(current => current.setExcludeFromSim(v)));
+  check(attrs, 'Exclude From BOM', symbol.findFirstChildByName?.('in_bom')?.value === false, v => mutate(current => current.setInBom(!v)));
+  check(attrs, 'Exclude From Board', symbol.findFirstChildByName?.('on_board')?.value === false, v => mutate(current => current.setOnBoard(!v)));
+  check(attrs, 'Exclude From Position Files', symbol.findFirstChildByName?.('in_pos_files')?.value === false, v => mutate(current => current.setInPosFiles(!v)));
+  const pin = section('Pin Display'); check(pin, 'Show Pin Number', !symbol.arePinNumbersHidden?.(), v => mutate(current => current.togglePinNumbers(v))); check(pin, 'Show Pin Name', !symbol.arePinNameLabelsHidden?.(), v => mutate(current => current.togglePinNames(v))); const pinNames = symbol.findFirstChildByName?.('pin_names'); row(pin, 'Pin Name Offset (mm)', Number(pinNames?.getOffset?.() ?? 0).toFixed(2), true, v => mutate(current => current.setPinNameOffset(Number(v) || 0)));
+}
+
 setMode('view');
 ensureSession();
 resizeCanvas();
+updateStatusBar();

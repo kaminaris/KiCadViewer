@@ -101,7 +101,7 @@ html, body {
 main {
 	display: grid;
 	grid-template-columns: minmax(200px, 280px) 1fr;
-	height: calc(100% - 52px);
+	height: calc(100% - 76px);
 }
 
 main.edit-mode {
@@ -114,6 +114,22 @@ main.edit-mode {
 	background: var(--panel);
 	overflow: auto;
 }
+
+.edit-left-pane { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+.edit-left-pane.hidden, #general-side-content.hidden { display: none; }
+.edit-pane { min-height: 60px; flex: 1 1 0; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); background: var(--panel); }
+.edit-pane:first-child { flex: 1.9 1 0; }
+.edit-pane header { height: 28px; min-height: 28px; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; background: #121820; color: var(--text); font-size: 12px; font-weight: 600; border-bottom: 1px solid var(--line); }
+.edit-pane header button { border: 0; background: transparent; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.edit-pane header button:hover { color: var(--accent); }
+.edit-pane-body { padding: 8px; overflow: auto; color: var(--text); font-size: 12px; white-space: pre-wrap; }
+.hierarchy-row { padding: 3px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.pane-splitter { height: 5px; min-height: 5px; cursor: row-resize; background: var(--bg); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.edit-filter-grid { padding: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 6px; color: var(--text); font-size: 11px; }
+.edit-filter-grid label { white-space: nowrap; }
+.edit-filter-grid input { accent-color: #42b9e8; vertical-align: middle; margin: 0 3px 0 0; }
+main.edit-mode .side { padding: 0; background: var(--panel); }
+main.edit-mode #general-side-content { display: none; }
 
 .hint {
 	color: var(--muted);
@@ -327,4 +343,144 @@ main.edit-mode {
 		grid-template-rows: auto 1fr;
 	}
 	.side { border-right: none; border-bottom: 1px solid var(--line); }
+}
+.table-modal {
+	position: absolute;
+	z-index: 20;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	width: min(420px, calc(100% - 32px));
+	padding: 16px;
+	background: #252a33;
+	border: 1px solid #697386;
+	border-radius: 6px;
+	box-shadow: 0 8px 30px rgba(0,0,0,.45);
+	color: #e6e9ef;
+}
+.table-modal.hidden { display: none; }
+.table-modal h3 { margin: 0 0 12px; }
+.table-modal label { display: block; margin: 8px 0; font-size: 12px; }
+.table-modal input, .table-modal textarea { width: 100%; box-sizing: border-box; margin-top: 4px; background: #171a20; color: inherit; border: 1px solid #596273; padding: 6px; }
+.table-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
+.status-bar {
+	height: 24px;
+	min-height: 24px;
+	display: flex;
+	align-items: center;
+	gap: 1.5rem;
+	padding: 0 0.75rem;
+	border-top: 1px solid var(--line);
+	background: #151b23;
+	color: var(--muted);
+	font: 11px/1 var(--font);
+	font-variant-numeric: tabular-nums;
+}
+/* Editable symbol properties in the edit sidebar. */
+.property-section { border-top: 1px solid var(--line); }
+.property-section:first-child { border-top: 0; }
+.property-section-title { padding: 4px 8px; background: #252b33; color: var(--text); font-weight: 600; font-size: 12px; }
+.property-row { display: grid; grid-template-columns: minmax(96px, 42%) 1fr; min-height: 22px; border-top: 1px solid rgba(255,255,255,.06); align-items: center; }
+.property-label { padding: 2px 8px; color: var(--muted); font-size: 11px; }
+.property-value { min-width: 0; padding: 1px 5px; color: var(--text); font-size: 11px; }
+.property-input { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid transparent; border-radius: 2px; background: transparent; color: var(--text); padding: 2px 4px; font: inherit; }
+.property-input:hover, .property-input:focus { border-color: var(--accent); background: var(--panel-2); outline: none; }
+.property-input:is(select) {
+	appearance: auto;
+	color-scheme: dark;
+	background: #171d26;
+	border: 1px solid #3b4655;
+	color: var(--text);
+	cursor: pointer;
+}
+.property-input:is(select):hover,
+.property-input:is(select):focus {
+	background: #202936;
+	border-color: var(--accent);
+}
+.property-input:is(select) option {
+	background: #171d26;
+	color: var(--text);
+}
+.property-check { accent-color: var(--accent); vertical-align: middle; }
+.history-summary { padding: 5px 8px; color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--line); }
+.history-row { display: flex; gap: 6px; align-items: center; padding: 3px 8px; min-height: 18px; color: var(--text); font-size: 11px; border-top: 1px solid rgba(255,255,255,.05); }
+.history-row span { color: var(--accent); width: 10px; }
+.history-row small { margin-left: auto; color: var(--muted); font-size: 10px; }
+.history-redo, .history-empty { padding: 6px 8px; color: var(--muted); font-size: 11px; }
+
+/* Keep scrollbars compact and consistent with the viewer palette. */
+*, *::before, *::after {
+	scrollbar-width: thin;
+	scrollbar-color: #566273 #171d26;
+}
+
+*::-webkit-scrollbar {
+	width: 7px;
+	height: 7px;
+}
+
+*::-webkit-scrollbar-track {
+	background: #171d26;
+}
+
+*::-webkit-scrollbar-thumb {
+	background: #566273;
+	border-radius: 4px;
+	border: 1px solid #171d26;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+	background: #718096;
+}
+
+/* The inspector is a vertical document; never let long values create a
+ * horizontal scrollbar or widen the pane. */
+.side,
+#general-side-content,
+#edit-left-pane,
+.edit-pane,
+.edit-pane-body,
+#edit-properties,
+#edit-hierarchy,
+#edit-selection-filter {
+	min-width: 0;
+	max-width: 100%;
+	overflow-x: hidden;
+}
+
+.property-row,
+.property-value,
+.property-label {
+	min-width: 0;
+	max-width: 100%;
+	overflow: hidden;
+}
+
+.property-label,
+.property-value {
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Hard guarantee: inspector containers are never horizontally scrollable. */
+html, body, main, .side, #general-side-content, #edit-left-pane,
+.edit-pane, .edit-pane-body, #edit-properties, #edit-hierarchy,
+#edit-selection-filter {
+	min-width: 0 !important;
+	width: auto;
+	box-sizing: border-box;
+	overflow-x: hidden !important;
+}
+
+.tool-panel { overflow-x: hidden; }
+
+main > .side {
+	max-width: 100%;
+}
+
+*::-webkit-scrollbar:horizontal {
+	display: none;
+	height: 0;
 }
