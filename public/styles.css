@@ -368,7 +368,7 @@ main.edit-mode #general-side-content { display: none; }
    text/label/symbol) — shares table-modal's visual language but wider and
    scrollable, since a symbol's property panel can run to 15+ rows across
    several sections. Fields inside reuse .property-section/.property-row
-   etc. unchanged (see propertyTargetEl in main.ts) — no extra CSS needed
+   etc. unchanged — no extra CSS needed
    for them, they're already container-agnostic. */
 .properties-modal {
 	position: absolute;

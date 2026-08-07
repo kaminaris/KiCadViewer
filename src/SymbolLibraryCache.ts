@@ -1,5 +1,5 @@
 import { KicadElementSymbol } from '@kicad-io/KicadElementSymbol';
-import { KicadParser } from '@kicad-io/KicadParser';
+import { KicadParser }        from '@kicad-io/KicadParser';
 
 /**
  * Minimal structural types keep this service usable in browsers whose DOM
@@ -10,12 +10,14 @@ import { KicadParser } from '@kicad-io/KicadParser';
 export interface SymbolFileHandle {
 	kind: 'file';
 	name: string;
+
 	getFile(): Promise<File>;
 }
 
 export interface SymbolDirectoryHandle {
 	kind: 'directory';
 	name: string;
+
 	values(): AsyncIterable<SymbolFileHandle | SymbolDirectoryHandle>;
 }
 
@@ -73,9 +75,9 @@ const FILE_STORE = 'files';
  * so the ordinary `<input webkitdirectory>` fallback can place a symbol later.
  */
 export class SymbolLibraryCache {
-	private dbPromise: Promise<IDBDatabase> | null = null;
+	protected dbPromise: Promise<IDBDatabase> | null = null;
 
-	private openDb(): Promise<IDBDatabase> {
+	protected openDb(): Promise<IDBDatabase> {
 		if (this.dbPromise) {
 			return this.dbPromise;
 		}
@@ -99,7 +101,7 @@ export class SymbolLibraryCache {
 		return this.dbPromise;
 	}
 
-	private transactionDone(transaction: IDBTransaction): Promise<void> {
+	protected transactionDone(transaction: IDBTransaction): Promise<void> {
 		return new Promise((resolve, reject) => {
 			transaction.oncomplete = () => resolve();
 			transaction.onerror = () => reject(transaction.error ?? new Error('Symbol cache transaction failed.'));
@@ -107,7 +109,7 @@ export class SymbolLibraryCache {
 		});
 	}
 
-	private async clearStoredIndex(): Promise<void> {
+	protected async clearStoredIndex(): Promise<void> {
 		const db = await this.openDb();
 		const transaction = db.transaction([META_STORE, FILE_STORE], 'readwrite');
 		transaction.objectStore(META_STORE).clear();
@@ -125,7 +127,7 @@ export class SymbolLibraryCache {
 	 *  plain string (guaranteed cloneable) and is exactly the documented
 	 *  fallback for "no usable handle" already — reusing it here too rather
 	 *  than losing the entry outright. */
-	private async putFile(file: CachedSymbolFile): Promise<void> {
+	protected async putFile(file: CachedSymbolFile): Promise<void> {
 		try {
 			await this.putFileRecord(file);
 		}
@@ -137,21 +139,21 @@ export class SymbolLibraryCache {
 		}
 	}
 
-	private async putFileRecord(file: CachedSymbolFile): Promise<void> {
+	protected async putFileRecord(file: CachedSymbolFile): Promise<void> {
 		const db = await this.openDb();
 		const transaction = db.transaction(FILE_STORE, 'readwrite');
 		transaction.objectStore(FILE_STORE).put(file);
 		await this.transactionDone(transaction);
 	}
 
-	private async putSummary(summary: SymbolLibrarySummary): Promise<void> {
+	protected async putSummary(summary: SymbolLibrarySummary): Promise<void> {
 		const db = await this.openDb();
 		const transaction = db.transaction(META_STORE, 'readwrite');
 		transaction.objectStore(META_STORE).put({ ...summary, key: 'summary' } satisfies StoredSummary);
 		await this.transactionDone(transaction);
 	}
 
-	private async extractSymbols(text: string): Promise<CachedSymbolSummary[]> {
+	protected async extractSymbols(text: string): Promise<CachedSymbolSummary[]> {
 		const root = new KicadParser().parse(text);
 		if (!root) {
 			throw new Error('Parser returned no root element.');
@@ -178,21 +180,23 @@ export class SymbolLibraryCache {
 				const baseProperties = base?.getAllProperties() ?? {};
 				return {
 					name: symbol.symbolName!,
-					reference: properties.Reference ?? symbol.getReference?.() ?? baseProperties.Reference ?? base?.getReference?.() ?? '',
+					reference: properties.Reference ?? symbol.getReference?.() ?? baseProperties.Reference
+						?? base?.getReference?.() ?? '',
 					value: properties.Value ?? baseProperties.Value ?? '',
-					description: properties.Description ?? properties.ki_description ?? baseProperties.Description ?? baseProperties.ki_description ?? '',
+					description: properties.Description ?? properties.ki_description ?? baseProperties.Description
+						?? baseProperties.ki_description ?? '',
 					keywords: properties.ki_keywords ?? baseProperties.ki_keywords ?? '',
-					units: Math.max(1, symbol.getUnitId?.() || (base ?? symbol).getUnitId?.() || 1),
+					units: Math.max(1, symbol.getUnitId?.() || (base ?? symbol).getUnitId?.() || 1)
 				};
 			});
 	}
 
-	private async processFile(
+	protected async processFile(
 		file: File,
 		id: string,
 		name: string,
 		relativePath: string,
-		handle: SymbolFileHandle | undefined,
+		handle: SymbolFileHandle | undefined
 	): Promise<CachedSymbolFile> {
 		// Keep this scope deliberately small: once metadata has been extracted,
 		// neither the File nor its text is retained by the cache object.
@@ -206,16 +210,16 @@ export class SymbolLibraryCache {
 			lastModified: file.lastModified,
 			symbols,
 			sourceText: text,
-			handle,
+			handle
 		};
 	}
 
-	private async *walkDirectory(
+	protected async* walkDirectory(
 		directory: SymbolDirectoryHandle,
-		prefix = '',
+		prefix = ''
 	): AsyncGenerator<{ handle: SymbolFileHandle; relativePath: string }> {
 		for await (const entry of directory.values()) {
-			const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+			const relativePath = prefix ? `${ prefix }/${ entry.name }` : entry.name;
 			if (entry.kind === 'directory') {
 				yield* this.walkDirectory(entry, relativePath);
 			}
@@ -227,7 +231,7 @@ export class SymbolLibraryCache {
 
 	async indexDirectory(
 		directory: SymbolDirectoryHandle,
-		onProgress?: (progress: SymbolLibraryProgress) => void,
+		onProgress?: (progress: SymbolLibraryProgress) => void
 	): Promise<SymbolLibrarySummary> {
 		await this.clearStoredIndex();
 		let processedFiles = 0;
@@ -238,7 +242,8 @@ export class SymbolLibraryCache {
 			processedFiles++;
 			try {
 				const file = await entry.handle.getFile();
-				const record = await this.processFile(file, entry.relativePath, entry.handle.name, entry.relativePath, entry.handle);
+				const record = await this.processFile(
+					file, entry.relativePath, entry.handle.name, entry.relativePath, entry.handle);
 				symbolCount += record.symbols.length;
 				await this.putFile(record);
 				onProgress?.({ processedFiles, fileName: entry.relativePath, symbolCount: record.symbols.length });
@@ -249,7 +254,7 @@ export class SymbolLibraryCache {
 					processedFiles,
 					fileName: entry.relativePath,
 					symbolCount: 0,
-					error: error instanceof Error ? error.message : String(error),
+					error: error instanceof Error ? error.message : String(error)
 				});
 			}
 		}
@@ -259,7 +264,7 @@ export class SymbolLibraryCache {
 			indexedAt: Date.now(),
 			fileCount: processedFiles,
 			symbolCount,
-			errorCount,
+			errorCount
 		};
 		await this.putSummary(summary);
 		return summary;
@@ -270,7 +275,7 @@ export class SymbolLibraryCache {
 	async indexFiles(
 		files: FileList | File[],
 		rootName: string,
-		onProgress?: (progress: SymbolLibraryProgress) => void,
+		onProgress?: (progress: SymbolLibraryProgress) => void
 	): Promise<SymbolLibrarySummary> {
 		await this.clearStoredIndex();
 		const symbolFiles = Array.from(files).filter(file => {
@@ -291,11 +296,22 @@ export class SymbolLibraryCache {
 				const record = await this.processFile(file, relativePath, file.name, relativePath, undefined);
 				symbolCount += record.symbols.length;
 				await this.putFile(record);
-				onProgress?.({ processedFiles, totalFiles: symbolFiles.length, fileName: relativePath, symbolCount: record.symbols.length });
+				onProgress?.({
+					processedFiles,
+					totalFiles: symbolFiles.length,
+					fileName: relativePath,
+					symbolCount: record.symbols.length
+				});
 			}
 			catch (error) {
 				errorCount++;
-				onProgress?.({ processedFiles, totalFiles: symbolFiles.length, fileName: relativePath, symbolCount: 0, error: error instanceof Error ? error.message : String(error) });
+				onProgress?.({
+					processedFiles,
+					totalFiles: symbolFiles.length,
+					fileName: relativePath,
+					symbolCount: 0,
+					error: error instanceof Error ? error.message : String(error)
+				});
 			}
 		}
 		const summary: SymbolLibrarySummary = {
@@ -303,7 +319,7 @@ export class SymbolLibraryCache {
 			indexedAt: Date.now(),
 			fileCount: symbolFiles.length,
 			symbolCount,
-			errorCount,
+			errorCount
 		};
 		await this.putSummary(summary);
 		return summary;
@@ -343,7 +359,9 @@ export class SymbolLibraryCache {
 			request.onsuccess = () => resolve(request.result as CachedSymbolFile | undefined);
 			request.onerror = () => reject(request.error ?? new Error('Could not read cached symbol file.'));
 		});
-		if (!file) throw new Error('Cached symbol file was not found. Re-index the symbol directory.');
+		if (!file) {
+			throw new Error('Cached symbol file was not found. Re-index the symbol directory.');
+		}
 		// processFile() always populates sourceText at index time regardless of
 		// whether a handle is also available, so it is always the cheaper and
 		// more reliable read: no extra disk I/O, no dependency on the handle's
