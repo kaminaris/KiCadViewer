@@ -7,8 +7,10 @@ import {
 	type SelectionResizeBox,
 	type CurveAnchor,
 	type SelectionCurveAnchors,
+	type AlignAxis,
 } from '@kicad-render/KicadRenderSession';
 import { Vec2 } from '@kicad-render/math/Vec2';
+import { BBox } from '@kicad-render/math/BBox';
 import { FINE_GRID_MM } from '@kicad-layout/Geometry';
 import {
 	applyLockedPinNets,
@@ -24,11 +26,24 @@ import {
 	type LockedNetlist,
 } from '@kicad-layout/index';
 import { reroute } from '@kicad-layout/Reroute';
+import {
+	SymbolLibraryCache,
+	type CachedSymbolFile,
+	type CachedSymbolSummary,
+	type SymbolDirectoryHandle,
+	type SymbolLibraryProgress,
+	type SymbolLibrarySummary,
+} from './SymbolLibraryCache';
 
 type AppMode = 'view' | 'circuit' | 'edit';
 type EditTool =
-	| 'select' | 'wire' | 'bus' | 'bus-entry' | 'junction' | 'no-connect' | 'line' | 'rect' | 'circle' | 'arc' | 'text'
-	| 'text-box' | 'table' | 'rule-area' | 'bezier' | 'label' | 'directive-label' | 'global-label' | 'hier-label' | 'power' | 'delete';
+	| 'select' | 'place-symbol' | 'wire' | 'bus' | 'bus-entry' | 'junction' | 'no-connect' | 'line' | 'rect' | 'circle' | 'arc' | 'text'
+	| 'text-box' | 'table' | 'rule-area' | 'bezier' | 'image' | 'label' | 'directive-label' | 'global-label' | 'hier-label' | 'power' | 'delete';
+
+interface EmbeddedImagePayload {
+	data: string;
+	mimeType: 'image/png' | 'image/jpeg' | 'image/gif';
+}
 
 /** Edit-mode tool-switch hotkeys. R/T are already rotate/tidy, so Rect and
  *  Text have no letter here — toolbar-button only for those two. Local
@@ -133,8 +148,14 @@ const TEXT_INPUT_PLACEHOLDERS: Partial<Record<EditTool, string>> = {
 	power: 'Voltage (e.g. +3.3V)…',
 };
 
-const PLACE_GRID = FINE_GRID_MM;
+/** Snap-to-grid spacing (mm) — user-adjustable via #grid-select, which also
+ *  keeps the visible grid dots in sync (session.setGridSpacing()). */
+let PLACE_GRID = FINE_GRID_MM;
 const DEBUG = true;
+/** Screen-pixel distance before a rectangle-select mousedown counts as a
+ *  drag rather than a click — the box is unsnapped, so the existing
+ *  world-snapped dragMoved idiom doesn't apply here. */
+const RECT_SELECT_MOVE_THRESHOLD_PX = 4;
 
 const statusEl = document.getElementById('status')!;
 const scoreEl = document.getElementById('score')!;
@@ -148,6 +169,8 @@ const modeEditBtn = document.getElementById('mode-edit')!;
 const viewActions = document.getElementById('view-actions')!;
 const circuitActions = document.getElementById('circuit-actions')!;
 const editActions = document.getElementById('edit-actions')!;
+const indexSymbolsButton = document.getElementById('btn-index-symbols') as HTMLButtonElement;
+const symbolDirectoryInput = document.getElementById('symbol-directory-input') as HTMLInputElement;
 const editLeftPane = document.getElementById('edit-left-pane')!;
 const editPropertiesEl = document.getElementById('edit-properties')!;
 const editHierarchyEl = document.getElementById('edit-hierarchy')!;
@@ -160,10 +183,37 @@ const tableModal = document.getElementById('table-modal') as HTMLDivElement;
 const tableRowsInput = document.getElementById('table-rows') as HTMLInputElement;
 const tableColumnsInput = document.getElementById('table-columns') as HTMLInputElement;
 const tableDataInput = document.getElementById('table-data') as HTMLTextAreaElement;
+const imageInput = document.getElementById('image-input') as HTMLInputElement;
+const symbolLibraryCache = new SymbolLibraryCache();
+const propertiesModalEl = document.getElementById('properties-modal') as HTMLDivElement;
+const propertiesModalTitleEl = document.getElementById('properties-modal-title') as HTMLHeadingElement;
+const propertiesModalBodyEl = document.getElementById('properties-modal-body') as HTMLDivElement;
 const contextMenuEl = document.getElementById('context-menu') as HTMLDivElement;
 const coordStatusEl = document.getElementById('coord-status')!;
-const gridStatusEl = document.getElementById('grid-status')!;
+const gridSelectEl = document.getElementById('grid-select') as HTMLSelectElement;
 const zoomStatusEl = document.getElementById('zoom-status')!;
+const symbolChooserEl = document.getElementById('symbol-chooser-modal') as HTMLDivElement;
+const symbolChooserTitleEl = document.getElementById('symbol-chooser-title') as HTMLHeadingElement;
+const symbolChooserFilterEl = document.getElementById('symbol-chooser-filter') as HTMLInputElement;
+const symbolChooserListEl = document.getElementById('symbol-chooser-list') as HTMLDivElement;
+const symbolChooserDetailsEl = document.getElementById('symbol-preview-details') as HTMLDivElement;
+const symbolPreviewArtEl = document.getElementById('symbol-preview-art') as HTMLDivElement;
+const symbolPreviewCanvasEl = document.getElementById('symbol-preview-canvas') as HTMLCanvasElement;
+const symbolPreviewPlaceholderEl = document.getElementById('symbol-preview-placeholder') as HTMLSpanElement;
+/** Lazily created — a second, throwaway KicadRenderSession bound to the
+ *  preview canvas, entirely separate from the main document's session.
+ *  Reused across preview updates (not recreated per symbol) so switching
+ *  the selected row doesn't pay session-construction cost every time. */
+let symbolPreviewSession: KicadRenderSession | null = null;
+/** Guards against a stale, slow readCachedFile() response clobbering a
+ *  newer selection — e.g. user arrows down through rows faster than the
+ *  IndexedDB reads resolve; only the LATEST request's result may render. */
+let symbolPreviewRequestId = 0;
+const symbolChooserOkEl = document.getElementById('symbol-chooser-ok') as HTMLButtonElement;
+const symbolChooserCancelEl = document.getElementById('symbol-chooser-cancel') as HTMLButtonElement;
+const symbolChooserCloseEl = document.getElementById('symbol-chooser-close') as HTMLButtonElement;
+const symbolRepeatCopiesEl = document.getElementById('symbol-repeat-copies') as HTMLInputElement;
+const symbolAllUnitsEl = document.getElementById('symbol-all-units') as HTMLInputElement;
 const editToolButtons = Array.from(
 	document.querySelectorAll<HTMLButtonElement>('#tool-panel [data-tool]')
 );
@@ -174,6 +224,12 @@ const editToolButtons = Array.from(
 // and immediately steals focus/rolls the control back.
 for (const eventName of ['pointerdown', 'pointerup', 'pointermove', 'mousedown', 'mouseup', 'click', 'dblclick']) {
 	editPropertiesEl.addEventListener(eventName, event => event.stopPropagation());
+	// The properties modal reuses the exact same field builders (propertyRow
+	// etc.), so it needs the exact same interaction-island treatment — a
+	// checkbox/select/color click inside it must not reach window's own
+	// mousemove/mouseup drag-tracking listeners.
+	propertiesModalEl.addEventListener(eventName, event => event.stopPropagation());
+	symbolChooserEl.addEventListener(eventName, event => event.stopPropagation());
 }
 
 let mode: AppMode = 'view';
@@ -196,8 +252,27 @@ let dragStart = new Vec2(0, 0);
 /** Symbol ref being dragged — circuit mode (auto-rewire on drop) OR edit
  *  mode's select tool (manual move, no rewire); mode alone disambiguates. */
 let dragRef: string | null = null;
+/** Edit mode only — the specific unit-instance's paint id, alongside
+ *  dragRef. Several placed instances can share one Reference (multi-unit
+ *  parts, e.g. five "U1"s), so dragRef alone can't tell them apart; this is
+ *  always null in circuit mode, where a placements-array ref is already
+ *  unique on its own. */
+let dragInstanceId: string | null = null;
 /** Global / hierarchical label being dragged (local labels are regenerated). */
 let dragLabelId: string | null = null;
+/** Hierarchical sheet box being dragged — absolute-position like dragRef
+ *  (shares dragOffset/dragStartPose with it), not editDragId's relative-
+ *  delta translateElementById path: moving a sheet must ALSO shift its
+ *  properties and pins by the same amount (see moveSheetById's doc
+ *  comment), which a single-point relative translate can't express. */
+let dragSheetId: string | null = null;
+/** Sheet pin being dragged — also absolute-position (shares dragOffset/
+ *  dragStartPose), and MUST be intercepted before editDragId's generic
+ *  label-drag path: a sheet pin has kind:'label' like any other label, but
+ *  translateElementById's generic getOrigin/setOrigin fallback would move
+ *  it freely with no edge-constraint, unlike moveSheetPinById's real-KiCad-
+ *  ported ConstrainOnEdge behavior (see its doc comment). */
+let dragSheetPinId: string | null = null;
 let dragOffset = new Vec2(0, 0);
 let dragMoved = false;
 let dragUndoCaptured = false;
@@ -205,6 +280,24 @@ let dragStartPose: { x: number; y: number; rotation: number } | null = null;
 
 // ---- Edit mode: hand-drawn wires/junctions/no-connects/graphics ----
 let editTool: EditTool = 'select';
+type PendingSymbol = { file: CachedSymbolFile; summary: CachedSymbolSummary; libId: string };
+let pendingSymbol: PendingSymbol | null = null;
+let symbolChooserRows: PendingSymbol[] = [];
+/** World position the user clicked to trigger the chooser — the tool arms
+ *  on toolbar/menu click, then the FIRST canvas click both picks the
+ *  placement point AND opens the chooser (so the user can see where it'll
+ *  land before choosing what goes there); OK places at this remembered
+ *  point rather than requiring a second click. Not used for repeat-mode's
+ *  subsequent placements, which place directly at each new click without
+ *  reopening the chooser. */
+let pendingSymbolAnchor: Vec2 | null = null;
+/** Tracks an in-progress sequential (one-unit-per-click) multi-unit
+ *  placement — set after placing unit N of a symbol whose total unit count
+ *  is > 1, cleared once the last unit is placed or placement is abandoned.
+ *  Keyed by libId so switching to a different symbol mid-sequence is
+ *  detected as unrelated (see beginPendingSymbolPlacement) rather than
+ *  continuing the wrong part's unit numbering. */
+let pendingUnitState: { libId: string; reference: string; nextUnit: number; totalUnits: number } | null = null;
 /** Wire/bus tools: last committed chain point (world, snapped), or null if no chain in progress. */
 let lineChainStart: Vec2 | null = null;
 /** Line/rect/circle/text-box tools: first-click anchor, or null before it. */
@@ -221,9 +314,29 @@ let editDragLastPos: Vec2 | null = null;
  * ordinary editDrag path, since its contract is exactly "move this item". */
 let resizeDrag: { id: string; handle: Exclude<ResizeHandle, 'center'>; original: SelectionResizeBox } | null = null;
 let curveDrag: { id: string; anchor: CurveAnchor } | null = null;
+/** Select tool: rectangle multi-select drag in progress from empty space —
+ *  origin is fixed at mousedown, deliberately unsnapped (raw world coords,
+ *  matching real KiCad's own selection box, unlike every placement tool's
+ *  grid-snapped preview). */
+let rectSelectDrag: { originWorld: Vec2; originScreen: Vec2 } | null = null;
+/** Select tool: dragging the WHOLE current multi-selection together, started
+ *  by a plain (no-modifier) mousedown on an item that's already part of a
+ *  2+ item selection. lastSnapped is the cursor's own snapped world
+ *  position, re-anchored every mousemove — the per-step delta from it is
+ *  what actually moves every selected item (see translateSelection), same
+ *  incremental technique editDragId already uses for a single item. */
+let groupDrag: { lastSnapped: Vec2 } | null = null;
 /** Select tool: paint-item id/kind of whatever's currently selected (for Delete-key policy). */
 let editSelectedId: string | null = null;
 let editSelectedKind: string | null = null;
+/** Where propertySection()/the renderXProperties() family currently append —
+ *  the sidebar by default, temporarily swapped to the properties-modal body
+ *  by showPropertiesModal() so the exact same render functions can target
+ *  either surface. Always reset back to editPropertiesEl synchronously right
+ *  after the one render call that needs the swap — nothing else reads this
+ *  mid-render, so there's no window where a concurrent call could observe
+ *  the wrong target. */
+let propertyTargetEl: HTMLElement = editPropertiesEl;
 /** Text tool: world position of the pending (not-yet-committed) text. */
 let pendingTextAnchor: Vec2 | null = null;
 /** Bounds captured by Draw Text Box's two-click gesture while its multiline
@@ -231,6 +344,18 @@ let pendingTextAnchor: Vec2 | null = null;
 let pendingTextBoxBounds: { x: number; y: number; width: number; height: number } | null = null;
 let pendingTableAnchor: Vec2 | null = null;
 let pendingTableId: string | null = null;
+/** Image selected through the toolbar and waiting for its placement click. */
+let pendingImagePayload: EmbeddedImagePayload | null = null;
+/** Most recent canvas world position, used for clipboard-image placement. */
+let lastPointerWorld: Vec2 | null = null;
+/** In-memory copy/cut clipboard — cloned .write() text per copied element
+ *  plus each one's own original world position, so a multi-item paste can
+ *  preserve relative layout instead of stacking everything at one point.
+ *  Deliberately NOT the real OS clipboard (avoids MIME-type/permission
+ *  complexity for a same-tab feature) — the `paste` listener further down
+ *  already owns real clipboard reads, for image-drop only, and is untouched
+ *  by this. */
+let clipboard: { sourceText: string; x: number; y: number }[] = [];
 /** Set when the floating text input is editing an EXISTING label's text
  *  (via the context menu's "Edit Text…") rather than placing a new one —
  *  commitTextInput() checks this first, since editTool could be anything
@@ -253,8 +378,485 @@ function setStatus(msg: string): void {
 	statusEl.textContent = msg;
 }
 
+function symbolSummaryLabel(summary: SymbolLibrarySummary): string {
+	const errors = summary.errorCount ? `, ${summary.errorCount} failed` : '';
+	return `Indexed ${summary.symbolCount} symbols from ${summary.fileCount} files${errors}.`;
+}
+
+function reportSymbolIndexProgress(progress: SymbolLibraryProgress): void {
+	const total = progress.totalFiles ? `/${progress.totalFiles}` : '';
+	const suffix = progress.error ? ` — ${progress.error}` : ` — ${progress.symbolCount} symbols`;
+	setStatus(`Indexing symbols ${progress.processedFiles}${total}: ${progress.fileName}${suffix}`);
+}
+
+async function refreshSymbolLibraryButton(): Promise<void> {
+	try {
+		const summary = await symbolLibraryCache.getSummary();
+		if (summary) {
+			indexSymbolsButton.title = `${symbolSummaryLabel(summary)} Click to rescan.`;
+		}
+	}
+	catch {
+		// IndexedDB may be disabled by a private browsing policy; indexing will
+		// report the actionable error when the user actually tries it.
+	}
+}
+
+async function indexFallbackDirectory(files: FileList): Promise<void> {
+	indexSymbolsButton.disabled = true;
+	try {
+		const firstPath = (files[0] as (File & { webkitRelativePath?: string }) | undefined)?.webkitRelativePath;
+		const rootName = firstPath?.split('/')[0] || 'Selected symbols directory';
+		const summary = await symbolLibraryCache.indexFiles(files, rootName, reportSymbolIndexProgress);
+		setStatus(symbolSummaryLabel(summary));
+		indexSymbolsButton.title = `${symbolSummaryLabel(summary)} Click to rescan.`;
+	}
+	catch (error) {
+		setStatus(error instanceof Error ? error.message : String(error));
+	}
+	finally {
+		indexSymbolsButton.disabled = false;
+		symbolDirectoryInput.value = '';
+	}
+}
+
+async function chooseSymbolDirectory(): Promise<void> {
+	const picker = (window as Window & {
+		showDirectoryPicker?: (options?: { mode?: 'read' | 'readwrite' }) => Promise<SymbolDirectoryHandle>;
+	}).showDirectoryPicker;
+	if (!picker) {
+		symbolDirectoryInput.value = '';
+		symbolDirectoryInput.click();
+		return;
+	}
+	indexSymbolsButton.disabled = true;
+	try {
+		const directory = await picker({ mode: 'read' });
+		const summary = await symbolLibraryCache.indexDirectory(directory, reportSymbolIndexProgress);
+		setStatus(symbolSummaryLabel(summary));
+		indexSymbolsButton.title = `${symbolSummaryLabel(summary)} Click to rescan.`;
+	}
+	catch (error) {
+		// AbortError is the normal result of closing the directory chooser.
+		if (!(error instanceof DOMException && error.name === 'AbortError')) {
+			setStatus(error instanceof Error ? error.message : String(error));
+		}
+	}
+	finally {
+		indexSymbolsButton.disabled = false;
+	}
+}
+
+function symbolLibraryId(file: CachedSymbolFile, symbol: CachedSymbolSummary): string {
+	if (symbol.name.includes(':')) return symbol.name;
+	const library = file.name.replace(/\.kicad_sym$/i, '').replace(/[^A-Za-z0-9_.-]+/g, '_') || 'Library';
+	return `${ library }:${ symbol.name }`;
+}
+
+/** Real render, not a placeholder glyph: loads the symbol's own source into
+ *  a scratch KicadRenderSession bound to a small preview canvas, places it
+ *  at the origin via the same addLibrarySymbolFromText() the actual
+ *  placement flow uses, fits the camera to its rendered bounds, and draws
+ *  it — reusing the exact rendering pipeline already proven correct for
+ *  the main canvas rather than a second, parallel drawing implementation. */
+async function renderSymbolChooserPreview(item: PendingSymbol | null): Promise<void> {
+	const requestId = ++symbolPreviewRequestId;
+	if (!item) {
+		symbolPreviewCanvasEl.classList.add('hidden');
+		symbolPreviewPlaceholderEl.textContent = 'Select a symbol to preview';
+		symbolPreviewPlaceholderEl.classList.remove('hidden');
+		symbolChooserDetailsEl.textContent = '';
+		symbolChooserOkEl.disabled = true;
+		return;
+	}
+	const { summary } = item;
+	const reference = summary.reference || 'U';
+	symbolChooserDetailsEl.innerHTML = `<div class="detail-title">${summary.name}</div><div class="detail-muted">${summary.description || 'No description available.'}</div><br>Reference: ${reference}\nUnits: ${summary.units}\nKeywords: ${summary.keywords || '—'}\nLibrary: ${item.file.relativePath}`;
+	symbolChooserOkEl.disabled = false;
+
+	symbolPreviewPlaceholderEl.textContent = 'Loading preview…';
+	symbolPreviewPlaceholderEl.classList.remove('hidden');
+	symbolPreviewCanvasEl.classList.add('hidden');
+	try {
+		const source = await symbolLibraryCache.readCachedFile(item.file.id);
+		// A newer selection (user arrowed/clicked past this one before the
+		// cached-file read resolved) has already superseded this request —
+		// don't let a stale, slow response clobber what's now selected.
+		if (requestId !== symbolPreviewRequestId) return;
+
+		if (!symbolPreviewSession) {
+			symbolPreviewSession = new KicadRenderSession(symbolPreviewCanvasEl, null);
+		}
+		const dpr = window.devicePixelRatio || 1;
+		// Measure the always-visible WRAPPER, not the canvas itself — the
+		// canvas starts (and returns to, between previews) `display:none`
+		// via .hidden, and getBoundingClientRect() on a display:none element
+		// is always 0×0, which is below resize()'s own minFitViewportPx
+		// floor — it silently no-ops rather than shrink the buffer to
+		// something unusable, which left the canvas stuck at the browser's
+		// default 300×150 HTML canvas buffer on every single preview.
+		const rect = symbolPreviewArtEl.getBoundingClientRect();
+		symbolPreviewSession.resize(Math.max(1, Math.floor(rect.width * dpr)), Math.max(1, Math.floor(rect.height * dpr)));
+
+		const blank = '(kicad_sch (version 20221206) (generator eeschema) (uuid 00000000-0000-0000-0000-000000000000) (paper "A4") (lib_symbols))';
+		await symbolPreviewSession.loadSchematicText(blank, { filename: 'preview.kicad_sch', showDrawingSheet: false });
+		if (requestId !== symbolPreviewRequestId) return;
+
+		const placedRef = symbolPreviewSession.addLibrarySymbolFromText(source, item.summary.name, 0, 0, item.libId);
+		if (!placedRef) throw new Error('Could not render preview.');
+
+		// schScene is a protected implementation detail — getHitElement()
+		// elsewhere in this file already uses the same any-cast to reach it
+		// from outside the class; this preview session is a throwaway scratch
+		// instance, not the shared public API surface that protection guards.
+		const previewItems = (symbolPreviewSession as any).schScene?.hitTestItems ?? [];
+		let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+		for (const hitItem of previewItems) {
+			const b = (hitItem as { bbox?: { x: number; y: number; w: number; h: number } }).bbox;
+			if (!b) continue;
+			minX = Math.min(minX, b.x); minY = Math.min(minY, b.y);
+			maxX = Math.max(maxX, b.x + b.w); maxY = Math.max(maxY, b.y + b.h);
+		}
+		if (Number.isFinite(minX) && Number.isFinite(maxX)) {
+			const width = Math.max(1, maxX - minX);
+			const height = Math.max(1, maxY - minY);
+			const padX = width * 0.15;
+			const padY = height * 0.15;
+			symbolPreviewSession.camera.bbox = new BBox(minX - padX, minY - padY, width + padX * 2, height + padY * 2);
+		}
+		symbolPreviewSession.render();
+		symbolPreviewPlaceholderEl.classList.add('hidden');
+		symbolPreviewCanvasEl.classList.remove('hidden');
+	}
+	catch (error) {
+		if (requestId !== symbolPreviewRequestId) return;
+		symbolPreviewPlaceholderEl.textContent = error instanceof Error ? error.message : 'Could not render preview.';
+		symbolPreviewPlaceholderEl.classList.remove('hidden');
+		symbolPreviewCanvasEl.classList.add('hidden');
+	}
+}
+
+// ---- Symbol chooser: virtualized list ----
+// A real KiCad-scale library index (its own standard libraries alone run
+// 20k+ symbols) makes appending one real DOM row per match unusably slow.
+// Instead: flatten the grouped/filtered data into one array of fixed-height
+// "group header" | "row" entries with precomputed cumulative pixel offsets,
+// then on every render only create DOM nodes for whichever slice is
+// actually within (or just outside) the scroll container's viewport,
+// absolutely-positioned at their real offset inside a spacer div sized to
+// the FULL virtual content height — the scrollbar behaves exactly as if
+// every row were really there, only a small window of it ever exists in
+// the DOM at once.
+const CHOOSER_ROW_HEIGHT = 30;
+const CHOOSER_GROUP_HEIGHT = 24;
+/** Extra items rendered just outside the visible viewport so a fast
+ *  scroll/trackpad flick doesn't flash empty space before the next
+ *  scroll-driven repaint catches up. */
+const CHOOSER_BUFFER_ITEMS = 8;
+
+type ChooserListItem =
+	| { type: 'group'; label: string; height: number }
+	| { type: 'row'; item: PendingSymbol; height: number };
+
+let symbolChooserFlatItems: ChooserListItem[] = [];
+/** offsets[i] = top pixel offset of symbolChooserFlatItems[i] within the spacer. */
+let symbolChooserItemOffsets: number[] = [];
+let symbolChooserListInnerEl: HTMLDivElement | null = null;
+let symbolChooserWindowFramePending = false;
+
+function buildSymbolChooserFlatItems(filtered: PendingSymbol[]): void {
+	const items: ChooserListItem[] = [];
+	let previousFile = '';
+	for (const row of filtered) {
+		if (row.file.id !== previousFile) {
+			items.push({ type: 'group', label: row.file.relativePath, height: CHOOSER_GROUP_HEIGHT });
+			previousFile = row.file.id;
+		}
+		items.push({ type: 'row', item: row, height: CHOOSER_ROW_HEIGHT });
+	}
+	symbolChooserFlatItems = items;
+	const offsets: number[] = [];
+	let cursor = 0;
+	for (const entry of items) {
+		offsets.push(cursor);
+		cursor += entry.height;
+	}
+	symbolChooserItemOffsets = offsets;
+}
+
+function totalSymbolChooserHeight(): number {
+	const n = symbolChooserFlatItems.length;
+	if (!n) return 0;
+	return symbolChooserItemOffsets[n - 1]! + symbolChooserFlatItems[n - 1]!.height;
+}
+
+/** Binary search over the precomputed offsets: first item whose bottom edge
+ *  is past `y` (i.e. the first item at least partially visible at that
+ *  scroll position). Offsets are monotonically increasing, so this is a
+ *  correct, fast (O(log n)) alternative to the fixed-row-height division a
+ *  uniform-height virtual list could use — group headers and rows differ. */
+function symbolChooserIndexAtOffset(y: number): number {
+	let lo = 0, hi = symbolChooserFlatItems.length - 1, result = 0;
+	while (lo <= hi) {
+		const mid = (lo + hi) >> 1;
+		const bottom = symbolChooserItemOffsets[mid]! + symbolChooserFlatItems[mid]!.height;
+		if (bottom > y) { result = mid; hi = mid - 1; }
+		else { lo = mid + 1; }
+	}
+	return result;
+}
+
+/** Repaints ONLY the currently-visible slice — call on scroll, or after a
+ *  selection change that needs `.selected` to move. Does NOT touch the
+ *  flat item list or scroll position, unlike renderSymbolChooserList. */
+function renderSymbolChooserWindow(): void {
+	const inner = symbolChooserListInnerEl;
+	if (!inner) return;
+	inner.replaceChildren();
+	if (!symbolChooserFlatItems.length) {
+		const empty = document.createElement('div');
+		empty.className = 'symbol-chooser-group';
+		empty.textContent = symbolChooserRows.length ? 'No matching symbols' : 'Index a .kicad_sym directory first.';
+		inner.appendChild(empty);
+		return;
+	}
+	const viewportHeight = symbolChooserListEl.clientHeight || 300;
+	const scrollTop = symbolChooserListEl.scrollTop;
+	const startIndex = Math.max(0, symbolChooserIndexAtOffset(scrollTop) - CHOOSER_BUFFER_ITEMS);
+	const endIndex = Math.min(
+		symbolChooserFlatItems.length - 1,
+		symbolChooserIndexAtOffset(scrollTop + viewportHeight) + CHOOSER_BUFFER_ITEMS
+	);
+	for (let i = startIndex; i <= endIndex; i++) {
+		const entry = symbolChooserFlatItems[i]!;
+		const top = symbolChooserItemOffsets[i]!;
+		if (entry.type === 'group') {
+			const group = document.createElement('div');
+			group.className = 'symbol-chooser-group';
+			group.style.cssText = `position:absolute; top:${top}px; left:0; right:0;`;
+			group.textContent = entry.label;
+			inner.appendChild(group);
+		}
+		else {
+			const row = document.createElement('div');
+			row.className = 'symbol-chooser-row';
+			row.style.cssText = `position:absolute; top:${top}px; left:0; right:0; box-sizing:border-box;`;
+			row.dataset.fileId = entry.item.file.id;
+			row.dataset.symbolName = entry.item.summary.name;
+			if (pendingSymbol && row.dataset.fileId === pendingSymbol.file.id && row.dataset.symbolName === pendingSymbol.summary.name) row.classList.add('selected');
+			const name = document.createElement('span');
+			name.textContent = entry.item.summary.name;
+			const description = document.createElement('small');
+			description.textContent = entry.item.summary.description || entry.item.summary.value || entry.item.summary.reference || '';
+			row.append(name, description);
+			inner.appendChild(row);
+		}
+	}
+}
+
+function scheduleSymbolChooserWindowRender(): void {
+	if (symbolChooserWindowFramePending) return;
+	symbolChooserWindowFramePending = true;
+	requestAnimationFrame(() => {
+		symbolChooserWindowFramePending = false;
+		renderSymbolChooserWindow();
+	});
+}
+
+/** Full rebuild: re-filters, re-flattens, resizes the spacer to the new
+ *  total height, and resets scroll to top (matches the old behavior, where
+ *  a fresh filter keystroke's replaceChildren() implicitly did the same). */
+function renderSymbolChooserList(): void {
+	const query = symbolChooserFilterEl.value.trim().toLowerCase();
+	const filtered = symbolChooserRows.filter(item => {
+		const haystack = `${item.summary.name} ${item.summary.value} ${item.summary.description} ${item.summary.keywords} ${item.file.relativePath}`.toLowerCase();
+		return !query || haystack.includes(query);
+	});
+	buildSymbolChooserFlatItems(filtered);
+	if (!symbolChooserListInnerEl) {
+		symbolChooserListEl.replaceChildren();
+		symbolChooserListInnerEl = document.createElement('div');
+		symbolChooserListInnerEl.style.position = 'relative';
+		symbolChooserListEl.appendChild(symbolChooserListInnerEl);
+	}
+	symbolChooserListInnerEl.style.height = `${totalSymbolChooserHeight()}px`;
+	symbolChooserListEl.scrollTop = 0;
+	renderSymbolChooserWindow();
+}
+symbolChooserListEl.addEventListener('scroll', scheduleSymbolChooserWindowRender);
+
+async function openSymbolChooser(): Promise<void> {
+	try {
+		const files = await symbolLibraryCache.getFiles();
+		symbolChooserRows = files.flatMap(file => file.symbols.map(summary => ({ file, summary, libId: symbolLibraryId(file, summary) })));
+		pendingSymbol = symbolChooserRows[0] ?? null;
+		symbolChooserTitleEl.textContent = `Choose Symbol (${symbolChooserRows.length} items loaded)`;
+		symbolChooserFilterEl.value = '';
+		// Show the modal BEFORE building the list — renderSymbolChooserList's
+		// virtual-scroll math reads symbolChooserListEl.clientHeight, which is
+		// 0 while the modal is still display:none, so the list built while
+		// hidden sized its window for a 0-height viewport and needed a scroll
+		// event (any clientHeight-dependent recompute) before anything showed.
+		symbolChooserEl.classList.remove('hidden');
+		renderSymbolChooserList();
+		void renderSymbolChooserPreview(pendingSymbol);
+		symbolChooserFilterEl.focus();
+	}
+	catch (error) {
+		setStatus(error instanceof Error ? error.message : String(error));
+	}
+}
+
+function closeSymbolChooser(): void {
+	symbolChooserEl.classList.add('hidden');
+	pendingSymbol = null;
+}
+
+/** Places one unit of the current library symbol at `x,y` under `reference`
+ *  (a fresh reference when null). Shared by both the bulk ("Place all
+ *  units", stacking every unit under one click) and sequential ("click
+ *  again for the next unit") flows below. */
+function placeSymbolUnit(item: PendingSymbol, source: string, x: number, y: number, unit: number, reference: string | null): string | null {
+	return session!.addLibrarySymbolFromText(source, item.summary.name, x, y, item.libId, unit, reference ?? undefined);
+}
+
+/** Vertical spacing between bulk-stacked units — generous enough to clear a
+ *  typical gate symbol's bounding box (a few pin-pitches tall) without
+ *  measuring each unit's real extent, which would need a full throwaway
+ *  render per unit just to lay out one click's worth of placement. The user
+ *  can drag units apart afterward if a particular symbol needs more room. */
+const BULK_UNIT_SPACING_MM = 12.7;
+
+async function beginPendingSymbolPlacement(anchor: Vec2): Promise<void> {
+	const item = pendingSymbol;
+	if (!item || !session) return;
+	try {
+		setStatus(`Loading ${item.summary.name}…`);
+		const source = await symbolLibraryCache.readCachedFile(item.file.id);
+
+		// Continuing a sequential multi-unit placement: same libId as the
+		// in-progress state means this click is "the next unit", not a fresh
+		// symbol. Any mismatch (different symbol picked mid-sequence, or no
+		// state at all) starts over at unit 1 with a new reference.
+		const continuing = pendingUnitState?.libId === item.libId ? pendingUnitState : null;
+
+		if (continuing) {
+			const reference = placeSymbolUnit(item, source, anchor.x, anchor.y, continuing.nextUnit, continuing.reference);
+			if (!reference) throw new Error(`Could not place ${item.summary.name}.`);
+			lastFullSch = session.getSchematicText() || lastFullSch;
+			selectedRef = reference;
+			finishOrAdvanceUnit(item, reference, continuing.nextUnit, continuing.totalUnits);
+			return;
+		}
+
+		const totalUnits = session.getLibrarySymbolUnitCount(source, item.summary.name);
+
+		if (totalUnits > 1 && symbolAllUnitsEl.checked) {
+			let reference: string | null = null;
+			for (let unit = 1; unit <= totalUnits; unit++) {
+				reference = placeSymbolUnit(item, source, anchor.x, anchor.y + BULK_UNIT_SPACING_MM * (unit - 1), unit, reference);
+				if (!reference) throw new Error(`Could not place ${item.summary.name}.`);
+			}
+			lastFullSch = session.getSchematicText() || lastFullSch;
+			selectedRef = reference;
+			setStatus(`Placed ${item.summary.name} (${totalUnits} units) as ${reference}. Click to place another or Esc to stop.`);
+			if (!symbolRepeatCopiesEl.checked) {
+				pendingSymbol = null;
+				setEditTool('select');
+			}
+			return;
+		}
+
+		const reference = placeSymbolUnit(item, source, anchor.x, anchor.y, 1, null);
+		if (!reference) throw new Error(`Could not place ${item.summary.name}.`);
+		lastFullSch = session.getSchematicText() || lastFullSch;
+		selectedRef = reference;
+		finishOrAdvanceUnit(item, reference, 1, totalUnits);
+	}
+	catch (error) {
+		setStatus(error instanceof Error ? error.message : String(error));
+		setEditTool('select');
+		pendingUnitState = null;
+	}
+}
+
+/** Shared tail for both the "just placed unit 1 of N" and "just placed unit
+ *  K of N while continuing" cases: either arm pendingUnitState for the next
+ *  unit, or clear it and fall through to the ordinary single-symbol
+ *  completion (repeat-copies check + status message). */
+function finishOrAdvanceUnit(item: PendingSymbol, reference: string, placedUnit: number, totalUnits: number): void {
+	if (totalUnits > 1 && placedUnit < totalUnits) {
+		pendingUnitState = { libId: item.libId, reference, nextUnit: placedUnit + 1, totalUnits };
+		setStatus(`Placed ${item.summary.name} unit ${placedUnit}/${totalUnits} as ${reference}. Click to place unit ${placedUnit + 1} or Esc to stop.`);
+		return;
+	}
+	pendingUnitState = null;
+	setStatus(`Placed ${item.summary.name}${totalUnits > 1 ? ` (${totalUnits} units)` : ''} as ${reference}. Click to place another or Esc to stop.`);
+	if (!symbolRepeatCopiesEl.checked) {
+		pendingSymbol = null;
+		setEditTool('select');
+	}
+}
+
+symbolChooserFilterEl.addEventListener('input', renderSymbolChooserList);
+symbolChooserListEl.addEventListener('click', event => {
+	const row = (event.target as HTMLElement).closest<HTMLElement>('.symbol-chooser-row');
+	if (!row?.dataset.fileId || !row.dataset.symbolName) return;
+	const fileId = row.dataset.fileId;
+	const symbolName = row.dataset.symbolName;
+	pendingSymbol = symbolChooserRows.find(item => item.file.id === fileId && item.summary.name === symbolName) ?? null;
+	// Repaint the window only (moves .selected) — NOT the full list rebuild,
+	// which would reset scroll to top on every single row click.
+	renderSymbolChooserWindow();
+	void renderSymbolChooserPreview(pendingSymbol);
+});
+/** Cancel/Close/Escape all fully abandon placement (back to select) — unlike
+ *  closeSymbolChooser() alone, which the OK handler below also uses but
+ *  deliberately does NOT revert the tool, since OK's whole point is to
+ *  proceed with placing. */
+function cancelSymbolPlacement(): void {
+	closeSymbolChooser();
+	pendingSymbolAnchor = null;
+	setEditTool('select');
+}
+symbolChooserCancelEl.addEventListener('click', cancelSymbolPlacement);
+symbolChooserCloseEl.addEventListener('click', cancelSymbolPlacement);
+symbolChooserOkEl.addEventListener('click', () => {
+	if (!pendingSymbol) return;
+	const item = pendingSymbol;
+	closeSymbolChooser();
+	pendingSymbol = item;
+	if (pendingSymbolAnchor) {
+		const anchor = pendingSymbolAnchor;
+		pendingSymbolAnchor = null;
+		void beginPendingSymbolPlacement(anchor);
+	}
+	else {
+		// Defensive fallback only — every current entry point into the
+		// chooser sets pendingSymbolAnchor via a canvas click first.
+		setEditTool('place-symbol');
+		setStatus(`Click to place ${item.summary.name}.`);
+	}
+});
+
 function updateEditSidebar(): void {
 	if (!session || mode !== 'edit') return;
+	// session.selection degrades to null for BOTH "0 selected" and "2+
+	// selected" (see its own doc comment) — handle the multi-item case
+	// first so it doesn't fall into the "No objects selected" branch below,
+	// which would be actively misleading for a real multi-selection.
+	if (session.selectionIds.size > 1) {
+		const items = (session.activeScene?.hitTestItems ?? []).filter(item => session!.selectionIds.has(item.id));
+		const names = new Set(items.map(item => (item as any).element?.name));
+		const [onlyName] = names;
+		if (items.length > 0 && names.size === 1 && onlyName && MULTI_EDIT_NAMES.has(onlyName)) {
+			renderMultiProperties(onlyName, items.map(item => (item as any).element), items.map(item => item.id));
+		}
+		else {
+			editPropertiesEl.textContent = `${session.selectionIds.size} objects selected`;
+		}
+		return;
+	}
 	const selected = session.selection;
 	if (!selected) {
 		editPropertiesEl.textContent = 'No objects selected';
@@ -361,11 +963,39 @@ function snap(n: number): number {
 	return Math.round(n / PLACE_GRID) * PLACE_GRID;
 }
 
+/** Rectangle-select AND single-item-click modifier semantics — matches real
+ *  KiCad's own drag-select mapping exactly (SELECTION_TOOL::setModifiersState,
+ *  common/tool/selection_tool.cpp), confirmed against the user's local KiCad
+ *  checkout and against the user directly: Shift alone or Ctrl alone both
+ *  ADD (not "ctrl subtracts", which is a common but incorrect assumption);
+ *  only Ctrl+Shift together subtracts. Applied uniformly to single-item
+ *  clicks too for consistency, even though real KiCad's own plain-click Ctrl
+ *  behavior differs from its drag behavior (a toggle, not a plain add) —
+ *  deliberately not porting that click-specific nuance here. */
+function rectSelectionModeFromModifiers(e: MouseEvent): 'replace' | 'add' | 'subtract' {
+	if (e.shiftKey && e.ctrlKey) return 'subtract';
+	if (e.shiftKey || e.ctrlKey) return 'add';
+	return 'replace';
+}
+
 let statusBarFramePending = false;
 let pendingStatusScreenPos: Vec2 | undefined;
 let lastStatusCoord = '';
-let lastStatusGrid = '';
 let lastStatusZoom = '';
+
+/** #grid-select IS the grid display now (its selected option shows the
+ *  current value) — no separate text label to keep in sync, unlike the
+ *  coord/zoom fields below which have no interactive counterpart. */
+function setGridSpacing(mm: number): void {
+	PLACE_GRID = mm;
+	session?.setGridSpacing(mm);
+}
+gridSelectEl.addEventListener('change', () => {
+	const mm = Number(gridSelectEl.value);
+	if (Number.isFinite(mm) && mm > 0) {
+		setGridSpacing(mm);
+	}
+});
 
 function updateStatusBar(screenPos?: Vec2): void {
 	pendingStatusScreenPos = screenPos ?? pendingStatusScreenPos;
@@ -376,10 +1006,8 @@ function updateStatusBar(screenPos?: Vec2): void {
 		const s = session;
 		const world = s && pendingStatusScreenPos ? s.screenToWorld(pendingStatusScreenPos) : null;
 		const coord = world ? `X: ${world.x.toFixed(2)}  Y: ${world.y.toFixed(2)}` : lastStatusCoord;
-		const grid = `Grid: ${PLACE_GRID.toFixed(2)} mm`;
 		const zoom = `Zoom: ${s && Number.isFinite(s.camera.zoom) ? `${s.camera.zoom.toFixed(2)}×` : '—'}`;
 		if (coord !== lastStatusCoord) { coordStatusEl.textContent = coord; lastStatusCoord = coord; }
-		if (grid !== lastStatusGrid) { gridStatusEl.textContent = grid; lastStatusGrid = grid; }
 		if (zoom !== lastStatusZoom) { zoomStatusEl.textContent = zoom; lastStatusZoom = zoom; }
 	});
 }
@@ -513,6 +1141,11 @@ function ensureSession(): KicadRenderSession {
 	if (!session) {
 		session = new KicadRenderSession(canvas, null);
 		session.onError = (err) => setStatus(err instanceof Error ? err.message : String(err));
+		// Matches FINE_GRID_MM's default exactly, but stay explicit rather
+		// than relying on that coincidence — the user may have already
+		// changed #grid-select before any session existed (e.g. before
+		// opening a file).
+		session.setGridSpacing(PLACE_GRID);
 	}
 	return session;
 }
@@ -637,6 +1270,7 @@ function setMode(next: AppMode): void {
 	toolPanel.classList.toggle('hidden', next !== 'edit');
 	mainEl.classList.toggle('edit-mode', next === 'edit');
 	if (next !== 'edit') {
+		closeSymbolChooser();
 		resetEditToolState();
 	}
 
@@ -671,6 +1305,7 @@ async function loadTextIntoSession(text: string, kind: 'schematic' | 'board', fi
 	// open before. (undo()/redo() themselves call the session's own
 	// loadSchematicText directly, bypassing this wrapper, so they never hit this.)
 	s.resetUndoHistory();
+	lastPointerWorld = null;
 	if (kind === 'board') {
 		await s.loadBoardText(text);
 		placements = [];
@@ -866,11 +1501,58 @@ function restoreSelection(): void {
 		return;
 	}
 	const items = session.activeScene?.hitTestItems ?? [];
-	const hit = items.find(item =>
-		(item as { kind?: string; refDesignator?: string }).kind === 'symbol'
-		&& (item as { refDesignator?: string }).refDesignator === selectedRef
-	);
+	// Prefer the exact paint id in edit mode (always set alongside
+	// selectedRef there) — several instances can share one Reference for a
+	// multi-unit part, so matching by refDesignator alone would silently
+	// restore selection to a DIFFERENT unit than the one actually selected.
+	// Circuit mode never sets editSelectedId, so it always takes the
+	// refDesignator path below, unchanged (its placements are reference-
+	// unique on their own — no multi-unit concept there).
+	const hit = (mode === 'edit' && editSelectedId)
+		? items.find(item => item.id === editSelectedId)
+		: items.find(item =>
+			(item as { kind?: string; refDesignator?: string }).kind === 'symbol'
+			&& (item as { refDesignator?: string }).refDesignator === selectedRef
+		);
 	session.select(hit?.id ?? null);
+}
+
+/** Re-derives editSelectedId/editSelectedKind/selectedRef from whatever
+ *  session.selection resolves to after any multi-select-capable mutation
+ *  (rect-select commit, a modifier-click, Delete on a multi-selection). The
+ *  singular-degrade getter (null for 0 or 2+ selected) means a selection
+ *  that happens to collapse to exactly one item re-arms Rotate/Tidy/Delete/
+ *  the property sidebar for it automatically, with no special-casing —
+ *  they already only ever look at these single-item variables. */
+function syncSingleSelectionBookkeeping(s: KicadRenderSession): void {
+	const sole = s.selection;
+	const item = sole ? s.activeScene?.hitTestItems.find(it => it.id === sole) : undefined;
+	editSelectedId = sole;
+	editSelectedKind = item?.kind ?? null;
+	selectedRef = (item?.kind === 'symbol' && item.refDesignator) ? item.refDesignator : null;
+}
+
+/** Copy/Cut/Duplicate scope filter: sheets and sheet pins are excluded —
+ *  a sheet carries hierarchical-file/page-numbering implications beyond
+ *  this app's single-file edit scope, and a cloned sheet pin without its
+ *  specific parent sheet is meaningless. Every other kind (including
+ *  symbols) is fine to copy/duplicate freely. */
+function copyableIds(s: KicadRenderSession, ids: string[]): string[] {
+	const hitItems = s.activeScene?.hitTestItems ?? [];
+	return ids.filter(id => {
+		const it = hitItems.find(h => h.id === id);
+		return !!it && it.kind !== 'sheet' && !(it.kind === 'label' && (it as any).labelKind === 'sheet-pin');
+	});
+}
+
+/** Cut's scope is copyableIds further minus symbols — matches the Delete
+ *  handler's existing "symbols aren't deletable in edit mode" rule. Cut
+ *  never copies-then-leaves a symbol behind: since it can't delete one, it
+ *  skips copying it too, so a later Paste can't silently duplicate what
+ *  looked like a "moved" item. */
+function cuttableIds(s: KicadRenderSession, ids: string[]): string[] {
+	const hitItems = s.activeScene?.hitTestItems ?? [];
+	return copyableIds(s, ids).filter(id => hitItems.find(h => h.id === id)?.kind !== 'symbol');
 }
 
 function beginSymbolDrag(ref: string, screenPos: Vec2): void {
@@ -899,20 +1581,65 @@ function beginSymbolDrag(ref: string, screenPos: Vec2): void {
 
 /** Edit mode's select-tool symbol drag start — sources the pose directly
  *  from the live AST, unlike circuit mode's placements-array-backed variant
- *  (edit mode never touches placements/pinNets — it's not net-aware). */
-function beginEditSymbolDrag(ref: string, screenPos: Vec2): void {
+ *  (edit mode never touches placements/pinNets — it's not net-aware).
+ *  `instanceId` (the hit paint id) disambiguates which unit of a multi-unit
+ *  part to move — see dragInstanceId's own doc comment. */
+function beginEditSymbolDrag(ref: string, instanceId: string, screenPos: Vec2): void {
 	if (!session) {
 		return;
 	}
-	const pose = session.getSymbolPose(ref);
+	const pose = session.getSymbolPose(ref, instanceId);
 	if (!pose) {
 		return;
 	}
 	const world = session.screenToWorld(screenPos);
 	dragRef = ref;
+	dragInstanceId = instanceId;
 	dragMoved = false;
 	dragStartPose = { x: pose.x, y: pose.y, rotation: pose.rotation };
 	dragOffset = new Vec2(world.x - pose.x, world.y - pose.y);
+}
+
+/** Select-tool sheet drag start — mirrors beginEditSymbolDrag exactly, just
+ *  sourced from the sheet's own element (no ref-designator lookup; sheets
+ *  aren't reference-numbered) and with rotation always 0 (see
+ *  KicadElementSheet's doc comment — sheets have no rotation concept). */
+function beginSheetDrag(paintId: string, screenPos: Vec2): void {
+	if (!session) {
+		return;
+	}
+	const item = session.activeScene?.hitTestItems.find(it => it.id === paintId);
+	const sheet = (item as { element?: any } | undefined)?.element;
+	if (!sheet || typeof sheet.getPosition !== 'function') {
+		return;
+	}
+	const pos = sheet.getPosition();
+	const world = session.screenToWorld(screenPos);
+	dragSheetId = paintId;
+	dragMoved = false;
+	dragStartPose = { x: pos.x, y: pos.y, rotation: 0 };
+	dragOffset = new Vec2(world.x - pos.x, world.y - pos.y);
+}
+
+/** Select-tool sheet-PIN drag start — same shape as beginSheetDrag, sourced
+ *  from the pin's own current position (moveSheetPinById re-derives which
+ *  edge it belongs to fresh on every mousemove, so only the starting grab
+ *  offset needs capturing here). */
+function beginSheetPinDrag(paintId: string, screenPos: Vec2): void {
+	if (!session) {
+		return;
+	}
+	const item = session.activeScene?.hitTestItems.find(it => it.id === paintId);
+	const pin = (item as { element?: any } | undefined)?.element;
+	if (!pin || typeof pin.getOrigin !== 'function') {
+		return;
+	}
+	const pos = pin.getOrigin();
+	const world = session.screenToWorld(screenPos);
+	dragSheetPinId = paintId;
+	dragMoved = false;
+	dragStartPose = { x: pos.x, y: pos.y, rotation: pos.rotation ?? 0 };
+	dragOffset = new Vec2(world.x - pos.x, world.y - pos.y);
 }
 
 async function rotateSelected(): Promise<void> {
@@ -920,14 +1647,15 @@ async function rotateSelected(): Promise<void> {
 		return;
 	}
 	if (mode === 'edit') {
-		const pose = session.getSymbolPose(selectedRef);
+		const instanceId = editSelectedId ?? undefined;
+		const pose = session.getSymbolPose(selectedRef, instanceId);
 		if (!pose) {
 			setStatus('Nothing selected to rotate — click a symbol first.');
 			return;
 		}
 		session.pushUndoSnapshot();
 		const newRotation = (pose.rotation + 90) % 360;
-		session.moveSymbolByRef(selectedRef, pose.x, pose.y, newRotation);
+		session.moveSymbolByRef(selectedRef, pose.x, pose.y, newRotation, instanceId);
 		lastFullSch = session.getSchematicText() || lastFullSch;
 		setStatus(`Rotated ${selectedRef} to ${newRotation}°.`);
 		return;
@@ -971,6 +1699,61 @@ function downloadSchematic(): void {
 	setStatus('Downloaded schematic.');
 }
 
+/** Convert a browser Blob into the binary-string payload used by KiCad's
+ * `(data ...)` element. Only formats understood by the existing schematic
+ * renderer are accepted; this keeps unsupported clipboard formats from
+ * creating an AST object that renders as a blank rectangle. */
+async function readEmbeddedImage(blob: Blob): Promise<EmbeddedImagePayload> {
+	const bytes = new Uint8Array(await blob.arrayBuffer());
+	const isPng = bytes.length >= 8
+		&& bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47
+		&& bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a;
+	const isJpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+	const isGif = bytes.length >= 6
+		&& bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46
+		&& (bytes[3] === 0x38 && (bytes[4] === 0x37 || bytes[4] === 0x39) && bytes[5] === 0x61);
+	const mimeType: EmbeddedImagePayload['mimeType'] | null = isPng
+		? 'image/png'
+		: isJpeg
+			? 'image/jpeg'
+			: isGif ? 'image/gif' : null;
+	if (mimeType !== 'image/png' && mimeType !== 'image/jpeg' && mimeType !== 'image/gif') {
+		throw new Error('Only PNG, JPEG, and GIF images are supported.');
+	}
+	let data = '';
+	const chunkSize = 0x8000;
+	for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+		data += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)));
+	}
+	return { data, mimeType };
+}
+
+function insertImageAt(payload: EmbeddedImagePayload, anchor: Vec2): boolean {
+	if (mode !== 'edit' || !session || session.documentTypeLoaded !== 'schematic') {
+		setStatus('Open a schematic in Edit mode before inserting an image.');
+		return false;
+	}
+	const id = session.addGraphicImage(anchor.x, anchor.y, payload.data, payload.mimeType);
+	if (!id) {
+		setStatus('Could not insert image.');
+		return false;
+	}
+	lastFullSch = session.getSchematicText() || lastFullSch;
+	session.select(id);
+	editSelectedId = id;
+	editSelectedKind = 'image';
+	setStatus('Added image.');
+	updateEditSidebar();
+	return true;
+}
+
+function startImageInsertion(): void {
+	setEditTool('image');
+	pendingImagePayload = null;
+	imageInput.value = '';
+	imageInput.click();
+}
+
 function screenPosFromEvent(e: MouseEvent): Vec2 {
 	const rect = canvas.getBoundingClientRect();
 	const x = (e.clientX - rect.left) * (canvas.width / Math.max(1, rect.width));
@@ -986,7 +1769,19 @@ for (const btn of editToolButtons) {
 	btn.addEventListener('click', () => {
 		const tool = btn.dataset.tool as EditTool | undefined;
 		if (tool) {
-			setEditTool(tool);
+			if (tool === 'image') {
+				startImageInsertion();
+			}
+			else if (tool === 'place-symbol') {
+				// Arm only — the chooser opens on the first canvas click (see
+				// handleEditModeMouseDown's place-symbol branch), not here, so
+				// the user can see where the symbol will land before picking one.
+				setEditTool('place-symbol');
+				setStatus('Click on canvas to choose where to place a symbol.');
+			}
+			else {
+				setEditTool(tool);
+			}
 		}
 	});
 }
@@ -1115,6 +1910,33 @@ document.getElementById('symbol-input')!.addEventListener('change', async (e) =>
 	updateCircuitHint();
 });
 
+imageInput.addEventListener('change', async () => {
+	const file = imageInput.files?.[0];
+	if (!file) {
+		return;
+	}
+	try {
+		pendingImagePayload = await readEmbeddedImage(file);
+		setEditTool('image');
+		setStatus(`Image loaded (${file.name}) — click the schematic to place it.`);
+	}
+	catch (err) {
+		pendingImagePayload = null;
+		setStatus(err instanceof Error ? err.message : String(err));
+	}
+});
+
+indexSymbolsButton.addEventListener('click', () => {
+		void chooseSymbolDirectory();
+});
+
+symbolDirectoryInput.addEventListener('change', () => {
+	const files = symbolDirectoryInput.files;
+	if (files?.length) {
+		void indexFallbackDirectory(files);
+	}
+});
+
 document.getElementById('btn-place')!.addEventListener('click', () => runPlace());
 document.getElementById('btn-autowire')!.addEventListener('click', () => {
 	session?.pushUndoSnapshot();
@@ -1136,10 +1958,17 @@ canvas.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 canvas.addEventListener('mousedown', (e) => {
-	// A click that's just dismissing the open context menu shouldn't ALSO
-	// act on whatever's underneath it (place/select/pan) — swallow it here;
-	// the window 'click' listener still runs afterward and closes the menu.
-	if (!contextMenuEl.classList.contains('hidden')) {
+	// A click that's just dismissing an open modal/menu shouldn't ALSO act on
+	// whatever's underneath it (place/select/pan) — swallow it here. This
+	// gap was a real, live bug for the symbol chooser specifically: with
+	// place-symbol now opening the chooser reactively (from a canvas click),
+	// a SECOND canvas click landing while it's still open would otherwise
+	// reach handleEditModeMouseDown's place-symbol branch and — since
+	// openSymbolChooser() auto-selects the first row into pendingSymbol as
+	// soon as it resolves — silently place whatever that first row happened
+	// to be, ignoring the modal entirely. The window 'click' listener still
+	// runs afterward for the ones that use click-outside-to-close.
+	if (!contextMenuEl.classList.contains('hidden') || !propertiesModalEl.classList.contains('hidden') || !symbolChooserEl.classList.contains('hidden')) {
 		return;
 	}
 	const s = ensureSession();
@@ -1190,6 +2019,7 @@ function onPointerMove(e: MouseEvent): void {
 	const s = session;
 	if (!s) return;
 	const pos = screenPosFromEvent(e);
+	lastPointerWorld = s.screenToWorld(pos);
 	updateStatusBar(pos);
 
 	if (mode === 'edit' && editTool !== 'select') {
@@ -1228,6 +2058,34 @@ function onPointerMove(e: MouseEvent): void {
 		}
 		return;
 	}
+	if (mode === 'edit' && rectSelectDrag) {
+		const worldPos = s.screenToWorld(pos);
+		if (!dragMoved && Math.hypot(pos.x - rectSelectDrag.originScreen.x, pos.y - rectSelectDrag.originScreen.y) > RECT_SELECT_MOVE_THRESHOLD_PX) {
+			dragMoved = true;
+		}
+		const boxMode: 'contained' | 'touching' = worldPos.x >= rectSelectDrag.originWorld.x ? 'contained' : 'touching';
+		s.setEditPreview({
+			kind: 'selection-box', origin: rectSelectDrag.originWorld, cursor: worldPos,
+			mode: boxMode, selectMode: rectSelectionModeFromModifiers(e),
+		});
+		return;
+	}
+	if (mode === 'edit' && groupDrag) {
+		const worldPos = s.screenToWorld(pos);
+		const snapped = new Vec2(snap(worldPos.x), snap(worldPos.y));
+		const dx = snapped.x - groupDrag.lastSnapped.x;
+		const dy = snapped.y - groupDrag.lastSnapped.y;
+		if (dx !== 0 || dy !== 0) {
+			if (!dragUndoCaptured) {
+				s.pushUndoSnapshot('Group drag');
+				dragUndoCaptured = true;
+			}
+			s.translateSelection([...s.selectionIds], dx, dy);
+			groupDrag.lastSnapped = snapped;
+			dragMoved = true;
+		}
+		return;
+	}
 	if (dragLabelId) {
 		const worldPos = s.screenToWorld(pos);
 		const nx = snap(worldPos.x - dragOffset.x);
@@ -1236,6 +2094,34 @@ function onPointerMove(e: MouseEvent): void {
 			dragMoved = true;
 		}
 		s.moveLabelById(dragLabelId, nx, ny, dragStartPose?.rotation ?? 0);
+		return;
+	}
+	if (dragSheetId) {
+		const worldPos = s.screenToWorld(pos);
+		const nx = snap(worldPos.x - dragOffset.x);
+		const ny = snap(worldPos.y - dragOffset.y);
+		if (dragStartPose && (nx !== dragStartPose.x || ny !== dragStartPose.y)) {
+			dragMoved = true;
+		}
+		if (dragMoved && !dragUndoCaptured) {
+			s.pushUndoSnapshot('Sheet drag');
+			dragUndoCaptured = true;
+		}
+		s.moveSheetById(dragSheetId, nx, ny);
+		return;
+	}
+	if (dragSheetPinId) {
+		const worldPos = s.screenToWorld(pos);
+		const nx = snap(worldPos.x - dragOffset.x);
+		const ny = snap(worldPos.y - dragOffset.y);
+		if (dragStartPose && (nx !== dragStartPose.x || ny !== dragStartPose.y)) {
+			dragMoved = true;
+		}
+		if (dragMoved && !dragUndoCaptured) {
+			s.pushUndoSnapshot('Sheet pin drag');
+			dragUndoCaptured = true;
+		}
+		s.moveSheetPinById(dragSheetPinId, nx, ny);
 		return;
 	}
 	if (dragRef) {
@@ -1251,7 +2137,7 @@ function onPointerMove(e: MouseEvent): void {
 				s.pushUndoSnapshot('Symbol drag');
 				dragUndoCaptured = true;
 			}
-			s.moveSymbolByRef(dragRef, nx, ny, dragStartPose?.rotation ?? 0);
+			s.moveSymbolByRef(dragRef, nx, ny, dragStartPose?.rotation ?? 0, dragInstanceId ?? undefined);
 			return;
 		}
 		const placement = placements.find(p => p.ref === dragRef);
@@ -1272,28 +2158,61 @@ function onPointerMove(e: MouseEvent): void {
 	dragStart = pos;
 }
 
-function onPointerUp(): void {
+function onPointerUp(e: MouseEvent): void {
 	const finishingSym = dragRef;
 	const finishingLabel = dragLabelId;
 	const finishingEditDrag = editDragId;
 	const finishingResize = resizeDrag;
 	const finishingCurve = curveDrag;
+	const finishingSheet = dragSheetId;
+	const finishingSheetPin = dragSheetPinId;
+	const finishingRectSelect = rectSelectDrag;
+	const finishingGroupDrag = groupDrag;
 	const moved = dragMoved;
 	dragRef = null;
+	dragInstanceId = null;
 	dragLabelId = null;
 	editDragId = null;
 	editDragLastPos = null;
 	resizeDrag = null;
 	curveDrag = null;
+	dragSheetId = null;
+	dragSheetPinId = null;
+	rectSelectDrag = null;
+	groupDrag = null;
 	draggingPan = false;
 	// Any symbol OR global/hier label move → full net-locked rewire (the single
 	// edit path; the moved label/rail is preserved and wires re-route to it).
 	if (mode === 'circuit' && circuitDragMode && (finishingSym || finishingLabel) && moved) {
 		void commitReroute('autoroute');
 	}
-	else if (mode === 'edit' && (finishingSym || finishingEditDrag || finishingResize || finishingCurve) && moved && session) {
-		// Manual move, no rewire — just persist the mutated AST text.
+	else if (mode === 'edit' && (finishingSym || finishingEditDrag || finishingResize || finishingCurve || finishingSheet || finishingSheetPin || finishingGroupDrag) && moved && session) {
+		// Manual move, no rewire — just persist the mutated AST text. Covers
+		// group-drag too: translateSelection already applied every step's
+		// delta live during the drag, same as every other kind here — this
+		// branch only needs to persist the final text once.
 		lastFullSch = session.getSchematicText() || lastFullSch;
+	}
+	else if (mode === 'edit' && finishingRectSelect && session) {
+		const s = session;
+		if (moved) {
+			const worldPos = s.screenToWorld(screenPosFromEvent(e));
+			const boxMode: 'contained' | 'touching' = worldPos.x >= finishingRectSelect.originWorld.x ? 'contained' : 'touching';
+			const hitIds = s.hitTestRect(finishingRectSelect.originWorld, worldPos, boxMode);
+			// A box that touches just one member of a group still pulls in
+			// every other member — grouped items behave as one unit for
+			// rect-select the same way a plain click on one does below.
+			s.selectMultiple(s.expandGroupSelection(hitIds), rectSelectionModeFromModifiers(e));
+		}
+		else if (!e.shiftKey && !e.ctrlKey) {
+			s.select(null);
+		}
+		// else: modifier held, nothing dragged, nothing hit — no-op, matches
+		// real KiCad's degenerate zero-size-box behavior (adds/subtracts
+		// nothing rather than clobbering an accumulated selection).
+		syncSingleSelectionBookkeeping(s);
+		s.setEditPreview(null);
+		dbg('rect-select commit', { moved, ids: [...s.selectionIds] });
 	}
 	dragMoved = false;
 	dragUndoCaptured = false;
@@ -1315,6 +2234,11 @@ canvas.addEventListener('dblclick', (event) => {
 		const hit = ensureSession().hitTestAtScreen(screenPosFromEvent(event));
 		if (hit?.kind === 'table') {
 			showTableEditModal(hit.id);
+			event.preventDefault();
+			return;
+		}
+		if (hit) {
+			showPropertiesModal(hit.id);
 			event.preventDefault();
 			return;
 		}
@@ -1399,8 +2323,43 @@ window.addEventListener('keydown', (e) => {
 		void performRedo();
 		return;
 	}
+	// Matches real KiCad's own zoomFitScreen hotkey exactly (common/tool/
+	// actions.cpp) — works in every mode, same as undo/redo above, since
+	// "see the whole thing" is a navigation action, not an edit-mode one.
+	if (e.key === 'Home' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+		e.preventDefault();
+		session?.fitSchematicContent();
+		return;
+	}
 
 	if (mode === 'edit') {
+		// Copy/Cut/Paste/Duplicate — gated on editTool === 'select' the same
+		// way Delete/Backspace below already is, so none of these interfere
+		// with an in-progress multi-click gesture (wire chain, shape anchor,
+		// …) in some other tool. Bare c/x/d are already tool hotkeys
+		// (circle/no-connect/…) but those are ALL gated on no-modifiers, so
+		// there's no collision with the Ctrl-chorded versions here.
+		if (editTool === 'select' && session && (e.key === 'c' || e.key === 'C') && (e.ctrlKey || e.metaKey) && session.selectionIds.size > 0) {
+			e.preventDefault();
+			const count = copySelectionToClipboard(session, copyableIds(session, [...session.selectionIds]));
+			setStatus(`Copied ${count} item(s).`);
+			return;
+		}
+		if (editTool === 'select' && session && (e.key === 'x' || e.key === 'X') && (e.ctrlKey || e.metaKey) && session.selectionIds.size > 0) {
+			e.preventDefault();
+			cutSelectionToClipboard(session);
+			return;
+		}
+		if (editTool === 'select' && session && (e.key === 'v' || e.key === 'V') && (e.ctrlKey || e.metaKey)) {
+			e.preventDefault();
+			void pasteAtWorld(session, lastPointerWorld ?? new Vec2(session.camera.center.x, session.camera.center.y));
+			return;
+		}
+		if (editTool === 'select' && session && (e.key === 'd' || e.key === 'D') && (e.ctrlKey || e.metaKey) && session.selectionIds.size > 0) {
+			e.preventDefault();
+			duplicateSelectedElements(session);
+			return;
+		}
 		// Tool-switch hotkeys. R/T are already rotate/tidy below, so Rect and
 		// Text stay button-only (no letter available without a collision).
 		const hotkeyTool = EDIT_TOOL_HOTKEYS[e.key.toLowerCase()];
@@ -1410,7 +2369,16 @@ window.addEventListener('keydown', (e) => {
 			return;
 		}
 		if (e.key === 'Escape') {
-			if (!contextMenuEl.classList.contains('hidden')) {
+			if (!symbolChooserEl.classList.contains('hidden') || editTool === 'place-symbol') {
+				// Covers both the chooser being open AND the armed-but-not-
+				// yet-clicked state (tool active, modal not open yet) —
+				// cancelSymbolPlacement handles either safely.
+				cancelSymbolPlacement();
+			}
+			else if (!propertiesModalEl.classList.contains('hidden')) {
+				closePropertiesModal();
+			}
+			else if (!contextMenuEl.classList.contains('hidden')) {
 				closeContextMenu();
 			}
 			else if (lineChainStart || shapeAnchor || arcPoints.length || bezierPoints.length) {
@@ -1424,19 +2392,31 @@ window.addEventListener('keydown', (e) => {
 			}
 			return;
 		}
-		if ((e.key === 'Delete' || e.key === 'Backspace') && editTool === 'select' && editSelectedId) {
-			if (editSelectedKind === 'symbol') {
-				setStatus("Symbols aren't deletable in edit mode.");
-				return;
-			}
+		if ((e.key === 'Delete' || e.key === 'Backspace') && editTool === 'select' && session && session.selectionIds.size > 0) {
 			e.preventDefault();
-			const removed = session?.deleteElements([editSelectedId]) ?? 0;
+			const s = session;
+			const hitItems = s.activeScene?.hitTestItems ?? [];
+			const allIds = [...s.selectionIds];
+			// Symbols aren't deletable in edit mode (matches the single-select
+			// rule this replaces) — deleteElements() itself has no such guard
+			// (it's a caller-side convention only), so the filter has to happen
+			// here, not there.
+			const deletableIds = allIds.filter(id => hitItems.find(it => it.id === id)?.kind !== 'symbol');
+			const skippedSymbols = allIds.length - deletableIds.length;
+			const removed = deletableIds.length ? s.deleteElements(deletableIds) : 0;
 			if (removed) {
-				lastFullSch = session?.getSchematicText() || lastFullSch;
+				lastFullSch = s.getSchematicText() || lastFullSch;
+			}
+			if (skippedSymbols && !removed) {
+				setStatus("Symbols aren't deletable in edit mode.");
+			}
+			else if (skippedSymbols) {
+				setStatus(`Deleted ${removed} item(s); ${skippedSymbols} symbol(s) skipped (not deletable in edit mode).`);
+			}
+			else if (removed) {
 				setStatus('Deleted.');
 			}
-			editSelectedId = null;
-			editSelectedKind = null;
+			syncSingleSelectionBookkeeping(s);
 			return;
 		}
 		if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -1475,17 +2455,185 @@ function autoplaceSelectedFields(): void {
 		setStatus('Click a component first, then press T to tidy its labels.');
 		return;
 	}
-	const pose = session.getSymbolPose(selectedRef);
+	// Only meaningful in edit mode — circuit mode's placements are always
+	// reference-unique on their own (no multi-unit concept there), and
+	// editSelectedId may hold a stale id from an earlier edit-mode selection.
+	const instanceId = mode === 'edit' ? (editSelectedId ?? undefined) : undefined;
+	const pose = session.getSymbolPose(selectedRef, instanceId);
 	if (!pose) {
 		return;
 	}
 	const pins = lockedNetlist ? pinsForLockedLib(pose.libId, lockedNetlist.pinsByLib) : [];
 	const layout = symbolFieldLayout(pose.libId, pose.x, pose.y, pose.rotation, pins);
 	session.pushUndoSnapshot();
-	if (session.autoplaceSymbolFields(selectedRef, layout)) {
+	if (session.autoplaceSymbolFields(selectedRef, layout, instanceId)) {
 		lastFullSch = session.getSchematicText() || lastFullSch;
 		setStatus(`Tidied labels for ${selectedRef}.`);
 	}
+}
+
+// ---- Copy / Cut / Paste / Duplicate ----
+
+/** Copy handler shared by Ctrl+C and the context menu's Copy — stores each
+ *  copied element's source text AND its own original bbox position, so
+ *  pasteClipboardAt can preserve the copied set's relative layout instead
+ *  of stacking every pasted item at one point. Returns the count copied.
+ *
+ *  Also best-effort writes a real-KiCad-compatible text blob to the actual
+ *  OS clipboard (session.copySelectionForSystemClipboard — same shape
+ *  real KiCad's own Copy produces, confirmed against its source) so a
+ *  copy here can be pasted directly into real KiCad. Deliberately
+ *  fire-and-forget with a swallowed rejection: navigator.clipboard can be
+ *  absent (non-secure context) or throw (permission denied), and none of
+ *  that should ever break the in-app clipboard this function's caller
+ *  actually depends on. */
+function copySelectionToClipboard(s: KicadRenderSession, ids: string[]): number {
+	const copied = s.copySelectionText(ids);
+	const hitItems = s.activeScene?.hitTestItems ?? [];
+	clipboard = copied.map(({ id, sourceText }) => {
+		const bbox = hitItems.find(it => it.id === id)?.bbox;
+		return { sourceText, x: bbox?.x ?? 0, y: bbox?.y ?? 0 };
+	});
+	const systemText = s.copySelectionForSystemClipboard(ids);
+	if (systemText) {
+		void navigator.clipboard?.writeText(systemText).catch(() => { /* best-effort only */ });
+	}
+	return clipboard.length;
+}
+
+/** Cut = copy the cuttable subset of the selection, then delete exactly that
+ *  subset — reuses the Delete/Backspace handler's own "symbols aren't
+ *  deletable in edit mode" skip-count message wording/shape. Deliberately
+ *  does NOT copy-then-partially-delete the full selection: a symbol that
+ *  can't be deleted also isn't copied, so a later Paste can't silently
+ *  duplicate something that looked like it had just been "moved" out. */
+function cutSelectionToClipboard(s: KicadRenderSession): void {
+	const allIds = [...s.selectionIds];
+	const hitItems = s.activeScene?.hitTestItems ?? [];
+	const symbolCount = allIds.filter(id => hitItems.find(it => it.id === id)?.kind === 'symbol').length;
+	const ids = cuttableIds(s, allIds);
+	if (ids.length === 0) {
+		setStatus(symbolCount ? "Symbols aren't deletable in edit mode." : 'Nothing to cut.');
+		return;
+	}
+	copySelectionToClipboard(s, ids);
+	const removed = s.deleteElements(ids);
+	if (removed) {
+		lastFullSch = s.getSchematicText() || lastFullSch;
+	}
+	syncSingleSelectionBookkeeping(s);
+	setStatus(symbolCount
+		? `Cut ${removed} item(s); ${symbolCount} symbol(s) skipped (not deletable in edit mode).`
+		: `Cut ${removed} item(s).`);
+	updateEditSidebar();
+}
+
+/** Pastes the current clipboard anchored at targetWorld — the clipboard
+ *  set's own combined top-left (min x/y across every copied item) maps to
+ *  targetWorld; since every item then shares that SAME translation, each
+ *  keeps its original offset from that anchor, preserving the copied set's
+ *  relative layout instead of collapsing everything onto one point. */
+function pasteClipboardAt(s: KicadRenderSession, targetWorld: Vec2): void {
+	if (!clipboard.length) {
+		return;
+	}
+	const anchorX = Math.min(...clipboard.map(c => c.x));
+	const anchorY = Math.min(...clipboard.map(c => c.y));
+	const dx = targetWorld.x - anchorX;
+	const dy = targetWorld.y - anchorY;
+	const newIds = s.pasteElements(clipboard.map(c => ({ sourceText: c.sourceText, dx, dy })));
+	if (newIds.length === 0) {
+		return;
+	}
+	s.selectMultiple(newIds, 'replace');
+	syncSingleSelectionBookkeeping(s);
+	lastFullSch = s.getSchematicText() || lastFullSch;
+	setStatus(`Pasted ${newIds.length} item(s).`);
+	updateEditSidebar();
+}
+
+/** Entry point for every Paste gesture (Ctrl+V, context-menu Paste) — tries
+ *  the REAL OS clipboard first (session.pasteSystemClipboardText, which
+ *  understands real KiCad's own clipboard text shape) so content copied in
+ *  real KiCad pastes directly into this app; falls back to the in-app
+ *  clipboard array (pasteClipboardAt) when the OS clipboard is empty,
+ *  inaccessible, or doesn't parse as KiCad content. Since a same-app
+ *  Copy writes to BOTH the in-app array and the OS clipboard together,
+ *  this order doesn't change behavior for in-app-only copy/paste — it
+ *  only matters when the OS clipboard holds something this app didn't
+ *  itself just put there. */
+async function pasteAtWorld(s: KicadRenderSession, targetWorld: Vec2): Promise<void> {
+	let systemText: string | null = null;
+	try {
+		systemText = (await navigator.clipboard?.readText()) || null;
+	}
+	catch {
+		systemText = null;
+	}
+	if (systemText) {
+		const newIds = s.pasteSystemClipboardText(systemText, targetWorld.x, targetWorld.y);
+		if (newIds.length > 0) {
+			s.selectMultiple(newIds, 'replace');
+			syncSingleSelectionBookkeeping(s);
+			lastFullSch = s.getSchematicText() || lastFullSch;
+			setStatus(`Pasted ${newIds.length} item(s) from clipboard.`);
+			updateEditSidebar();
+			return;
+		}
+	}
+	if (clipboard.length > 0) {
+		pasteClipboardAt(s, targetWorld);
+	}
+	else {
+		setStatus('Nothing to paste.');
+	}
+}
+
+/** Duplicate (Ctrl+D / context menu) — same copyableIds scope as Copy
+ *  (sheets/sheet-pins excluded, symbols included), offset by
+ *  duplicateSelection's own small fixed default so the copies don't land
+ *  exactly on top of the originals. Selects the new items afterward. */
+function duplicateSelectedElements(s: KicadRenderSession): void {
+	const ids = copyableIds(s, [...s.selectionIds]);
+	if (ids.length === 0) {
+		return;
+	}
+	const newIds = s.duplicateSelection(ids);
+	if (newIds.length === 0) {
+		return;
+	}
+	s.selectMultiple(newIds, 'replace');
+	syncSingleSelectionBookkeeping(s);
+	lastFullSch = s.getSchematicText() || lastFullSch;
+	setStatus(`Duplicated ${newIds.length} item(s).`);
+	updateEditSidebar();
+}
+
+// ---- Group / Ungroup ----
+// Named groupSelectedElements/ungroupSelectedElements (never a bare
+// "Group"-prefixed name) to stay clear of the unrelated TOOL_GROUPS/
+// ToolGroupDef/cycleGroup/groupDrag identifiers already in this file for
+// the cyclable-toolbar-button concept (Label/Shape tool groups) — same
+// word, unrelated feature.
+
+function groupSelectedElements(s: KicadRenderSession): void {
+	const groupUuid = s.groupSelection([...s.selectionIds]);
+	if (!groupUuid) {
+		return;
+	}
+	lastFullSch = s.getSchematicText() || lastFullSch;
+	setStatus('Grouped selection.');
+	updateEditSidebar();
+}
+
+function ungroupSelectedElements(s: KicadRenderSession): void {
+	const removed = s.ungroupSelection([...s.selectionIds]);
+	if (removed === 0) {
+		return;
+	}
+	lastFullSch = s.getSchematicText() || lastFullSch;
+	setStatus(removed === 1 ? 'Ungrouped.' : `Ungrouped ${removed} group(s).`);
+	updateEditSidebar();
 }
 
 // ---- Edit mode: tool switching, text input, preview ----
@@ -1501,18 +2649,25 @@ function resetEditToolState(): void {
 	pendingTableAnchor = null;
 	pendingTableId = null;
 	tableModal.classList.add('hidden');
+	propertiesModalEl.classList.add('hidden');
 	currentLabelShape = 'input';
 	currentDirectiveLabelShape = 'round';
 	editDragId = null;
 	editDragLastPos = null;
 	resizeDrag = null;
 	curveDrag = null;
+	rectSelectDrag = null;
+	groupDrag = null;
 	hideTextInput();
 	closeContextMenu();
 	session?.setEditPreview(null);
 }
 
 function setEditTool(tool: EditTool): void {
+	if (tool !== 'place-symbol') {
+		pendingSymbol = null;
+		pendingUnitState = null;
+	}
 	editTool = tool;
 	resetEditToolState();
 	syncGroupButtonForTool(tool);
@@ -1627,6 +2782,78 @@ function showTableEditModal(id: string): void {
 	tableModal.classList.remove('hidden');
 	tableDataInput.focus();
 }
+
+/** Double-click-to-edit for every non-table kind — reuses whichever
+ *  renderXProperties() function updateEditSidebar() would already dispatch
+ *  to for this hit, just pointed at the modal body instead of the sidebar
+ *  via propertyTargetEl. Selecting first (not just reading the hit) keeps
+ *  this in lock-step with what a plain click already does, and means the
+ *  sidebar naturally shows the same element once the modal closes.
+ *
+ *  Cleared BEFORE rendering (not just checked after) so a kind with no
+ *  dedicated panel — updateEditSidebar()'s default case writes straight to
+ *  editPropertiesEl, never touching propertyTargetEl — can't leave a STALE
+ *  modal body from a previous, different double-click behind; children.length
+ *  after the render is what decides whether a real panel exists to show. */
+function showPropertiesModal(hitId: string): void {
+	const s = session;
+	if (!s) return;
+	s.select(hitId);
+	propertiesModalBodyEl.innerHTML = '';
+	propertiesModalTitleEl.textContent = 'Properties';
+	const hit = s.activeScene?.hitTestItems.find(item => item.id === hitId);
+	const element = (hit as any)?.element;
+	if (!hit || !element) {
+		return;
+	}
+	const labelKind = (hit as any).labelKind as string | undefined;
+	switch (hit.kind) {
+		case 'symbol':
+			renderSymbolDialog(element, hit.id);
+			break;
+		case 'symbol-graphic':
+			renderShapeDialog(element, hit.kind, hit.id);
+			break;
+		case 'wire':
+		case 'bus':
+			renderWireBusDialog(element, hit.kind, hit.id);
+			break;
+		case 'junction':
+			renderJunctionDialog(element, hit.id);
+			break;
+		case 'text':
+			// Same gate as updateEditSidebar's own dispatch — table cells also
+			// carry kind:'text' but have a wholly different property surface
+			// (row/col span, per-cell margins) out of scope here either way.
+			if (element.name === 'text' || element.name === 'text_box') {
+				renderTextDialog(element, hit.id);
+			}
+			break;
+		case 'label':
+			renderLabelDialog(element, labelKind, hit.id);
+			break;
+		default:
+			break;
+	}
+	if (!propertiesModalBodyEl.children.length) {
+		return;
+	}
+	propertiesModalEl.classList.remove('hidden');
+	updateUndoStackPane();
+}
+
+/** Refreshes the real sidebar on close (propertyTargetEl is already back to
+ *  editPropertiesEl by then) so it picks up whatever the modal's live edits
+ *  left behind — the fields inside commit immediately on change, same as
+ *  the sidebar's own fields, so there's nothing to "save" here. */
+function closePropertiesModal(): void {
+	propertiesModalEl.classList.add('hidden');
+	propertiesModalBodyEl.innerHTML = '';
+	updateEditSidebar();
+}
+document.getElementById('properties-modal-close')?.addEventListener('click', () => {
+	closePropertiesModal();
+});
 
 document.getElementById('table-cancel')?.addEventListener('click', () => {
 	pendingTableAnchor = null;
@@ -1884,7 +3111,59 @@ function buildPlaceSubmenu(): HTMLDivElement {
 		if (!tool) {
 			continue;
 		}
-		submenu.appendChild(menuItem(btn.title || tool, () => setEditTool(tool), btn.disabled));
+		submenu.appendChild(menuItem(btn.title || tool, () => {
+			if (tool === 'image') {
+				startImageInsertion();
+			}
+			else if (tool === 'place-symbol') {
+				setEditTool('place-symbol');
+				setStatus('Click on canvas to choose where to place a symbol.');
+			}
+			else {
+				setEditTool(tool);
+			}
+		}, btn.disabled));
+	}
+	wrap.appendChild(trigger);
+	wrap.appendChild(submenu);
+	return wrap;
+}
+
+const ALIGN_AXES: { axis: AlignAxis; label: string }[] = [
+	{ axis: 'left', label: 'Align Left' },
+	{ axis: 'right', label: 'Align Right' },
+	{ axis: 'top', label: 'Align Top' },
+	{ axis: 'bottom', label: 'Align Bottom' },
+	{ axis: 'center-x', label: 'Align Center Horizontally' },
+	{ axis: 'center-y', label: 'Align Center Vertically' },
+];
+
+/** Context-menu-only, no hotkey — same choice already made for Mirror
+ *  (index.html/main.ts's right-click Mirror Vertically/Horizontally
+ *  entries): no clean single-key mnemonic exists for 6 directions without
+ *  colliding with an existing edit-tool hotkey. */
+function buildAlignSubmenu(s: KicadRenderSession, ids: string[]): HTMLDivElement {
+	const wrap = document.createElement('div');
+	wrap.className = 'submenu-wrap';
+	const trigger = document.createElement('button');
+	trigger.type = 'button';
+	trigger.className = 'menu-item';
+	trigger.textContent = 'Align ▸';
+	trigger.disabled = ids.length < 2;
+	trigger.addEventListener('click', (e) => {
+		e.stopPropagation();
+		wrap.classList.toggle('open');
+	});
+	const submenu = document.createElement('div');
+	submenu.className = 'submenu';
+	for (const { axis, label } of ALIGN_AXES) {
+		submenu.appendChild(menuItem(label, () => {
+			if (s.alignSelection(ids, axis)) {
+				lastFullSch = s.getSchematicText() || lastFullSch;
+				updateUndoStackPane();
+				setStatus(`Aligned ${ids.length} item(s).`);
+			}
+		}, ids.length < 2));
 	}
 	wrap.appendChild(trigger);
 	wrap.appendChild(submenu);
@@ -1927,6 +3206,36 @@ canvas.addEventListener('contextmenu', (e) => {
 	const hit = s.hitTestAtScreen(screenPosFromEvent(e));
 	const items: HTMLElement[] = [];
 
+	// Keyed off the SELECTION, not the right-click target — real KiCad's
+	// zoomFitSelection has no default hotkey (common/tool/actions.cpp),
+	// menu-only, same choice made here rather than picking an arbitrary key.
+	if (s.selectionIds.size > 0) {
+		items.push(menuItem('Zoom to Selection', () => {
+			const selected = s.activeScene?.hitTestItems.filter(it => s.selectionIds.has(it.id)) ?? [];
+			s.fitToItems(selected);
+		}));
+		items.push(buildAlignSubmenu(s, [...s.selectionIds]));
+		items.push(menuSeparator());
+		const selectedIds = [...s.selectionIds];
+		items.push(menuItem('Copy', () => {
+			const count = copySelectionToClipboard(s, copyableIds(s, selectedIds));
+			setStatus(`Copied ${count} item(s).`);
+		}));
+		items.push(menuItem('Cut', () => cutSelectionToClipboard(s)));
+		items.push(menuItem('Duplicate', () => duplicateSelectedElements(s)));
+		items.push(menuItem('Group', () => groupSelectedElements(s), selectedIds.length < 2));
+		items.push(menuItem('Ungroup', () => ungroupSelectedElements(s), !s.selectionHasGroup(selectedIds)));
+		items.push(menuSeparator());
+	}
+	// Always shown, not gated on clipboard.length — the OS clipboard (tried
+	// first inside pasteAtWorld) may hold real-KiCad content even when this
+	// app's own in-app array is empty, and there's no cheap synchronous way
+	// to check navigator.clipboard's contents while building this menu.
+	// pasteAtWorld itself reports "Nothing to paste." if neither source has
+	// anything.
+	items.push(menuItem('Paste', () => void pasteAtWorld(s, s.screenToWorld(screenPosFromEvent(e)))));
+	items.push(menuSeparator());
+
 	if (hit) {
 		if (hit.kind === 'symbol' && hit.refDesignator) {
 			const ref = hit.refDesignator;
@@ -1939,6 +3248,27 @@ canvas.addEventListener('contextmenu', (e) => {
 				selectedRef = ref;
 				s.select(hit.id);
 				autoplaceSelectedFields();
+			}));
+			// Axis mapping is deliberately NOT "vertical=y, horizontal=x" —
+			// confirmed directly against real KiCad source (eeschema/tools/
+			// sch_edit_tool.cpp's SCH_EDIT_TOOL::Mirror, cross-checked all the
+			// way to the file writer in sch_io_kicad_sexpr.cpp): "Mirror
+			// Vertically" (flips top-to-bottom) sets SYM_MIRROR_X → writes
+			// `(mirror x)`; "Mirror Horizontally" (flips left-to-right) sets
+			// SYM_MIRROR_Y → writes `(mirror y)`. Real KiCad's own source has
+			// a comment noting these were genuinely backwards pre-6.0 and got
+			// fixed — this is the corrected, current mapping, not a guess.
+			items.push(menuItem('Mirror Vertically', () => {
+				s.mutateSymbolByPaintId(hit.id, symbol => {
+					symbol.setMirror(symbol.getMirror() === 'x' ? null : 'x');
+				});
+				lastFullSch = s.getSchematicText() || lastFullSch;
+			}));
+			items.push(menuItem('Mirror Horizontally', () => {
+				s.mutateSymbolByPaintId(hit.id, symbol => {
+					symbol.setMirror(symbol.getMirror() === 'y' ? null : 'y');
+				});
+				lastFullSch = s.getSchematicText() || lastFullSch;
 			}));
 		}
 		else if (hit.kind === 'label') {
@@ -1973,6 +3303,9 @@ canvas.addEventListener('contextmenu', (e) => {
 window.addEventListener('click', (e) => {
 	if (!contextMenuEl.classList.contains('hidden') && !contextMenuEl.contains(e.target as Node)) {
 		closeContextMenu();
+	}
+	if (!propertiesModalEl.classList.contains('hidden') && !propertiesModalEl.contains(e.target as Node)) {
+		closePropertiesModal();
 	}
 });
 
@@ -2034,6 +3367,7 @@ function updateEditPreview(s: KicadRenderSession, cursor: Vec2): void {
  */
 function handleEditModeMouseDown(e: MouseEvent, s: KicadRenderSession, screenPos: Vec2): boolean {
 	const worldPos = s.screenToWorld(screenPos);
+	lastPointerWorld = worldPos;
 	const snapped = new Vec2(snap(worldPos.x), snap(worldPos.y));
 	const samePoint = (a: Vec2, b: Vec2) => a.x === b.x && a.y === b.y;
 
@@ -2074,12 +3408,76 @@ function handleEditModeMouseDown(e: MouseEvent, s: KicadRenderSession, screenPos
 			return true;
 		}
 		const hit = s.hitTestAtScreen(screenPos);
+		const clickSelectMode = rectSelectionModeFromModifiers(e);
+		if (hit && clickSelectMode !== 'replace') {
+			// Modifier-click on an item: toggle its membership only, uniformly
+			// across every hit kind, never starting a drag — a modifier-click
+			// means "adjust the selection," not "move something," regardless
+			// of whether the clicked item ends up in or out of the selection
+			// afterward.
+			s.selectMultiple([hit.id], clickSelectMode);
+			syncSingleSelectionBookkeeping(s);
+			e.preventDefault();
+			return true;
+		}
+		if (hit) {
+			const expanded = s.expandGroupSelection([hit.id]);
+			if (expanded.length > 1) {
+				// Fresh click on an item belonging to an existing group, not yet
+				// the active selection: select the WHOLE group and start a
+				// group-drag immediately, same as the already-multi-selected
+				// case right below — otherwise a plain click on an unselected
+				// group member would visually highlight the whole group but
+				// only drag the one clicked item.
+				s.selectMultiple(expanded, 'replace');
+				syncSingleSelectionBookkeeping(s);
+				groupDrag = { lastSnapped: snapped };
+				dragMoved = false;
+				e.preventDefault();
+				return true;
+			}
+		}
+		if (hit && s.selectionIds.size > 1 && s.selectionIds.has(hit.id)) {
+			// Plain click-drag on an item that's already part of a real
+			// multi-selection: move the WHOLE group together rather than
+			// collapsing to just this one (which is what every kind-specific
+			// branch below would otherwise do via its own s.select(hit.id)).
+			// A plain click on something NOT already selected still falls
+			// through to those branches as normal — only an already-selected
+			// item preserves the group.
+			groupDrag = { lastSnapped: snapped };
+			dragMoved = false;
+			e.preventDefault();
+			return true;
+		}
 		if (hit?.kind === 'symbol' && hit.refDesignator) {
 			selectedRef = hit.refDesignator;
 			editSelectedId = hit.id;
 			editSelectedKind = hit.kind;
 			s.select(hit.id);
-			beginEditSymbolDrag(hit.refDesignator, screenPos);
+			beginEditSymbolDrag(hit.refDesignator, hit.id, screenPos);
+			e.preventDefault();
+			return true;
+		}
+		if (hit?.kind === 'sheet') {
+			selectedRef = null;
+			editSelectedId = hit.id;
+			editSelectedKind = hit.kind;
+			s.select(hit.id);
+			beginSheetDrag(hit.id, screenPos);
+			e.preventDefault();
+			return true;
+		}
+		if (hit?.kind === 'label' && hit.labelKind === 'sheet-pin') {
+			// Must be checked before the generic `if (hit)` fallback below:
+			// a sheet pin has kind:'label' like any other label, but needs
+			// moveSheetPinById's edge-constrained drag, not
+			// translateElementById's free relative move.
+			selectedRef = null;
+			editSelectedId = hit.id;
+			editSelectedKind = hit.kind;
+			s.select(hit.id);
+			beginSheetPinDrag(hit.id, screenPos);
 			e.preventDefault();
 			return true;
 		}
@@ -2097,11 +3495,18 @@ function handleEditModeMouseDown(e: MouseEvent, s: KicadRenderSession, screenPos
 			e.preventDefault();
 			return true;
 		}
-		selectedRef = null;
-		editSelectedId = null;
-		editSelectedKind = null;
-		s.select(null);
-		return false;
+		// Empty space: start a rectangle-select drag rather than clearing
+		// immediately — selection itself is deferred entirely to mouseup (see
+		// onPointerUp's rectSelectDrag branch), so an in-progress modifier
+		// change doesn't produce an inconsistent intermediate state. Every
+		// OTHER edit-mode tool already returns true unconditionally here with
+		// no left-drag-pan, so this makes the select tool consistent with the
+		// rest rather than newly inconsistent — middle-drag/wheel-zoom still
+		// pan/zoom regardless.
+		rectSelectDrag = { originWorld: worldPos, originScreen: screenPos };
+		dragMoved = false;
+		e.preventDefault();
+		return true;
 	}
 
 	if (editTool === 'wire' || editTool === 'bus') {
@@ -2143,6 +3548,40 @@ function handleEditModeMouseDown(e: MouseEvent, s: KicadRenderSession, screenPos
 	if (editTool === 'no-connect') {
 		s.addNoConnect(snapped.x, snapped.y);
 		lastFullSch = s.getSchematicText() || lastFullSch;
+		e.preventDefault();
+		return true;
+	}
+
+	if (editTool === 'place-symbol') {
+		if (e.button === 0) {
+			if (pendingSymbol) {
+				// Repeat-placement mode: a symbol's already chosen, place
+				// directly without reopening the chooser.
+				void beginPendingSymbolPlacement(snapped);
+			}
+			else {
+				// First click since arming — this IS the placement point;
+				// remember it and open the chooser now so the user can see
+				// where it'll land before picking what goes there.
+				pendingSymbolAnchor = snapped;
+				void openSymbolChooser();
+			}
+		}
+		e.preventDefault();
+		return true;
+	}
+
+	if (editTool === 'image') {
+		if (!pendingImagePayload) {
+			setStatus('Choose an image file first.');
+			startImageInsertion();
+		}
+		else {
+			const payload = pendingImagePayload;
+			pendingImagePayload = null;
+			insertImageAt(payload, snapped);
+			setEditTool('select');
+		}
 		e.preventDefault();
 		return true;
 	}
@@ -2296,6 +3735,27 @@ function handleEditModeMouseDown(e: MouseEvent, s: KicadRenderSession, screenPos
 
 window.addEventListener('resize', () => resizeCanvas());
 stage.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('paste', (event) => {
+	if (mode !== 'edit' || !session || session.documentTypeLoaded !== 'schematic') {
+		return;
+	}
+	const target = event.target as HTMLElement | null;
+	if (target && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)) {
+		return;
+	}
+	const imageItem = Array.from(event.clipboardData?.items ?? []).find(item => item.type.startsWith('image/'));
+	const file = imageItem?.getAsFile();
+	if (!file) {
+		return;
+	}
+	event.preventDefault();
+	void readEmbeddedImage(file)
+		.then(payload => {
+			const center = lastPointerWorld ?? new Vec2(session!.camera.center.x, session!.camera.center.y);
+			insertImageAt(payload, new Vec2(snap(center.x), snap(center.y)));
+		})
+		.catch(err => setStatus(err instanceof Error ? err.message : String(err)));
+});
 stage.addEventListener('drop', (e) => {
 	e.preventDefault();
 	const file = e.dataTransfer?.files?.[0];
@@ -2309,7 +3769,7 @@ stage.addEventListener('drop', (e) => {
 function propertySection(title: string): HTMLElement {
   const s = document.createElement('section'); s.className = 'property-section';
   const h = document.createElement('div'); h.className = 'property-section-title'; h.textContent = title;
-  s.appendChild(h); editPropertiesEl.appendChild(s); return s;
+  s.appendChild(h); propertyTargetEl.appendChild(s); return s;
 }
 
 function propertyRow(s: HTMLElement, label: string, value: string, edit = false, save?: (v: string) => void): void {
@@ -2393,6 +3853,205 @@ function hexToRgb255(hex: string): [number, number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255, 1];
 }
 
+// ---- Native-dialog primitives (double-click properties modal) ----
+// Deliberately separate from propertySection/propertyRow above: those are
+// implicitly targeted (always append to the module-level propertyTargetEl),
+// which works for the sidebar's flat list of sections but not for a dialog
+// that nests a section INSIDE one half of a 2-column layout — every
+// function here takes its container explicitly instead. Section boxes
+// still reuse .property-section/.property-section-title for visual
+// consistency with the sidebar (same bordered-box-with-header-bar look);
+// everything else (multi-control rows, columns, grid) is new since the
+// sidebar's rigid label|value 2-column row never needed to pack e.g.
+// "Width: [input] mm   Color: [swatch]" onto one line.
+
+function kdSection(container: HTMLElement, title: string): HTMLElement {
+  const s = document.createElement('section'); s.className = 'property-section kd-section';
+  const h = document.createElement('div'); h.className = 'property-section-title'; h.textContent = title;
+  s.appendChild(h); container.appendChild(s); return s;
+}
+
+/** Two panes side by side, each flex:1 — e.g. Border|Fill, General|Attributes. */
+function kdColumns(container: HTMLElement): [HTMLElement, HTMLElement] {
+  const wrap = document.createElement('div'); wrap.className = 'kd-columns';
+  const left = document.createElement('div'); const right = document.createElement('div');
+  wrap.append(left, right); container.appendChild(wrap);
+  return [left, right];
+}
+
+function kdRow(container: HTMLElement): HTMLElement {
+  const r = document.createElement('div'); r.className = 'kd-row'; container.appendChild(r); return r;
+}
+
+function kdLabel(row: HTMLElement, text: string): void {
+  const l = document.createElement('span'); l.className = 'kd-label'; l.textContent = text; row.appendChild(l);
+}
+
+function kdUnit(row: HTMLElement, text: string): void {
+  const u = document.createElement('span'); u.className = 'kd-unit'; u.textContent = text; row.appendChild(u);
+}
+
+function kdTextInput(row: HTMLElement, value: string, save: (v: string) => void, numeric = false): HTMLInputElement {
+  const i = document.createElement('input'); i.className = 'kd-input' + (numeric ? ' kd-input-num' : '');
+  i.value = value;
+  const commit = () => { if (i.value !== value) save(i.value); };
+  i.addEventListener('change', commit);
+  i.addEventListener('keydown', e => { if (e.key === 'Enter') { commit(); i.blur(); } });
+  row.appendChild(i);
+  return i;
+}
+
+function kdSelect(row: HTMLElement, value: string, options: { value: string, label: string }[], save: (v: string) => void): HTMLSelectElement {
+  const select = document.createElement('select'); select.className = 'kd-input';
+  for (const o of options) { const opt = document.createElement('option'); opt.value = o.value; opt.textContent = o.label; select.appendChild(opt); }
+  select.value = options.some(o => o.value === value) ? value : (options[0]?.value ?? '');
+  select.addEventListener('change', () => save(select.value));
+  row.appendChild(select);
+  return select;
+}
+
+function kdSwatch(row: HTMLElement, value: string | null | undefined, save: (hex: string) => void): void {
+  const i = document.createElement('input'); i.type = 'color'; i.className = 'kd-swatch';
+  i.value = cssColorToHex(value) ?? '#808080';
+  i.addEventListener('change', () => save(i.value));
+  row.appendChild(i);
+}
+
+function kdCheckRow(container: HTMLElement, label: string, checked: boolean, save: (v: boolean) => void): HTMLInputElement {
+  const r = document.createElement('label'); r.className = 'kd-check-row';
+  const i = document.createElement('input'); i.type = 'checkbox'; i.checked = checked;
+  i.addEventListener('change', () => save(i.checked));
+  const span = document.createElement('span'); span.textContent = label;
+  r.append(i, span); container.appendChild(r);
+  return i;
+}
+
+function kdRadioRow(container: HTMLElement, groupName: string, label: string, checked: boolean, save: () => void): void {
+  const r = document.createElement('label'); r.className = 'kd-radio-row';
+  const i = document.createElement('input'); i.type = 'radio'; i.name = groupName; i.checked = checked;
+  i.addEventListener('change', () => { if (i.checked) save(); });
+  const span = document.createElement('span'); span.textContent = label;
+  r.append(i, span); container.appendChild(r);
+}
+
+function kdTextArea(container: HTMLElement, value: string, save: (v: string) => void, rows = 3): HTMLTextAreaElement {
+  const t = document.createElement('textarea'); t.className = 'kd-input'; t.rows = rows;
+  t.style.width = '100%'; t.style.boxSizing = 'border-box'; t.style.resize = 'vertical';
+  t.value = value;
+  const commit = () => { if (t.value !== value) save(t.value); };
+  t.addEventListener('blur', commit);
+  container.appendChild(t);
+  return t;
+}
+
+/** A checkbox that sits INLINE within an existing row (e.g. "Bold"/"Italic"
+ *  packed onto the same row as Text Size) — unlike kdCheckRow, which always
+ *  creates its own full-width row. */
+function kdInlineCheck(row: HTMLElement, label: string, checked: boolean, save: (v: boolean) => void): void {
+  const wrap = document.createElement('label'); wrap.className = 'kd-check-row'; wrap.style.display = 'inline-flex';
+  const i = document.createElement('input'); i.type = 'checkbox'; i.checked = checked;
+  i.addEventListener('change', () => save(i.checked));
+  const span = document.createElement('span'); span.textContent = label;
+  wrap.append(i, span); row.appendChild(wrap);
+}
+
+function kdHelp(container: HTMLElement, text: string): void {
+  const p = document.createElement('div'); p.className = 'kd-help'; p.textContent = text; container.appendChild(p);
+}
+
+function kdButtonRow(container: HTMLElement): HTMLElement {
+  const r = document.createElement('div'); r.className = 'kd-btn-row'; container.appendChild(r); return r;
+}
+
+function kdButton(container: HTMLElement, label: string, onClick: () => void): HTMLButtonElement {
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'kd-btn'; b.textContent = label;
+  b.addEventListener('click', onClick);
+  container.appendChild(b);
+  return b;
+}
+
+interface KdGridColumn {
+  key: string;
+  label: string;
+  type: 'text' | 'checkbox' | 'select';
+  options?: { value: string, label: string }[];
+  readOnly?: (row: Record<string, unknown>) => boolean;
+}
+
+/** Only the symbol dialog's Fields grid needs this (8 mixed-type columns,
+ *  real add/remove rows) — generic over columns/rows rather than
+ *  hand-built once, since a table this shape is otherwise a lot of
+ *  near-duplicate cell-building code to get right for 8 columns. */
+function kdGrid(
+  container: HTMLElement,
+  columns: KdGridColumn[],
+  rows: Record<string, unknown>[],
+  handlers: {
+    onCellChange: (rowIndex: number, key: string, value: string | boolean) => void;
+    onAddRow?: () => void;
+    onRemoveRow?: (rowIndex: number) => void;
+    canRemoveRow?: (rowIndex: number) => boolean;
+  }
+): void {
+  const wrap = document.createElement('div'); wrap.className = 'kd-grid-wrap';
+  const table = document.createElement('table'); table.className = 'kd-grid';
+  const thead = document.createElement('thead'); const headRow = document.createElement('tr');
+  for (const col of columns) { const th = document.createElement('th'); th.textContent = col.label; headRow.appendChild(th); }
+  if (handlers.onRemoveRow) { const th = document.createElement('th'); headRow.appendChild(th); }
+  thead.appendChild(headRow); table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  rows.forEach((row, rowIndex) => {
+    const tr = document.createElement('tr');
+    for (const col of columns) {
+      const td = document.createElement('td');
+      const value = row[col.key];
+      if (col.type === 'checkbox') {
+        td.className = 'kd-grid-check';
+        const i = document.createElement('input'); i.type = 'checkbox'; i.checked = !!value;
+        i.addEventListener('change', () => handlers.onCellChange(rowIndex, col.key, i.checked));
+        td.appendChild(i);
+      }
+      else if (col.type === 'select' && col.options) {
+        const select = document.createElement('select'); select.className = 'kd-input';
+        for (const o of col.options) { const opt = document.createElement('option'); opt.value = o.value; opt.textContent = o.label; select.appendChild(opt); }
+        select.value = col.options.some(o => o.value === value) ? String(value) : (col.options[0]?.value ?? '');
+        select.addEventListener('change', () => handlers.onCellChange(rowIndex, col.key, select.value));
+        td.appendChild(select);
+      }
+      else {
+        const i = document.createElement('input'); i.className = 'kd-input'; i.value = String(value ?? '');
+        if (col.readOnly?.(row)) { i.disabled = true; }
+        const commit = () => handlers.onCellChange(rowIndex, col.key, i.value);
+        i.addEventListener('change', commit);
+        i.addEventListener('keydown', e => { if (e.key === 'Enter') { commit(); i.blur(); } });
+        td.appendChild(i);
+      }
+      tr.appendChild(td);
+    }
+    if (handlers.onRemoveRow) {
+      const td = document.createElement('td'); td.className = 'kd-grid-check';
+      if (!handlers.canRemoveRow || handlers.canRemoveRow(rowIndex)) {
+        kdButtonLikeCell(td, '✕', () => handlers.onRemoveRow!(rowIndex));
+      }
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  container.appendChild(wrap);
+  if (handlers.onAddRow) {
+    const btnRow = kdButtonRow(container);
+    kdButton(btnRow, '+ Add Field', handlers.onAddRow);
+  }
+}
+
+function kdButtonLikeCell(td: HTMLElement, label: string, onClick: () => void): void {
+  const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'kd-grid-row-del'; btn.textContent = label;
+  btn.addEventListener('click', onClick);
+  td.appendChild(btn);
+}
+
 /** Shared "commit an edit, refresh undo pane, leave the DOM alone" tail —
  *  every property-panel field handler ends with this. Not rebuilding the
  *  panel from inside its own event handler is deliberate: doing so would
@@ -2418,6 +4077,19 @@ function makeElementMutator(id: string): (fn: (element: any) => void) => void {
   };
 }
 
+/** Batch counterpart to makeElementMutator, for renderMultiProperties — one
+ *  commit/undo entry for the whole selection (via
+ *  session.mutateElementsByPaintIds) instead of one per item. */
+function makeElementsMutator(ids: string[]): (fn: (element: any) => void) => void {
+  return (fn) => {
+    const s = session;
+    const count = s?.mutateElementsByPaintIds(ids, fn) ?? 0;
+    if (count === 0) return;
+    lastFullSch = s!.getSchematicText() || lastFullSch;
+    updateUndoStackPane();
+  };
+}
+
 const LINE_STYLE_OPTIONS = [
   { value: 'default', label: 'Default' }, { value: 'solid', label: 'Solid' }, { value: 'dash', label: 'Dashed' },
   { value: 'dot', label: 'Dotted' }, { value: 'dash_dot', label: 'Dash-Dot' }, { value: 'dash_dot_dot', label: 'Dash-Dot-Dot' },
@@ -2429,12 +4101,24 @@ const FILL_TYPE_OPTIONS = [
 ];
 
 function renderSymbolProperties(symbol: any, kind: string, id: string): void {
-  editPropertiesEl.innerHTML = '';
+  propertyTargetEl.innerHTML = '';
   const mutate = makeSymbolMutator(id);
+  // Pin number/name visibility + offset are library-symbol-only fields in
+  // real KiCad (see mutateLibSymbolForInstance's doc comment) — read AND
+  // write target the resolved library definition, not this instance,
+  // otherwise the checkbox shows a value the renderer never actually
+  // consults and toggling it has no visible effect.
+  const libDef = session?.findLibSymbolForInstance(id) ?? null;
+  const mutateLibDef = (fn: (current: any) => void) => {
+    const s = session;
+    if (!s?.mutateLibSymbolForInstance(id, fn)) return;
+    lastFullSch = s.getSchematicText() || lastFullSch;
+    updateUndoStackPane();
+  };
   const origin = symbol.getOrigin?.();
   const basic = propertySection('Basic Properties');
-  propertyCheckRow(basic, 'Pin numbers', !symbol.arePinNumbersHidden?.(), v => mutate(current => current.togglePinNumbers(v)));
-  propertyCheckRow(basic, 'Pin names', !symbol.arePinNameLabelsHidden?.(), v => mutate(current => current.togglePinNames(v)));
+  propertyCheckRow(basic, 'Pin numbers', !libDef?.arePinNumbersHidden?.(), v => mutateLibDef(current => current.togglePinNumbers(v)));
+  propertyCheckRow(basic, 'Pin names', !libDef?.arePinNameLabelsHidden?.(), v => mutateLibDef(current => current.togglePinNames(v)));
   propertyRow(basic, 'Position X (mm)', origin ? origin.x.toFixed(2) : '—', !!origin, v => { if (origin) mutate(current => { const live = current.getOrigin(); current.setOrigin(Number(v) || 0, live.y, live.rotation ?? 0); }); });
   propertyRow(basic, 'Position Y (mm)', origin ? origin.y.toFixed(2) : '—', !!origin, v => { if (origin) mutate(current => { const live = current.getOrigin(); current.setOrigin(live.x, Number(v) || 0, live.rotation ?? 0); }); });
   if (origin) { const rotation = ((Math.round(Number(origin.rotation ?? 0) / 90) * 90) % 360 + 360) % 360; propertyOrientationRow(basic, 'Orientation', String(rotation), ['0', '90', '180', '270'], v => mutate(current => { const live = current.getOrigin(); current.setOrigin(live.x, live.y, Number(v)); })); }
@@ -2447,7 +4131,11 @@ function renderSymbolProperties(symbol: any, kind: string, id: string): void {
   propertyCheckRow(attrs, 'Exclude From BOM', symbol.findFirstChildByName?.('in_bom')?.value === false, v => mutate(current => current.setInBom(!v)));
   propertyCheckRow(attrs, 'Exclude From Board', symbol.findFirstChildByName?.('on_board')?.value === false, v => mutate(current => current.setOnBoard(!v)));
   propertyCheckRow(attrs, 'Exclude From Position Files', symbol.findFirstChildByName?.('in_pos_files')?.value === false, v => mutate(current => current.setInPosFiles(!v)));
-  const pin = propertySection('Pin Display'); propertyCheckRow(pin, 'Show Pin Number', !symbol.arePinNumbersHidden?.(), v => mutate(current => current.togglePinNumbers(v))); propertyCheckRow(pin, 'Show Pin Name', !symbol.arePinNameLabelsHidden?.(), v => mutate(current => current.togglePinNames(v))); const pinNames = symbol.findFirstChildByName?.('pin_names'); propertyRow(pin, 'Pin Name Offset (mm)', Number(pinNames?.getOffset?.() ?? 0).toFixed(2), true, v => mutate(current => current.setPinNameOffset(Number(v) || 0)));
+  const pin = propertySection('Pin Display');
+  propertyCheckRow(pin, 'Show Pin Number', !libDef?.arePinNumbersHidden?.(), v => mutateLibDef(current => current.togglePinNumbers(v)));
+  propertyCheckRow(pin, 'Show Pin Name', !libDef?.arePinNameLabelsHidden?.(), v => mutateLibDef(current => current.togglePinNames(v)));
+  const pinNames = (libDef as any)?.findFirstChildByName?.('pin_names');
+  propertyRow(pin, 'Pin Name Offset (mm)', Number(pinNames?.getOffset?.() ?? 0).toFixed(2), true, v => mutateLibDef(current => current.setPinNameOffset(Number(v) || 0)));
 }
 
 /** Graphic shapes: line/rectangle/circle/arc/polygon/bezier, plus rule
@@ -2458,7 +4146,7 @@ function renderSymbolProperties(symbol: any, kind: string, id: string): void {
  *  KiCad's DIALOG_SHAPE_PROPERTIES (eeschema/dialogs/dialog_shape_
  *  properties.cpp) — one dialog class for every shape type there too. */
 function renderShapeProperties(element: any, kind: string, id: string): void {
-  editPropertiesEl.innerHTML = '';
+  propertyTargetEl.innerHTML = '';
   const mutate = makeElementMutator(id);
   const isRuleArea = typeof element.getPolyline === 'function';
   const strokeTarget = isRuleArea ? element.getPolyline() : element;
@@ -2508,7 +4196,7 @@ function renderShapeProperties(element: any, kind: string, id: string): void {
  *  (eeschema/dialogs/dialog_wire_bus_properties.cpp). No fill (these are
  *  pure lines, not closed shapes). */
 function renderWireBusProperties(element: any, kind: string, id: string): void {
-  editPropertiesEl.innerHTML = '';
+  propertyTargetEl.innerHTML = '';
   const mutate = makeElementMutator(id);
   const basic = propertySection('Basic Properties');
   propertyRow(basic, 'Object', `${kind === 'bus' ? 'Bus' : (typeof element.getSize === 'function' ? 'Bus Entry' : 'Wire')} (${id.slice(0, 8)})`);
@@ -2527,7 +4215,7 @@ function renderWireBusProperties(element: any, kind: string, id: string): void {
  *  dialog_junction_props.cpp) — diameter + color only, no line style (a
  *  junction is a filled dot, not a stroked shape). */
 function renderJunctionProperties(junction: any, id: string): void {
-  editPropertiesEl.innerHTML = '';
+  propertyTargetEl.innerHTML = '';
   const mutate = makeElementMutator(id);
   const basic = propertySection('Basic Properties');
   propertyRow(basic, 'Object', `Junction (${id.slice(0, 8)})`);
@@ -2548,7 +4236,7 @@ function renderJunctionProperties(junction: any, id: string): void {
  *  per-unit "common to all units" (symbol-editor only) are out of scope —
  *  neither applies to a plain schematic-root text item. */
 function renderTextProperties(element: any, id: string): void {
-  editPropertiesEl.innerHTML = '';
+  propertyTargetEl.innerHTML = '';
   const mutate = makeElementMutator(id);
   const isTextBox = element.name === 'text_box';
   const basic = propertySection('Basic Properties');
@@ -2606,7 +4294,7 @@ const DIRECTIVE_SHAPE_OPTIONS = [
  *  labels keep their text in a "Netclass" property, not a top-level
  *  attribute — see KicadElementNetclassFlag's doc comment). */
 function renderLabelProperties(element: any, labelKind: string | undefined, id: string): void {
-  editPropertiesEl.innerHTML = '';
+  propertyTargetEl.innerHTML = '';
   const mutate = makeElementMutator(id);
   const kindLabel = labelKind === 'local' ? 'Local Label' : labelKind === 'global' ? 'Global Label'
     : labelKind === 'hier' ? 'Hierarchical Label' : labelKind === 'directive' ? 'Directive Label' : 'Label';
@@ -2653,7 +4341,525 @@ function renderLabelProperties(element: any, labelKind: string | undefined, id: 
   propertyColorRow(font, 'Color', element.getFontColorOverride?.(), hex => mutate(current => current.setFontColor(...hexToRgb255(hex))));
 }
 
+/** element.name values renderMultiProperties knows how to batch-edit — same
+ *  scoping real KiCad's own SCH_EDIT_TOOL::Properties() uses (every selected
+ *  item must be the SAME type before its multi-edit dialog even opens).
+ *  Symbols and labels are deliberately absent: their one most-useful field
+ *  (Reference, label text) is inherently per-instance, and a symbol's one
+ *  otherwise-safe batchable field (pin number/name display) targets the
+ *  resolved LIBRARY definition through mutateLibSymbolForInstance, a
+ *  structurally different per-item target this generic paint-id mutator
+ *  can't express. */
+const MULTI_EDIT_NAMES = new Set([
+  'wire', 'bus', 'bus_entry', 'junction',
+  'rectangle', 'circle', 'arc', 'polyline', 'bezier', 'rule_area',
+  'text', 'text_box',
+]);
+
+/** Multi-selection counterpart to the renderXProperties family above —
+ *  updateEditSidebar() shows this instead of the plain "N objects selected"
+ *  text when every selected item shares one element.name in
+ *  MULTI_EDIT_NAMES. Branches explicitly by name (mirroring each single-
+ *  item render function's own field set exactly) rather than by capability-
+ *  sniffing across the whole union, so e.g. a wire selection can never
+ *  accidentally pick up a Fill section meant for shapes. Every row's
+ *  initially-displayed value comes from the FIRST selected element only —
+ *  there is no "indeterminate/mixed" state — but editing a field always
+ *  writes the new value to EVERY selected item via makeElementsMutator, so
+ *  this only affects what's shown before the user changes anything, never
+ *  correctness of the edit itself. */
+function renderMultiProperties(name: string, elements: any[], ids: string[]): void {
+  propertyTargetEl.innerHTML = '';
+  const mutate = makeElementsMutator(ids);
+  const first = elements[0];
+  const basic = propertySection('Basic Properties');
+  propertyRow(basic, 'Object', `${elements.length} × ${name}`);
+
+  if (name === 'wire' || name === 'bus' || name === 'bus_entry') {
+    const line = propertySection('Line');
+    const stroke = first.getStroke();
+    propertyRow(line, 'Width (mm)', stroke.width.toFixed(2), true, v => {
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) mutate(current => current.setStroke(n, current.getStroke().type));
+    });
+    propertySelectRow(line, 'Style', stroke.type, LINE_STYLE_OPTIONS, v => mutate(current => current.setStroke(current.getStroke().width, v)));
+    propertyColorRow(line, 'Color', first.getStrokeColorOverride?.(), hex => mutate(current => current.setStrokeColor(...hexToRgb255(hex))));
+    return;
+  }
+
+  if (name === 'junction') {
+    const props = propertySection('Junction');
+    propertyRow(props, 'Diameter (mm)', first.getDiameter().toFixed(2), true, v => {
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) mutate(current => current.setDiameter(n));
+    });
+    propertyColorRow(props, 'Color', first.getColorOverride?.(), hex => mutate(current => current.setColor(...hexToRgb255(hex))));
+    return;
+  }
+
+  if (name === 'text' || name === 'text_box') {
+    const font = propertySection('Font');
+    const fontInfo = typeof first.getFont === 'function' ? first.getFont() : { width: 1.27, height: 1.27, bold: false, italic: false, thickness: undefined };
+    propertyRow(font, 'Size (mm)', (fontInfo.height || 1.27).toFixed(2), true, v => {
+      const n = Number(v);
+      if (Number.isFinite(n) && n > 0) mutate(current => { const f = current.getFont(); current.setFont(n, n, f.italic, f.bold, f.thickness); });
+    });
+    propertyCheckRow(font, 'Bold', !!fontInfo.bold, v => mutate(current => { const f = current.getFont(); current.setFont(f.width || 1.27, f.height || 1.27, f.italic, v, f.thickness); }));
+    propertyCheckRow(font, 'Italic', !!fontInfo.italic, v => mutate(current => { const f = current.getFont(); current.setFont(f.width || 1.27, f.height || 1.27, v, f.bold, f.thickness); }));
+    propertyColorRow(font, 'Color', first.getFontColorOverride?.(), hex => mutate(current => current.setFontColor(...hexToRgb255(hex))));
+
+    if (name === 'text_box') {
+      const border = propertySection('Border');
+      const stroke = first.getStroke();
+      propertyRow(border, 'Width (mm)', stroke.width.toFixed(2), true, v => {
+        const n = Number(v);
+        if (Number.isFinite(n) && n >= 0) mutate(current => current.setStroke(n, current.getStroke().type));
+      });
+      propertySelectRow(border, 'Style', stroke.type, LINE_STYLE_OPTIONS, v => mutate(current => current.setStroke(current.getStroke().width, v)));
+      propertyColorRow(border, 'Color', first.getStrokeColorOverride?.(), hex => mutate(current => current.setStrokeColor(...hexToRgb255(hex))));
+
+      const fill = propertySection('Fill');
+      propertySelectRow(fill, 'Type', first.getFill(), FILL_TYPE_OPTIONS, v => mutate(current => current.setFill(v)));
+      propertyColorRow(fill, 'Color', first.getFillColorOverride?.(), hex => mutate(current => current.setFillColor(...hexToRgb255(hex))));
+    }
+    return;
+  }
+
+  // rectangle / circle / arc / polyline / bezier / rule_area
+  const isRuleArea = name === 'rule_area';
+  const strokeOf = (el: any) => (isRuleArea ? el.getPolyline() : el);
+  const strokeTarget = strokeOf(first);
+  if (strokeTarget && typeof strokeTarget.getStroke === 'function') {
+    const border = propertySection('Border');
+    const stroke = strokeTarget.getStroke();
+    propertyRow(border, 'Width (mm)', stroke.width.toFixed(2), true, v => {
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) mutate(current => { const t = strokeOf(current); t.setStroke(n, t.getStroke().type); });
+    });
+    propertySelectRow(border, 'Style', stroke.type, LINE_STYLE_OPTIONS, v => mutate(current => { const t = strokeOf(current); t.setStroke(t.getStroke().width, v); }));
+    propertyColorRow(border, 'Color', strokeTarget.getStrokeColorOverride?.(), hex => mutate(current => strokeOf(current).setStrokeColor(...hexToRgb255(hex))));
+  }
+  if (name !== 'bezier' && strokeTarget && typeof strokeTarget.getFill === 'function') {
+    const fill = propertySection('Fill');
+    const fillType = strokeTarget.getFill();
+    propertySelectRow(fill, 'Type', fillType, FILL_TYPE_OPTIONS, v => mutate(current => strokeOf(current).setFill(v)));
+    propertyColorRow(fill, 'Color', strokeTarget.getFillColorOverride?.(), hex => mutate(current => strokeOf(current).setFillColor(...hexToRgb255(hex))));
+  }
+  if (isRuleArea) {
+    const ruleArea = propertySection('Rule Area');
+    propertyCheckRow(ruleArea, 'Do Not Populate', !!first.isDnp?.(), v => mutate(current => current.setDnp(v)));
+    propertyCheckRow(ruleArea, 'Exclude From Simulation', !!first.isExcludedFromSim?.(), v => mutate(current => current.setExcludedFromSim(v)));
+    propertyCheckRow(ruleArea, 'Exclude From BOM', !first.isInBom?.(), v => mutate(current => current.setInBom(!v)));
+    propertyCheckRow(ruleArea, 'Exclude From Board', !first.isOnBoard?.(), v => mutate(current => current.setOnBoard(!v)));
+  }
+}
+
+// ---- Double-click properties dialogs (native-KiCad-dialog style) ----
+// Separate from the renderXProperties family above (which the sidebar still
+// uses, unchanged) — these target an explicit container via the kd* helpers
+// rather than the module-level propertyTargetEl, and lay out fields to match
+// each real KiCad dialog's own structure (see the research this was built
+// from: eeschema/dialogs/dialog_*_base.fbp in the user's local checkout),
+// not just the sidebar's compact stacked-row list.
+
+/** Mirrors DIALOG_JUNCTION_PROPS exactly: Diameter row, Color row, 2 help
+ *  lines, a "Default" button (real KiCad relabels its Apply button to this —
+ *  resets diameter to 0 / color to unspecified, both meaning "use the
+ *  schematic's own defaults"). */
+function renderJunctionDialog(junction: any, id: string): void {
+  propertiesModalTitleEl.textContent = 'Junction Properties';
+  const body = propertiesModalBodyEl;
+  const mutate = makeElementMutator(id);
+
+  const diaRow = kdRow(body);
+  kdLabel(diaRow, 'Diameter:');
+  kdTextInput(diaRow, junction.getDiameter().toFixed(2), v => {
+    const n = Number(v);
+    if (Number.isFinite(n) && n >= 0) mutate(current => current.setDiameter(n));
+  }, true);
+  kdUnit(diaRow, 'mm');
+
+  const colorRow = kdRow(body);
+  kdLabel(colorRow, 'Color:');
+  kdSwatch(colorRow, junction.getColorOverride?.(), hex => mutate(current => current.setColor(...hexToRgb255(hex))));
+
+  kdHelp(body, "Set diameter to 0 to use schematic's junction dot size.");
+  kdHelp(body, 'Clear color to use Schematic Editor colors.');
+
+  const btnRow = kdButtonRow(body);
+  kdButton(btnRow, 'Default', () => {
+    mutate(current => { current.setDiameter(0); current.setColor(0, 0, 0, 0); });
+    showPropertiesModal(id);
+  });
+}
+
+/** Mirrors DIALOG_WIRE_BUS_PROPERTIES: Width+Color on one row, Style on its
+ *  own row, 2 help lines, a "Default" button (resets width->0, color-
+ *  >unspecified, style->'default'). Real KiCad's dialog also has a Junction
+ *  Size field for multi-selections that include a junction — this app's
+ *  modal always targets exactly one element (junctions get their own
+ *  dedicated dialog above), so that field doesn't apply here. */
+function renderWireBusDialog(element: any, kind: string, id: string): void {
+  const isBusEntry = typeof element.getSize === 'function';
+  const label = kind === 'bus' ? 'Bus' : (isBusEntry ? 'Bus Entry' : 'Wire');
+  propertiesModalTitleEl.textContent = `${label} Properties`;
+  const body = propertiesModalBodyEl;
+  const mutate = makeElementMutator(id);
+  const stroke = element.getStroke();
+
+  const widthRow = kdRow(body);
+  kdLabel(widthRow, `${label} width:`);
+  kdTextInput(widthRow, stroke.width.toFixed(2), v => {
+    const n = Number(v);
+    if (Number.isFinite(n) && n >= 0) mutate(current => current.setStroke(n, current.getStroke().type));
+  }, true);
+  kdUnit(widthRow, 'mm');
+  kdLabel(widthRow, 'Color:');
+  kdSwatch(widthRow, element.getStrokeColorOverride?.(), hex => mutate(current => current.setStrokeColor(...hexToRgb255(hex))));
+
+  const styleRow = kdRow(body);
+  kdLabel(styleRow, 'Style:');
+  kdSelect(styleRow, stroke.type, LINE_STYLE_OPTIONS, v => mutate(current => current.setStroke(current.getStroke().width, v)));
+
+  kdHelp(body, "Set width to 0 to use netclass's wire/bus widths.");
+  kdHelp(body, 'Clear color to use Schematic Editor colors.');
+
+  const btnRow = kdButtonRow(body);
+  kdButton(btnRow, 'Default', () => {
+    mutate(current => { current.setStroke(0, 'default'); current.setStrokeColor(0, 0, 0, 0); });
+    showPropertiesModal(id);
+  });
+}
+
+const SHAPE_TITLES: Record<string, string> = {
+  rectangle: 'Rectangle', circle: 'Circle', arc: 'Arc', polyline: 'Polyline', bezier: 'Bezier',
+};
+
+/** Mirrors DIALOG_SHAPE_PROPERTIES (schematic-editor variant, not the Symbol
+ *  Editor's — this app has no symbol editor, so the Fill Style radio-button
+ *  page and the "Private to Symbol Editor"/"Common to all units" row are
+ *  both omitted, not just disabled, matching this pass's "omit what this
+ *  app doesn't model" precedent): Rule-Area-only checkboxes (own block,
+ *  shown only for a rule area), then Border | Fill side by side. Fill's
+ *  options (none/color/outline/background) are kept exactly as the
+ *  already-source-verified FILL_TYPE_OPTIONS — NOT the solid/hatch/cross-
+ *  hatch vocabulary a fresh dialog-layout pass surfaced, which reads like a
+ *  different (PCB-graphic) fill concept and would contradict the file-
+ *  format semantics already verified in an earlier arc; trusting prior,
+ *  independently-confirmed code over one unverified research pass here. */
+function renderShapeDialog(element: any, kind: string, id: string): void {
+  const isRuleArea = typeof element.getPolyline === 'function';
+  const strokeTarget = isRuleArea ? element.getPolyline() : element;
+  const freshTarget = (current: any) => (isRuleArea ? current.getPolyline() : current);
+  const shapeName = kind === 'symbol-graphic' ? (element.name ?? 'shape') : kind;
+  propertiesModalTitleEl.textContent = `${isRuleArea ? 'Rule Area' : (SHAPE_TITLES[shapeName] ?? 'Shape')} Properties`;
+  const body = propertiesModalBodyEl;
+  const mutate = makeElementMutator(id);
+
+  if (isRuleArea) {
+    kdCheckRow(body, 'Exclude from simulation', !!element.isExcludedFromSim?.(), v => mutate(current => current.setExcludedFromSim(v)));
+    kdCheckRow(body, 'Exclude from board', !element.isOnBoard?.(), v => mutate(current => current.setOnBoard(!v)));
+    kdCheckRow(body, 'Do not populate', !!element.isDnp?.(), v => mutate(current => current.setDnp(v)));
+    kdCheckRow(body, 'Exclude from bill of materials', !element.isInBom?.(), v => mutate(current => current.setInBom(!v)));
+  }
+
+  const [borderCol, fillCol] = kdColumns(body);
+
+  if (strokeTarget && typeof strokeTarget.getStroke === 'function') {
+    const border = kdSection(borderCol, 'Border');
+    const stroke = strokeTarget.getStroke();
+    const widthRow = kdRow(border);
+    kdLabel(widthRow, 'Width:');
+    kdTextInput(widthRow, stroke.width.toFixed(2), v => {
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) mutate(current => { const t = freshTarget(current); t.setStroke(n, t.getStroke().type); });
+    }, true);
+    kdUnit(widthRow, 'mm');
+    kdLabel(widthRow, 'Color:');
+    kdSwatch(widthRow, strokeTarget.getStrokeColorOverride?.(), hex => mutate(current => freshTarget(current).setStrokeColor(...hexToRgb255(hex))));
+    const styleRow = kdRow(border);
+    kdLabel(styleRow, 'Style:');
+    kdSelect(styleRow, stroke.type, LINE_STYLE_OPTIONS, v => mutate(current => { const t = freshTarget(current); t.setStroke(t.getStroke().width, v); }));
+    kdHelp(border, "Set border width to 0 to use schematic's default line width.");
+  }
+
+  if (strokeTarget && typeof strokeTarget.getFill === 'function' && strokeTarget.name !== 'bezier') {
+    const fill = kdSection(fillCol, 'Fill');
+    const fillRow = kdRow(fill);
+    kdLabel(fillRow, 'Fill:');
+    kdSelect(fillRow, strokeTarget.getFill(), FILL_TYPE_OPTIONS, v => mutate(current => freshTarget(current).setFill(v)));
+    const fillColorRow = kdRow(fill);
+    kdLabel(fillColorRow, 'Fill color:');
+    kdSwatch(fillColorRow, strokeTarget.getFillColorOverride?.(), hex => mutate(current => freshTarget(current).setFillColor(...hexToRgb255(hex))));
+    kdHelp(fill, 'Clear colors to use Schematic Editor colors.');
+  }
+}
+
+/** Mirrors DIALOG_TEXT_PROPERTIES: multi-line content, Font size + Bold/
+ *  Italic + Color row, then (text box only) Border | Fill side by side —
+ *  same Border/Fill fields and vocabulary as renderShapeDialog, since a
+ *  text box's fill is the same underlying WithFill data as any other closed
+ *  shape (see that dialog's own doc comment for why the fill vocabulary is
+ *  kept as FILL_TYPE_OPTIONS, not the report's "Background fill" checkbox
+ *  wording). Omitted vs. the real dialog: font-family dropdown (this app
+ *  only has one stroke font, a FONT_CHOICE controlled would have exactly
+ *  one meaningful option), hyperlink, syntax-help hyperlink, exclude-from-
+ *  simulation (not modeled on text elements at all — WithEffects/
+ *  KicadElementTextBase has no such field), symbol-editor-only rows (no
+ *  symbol editor in this app), and H/V alignment + horizontal/vertical text
+ *  toggle (not exposed even in the old sidebar version — a real but
+ *  separate gap from this pass's visual-restyle scope, not fixed here). */
+function renderTextDialog(element: any, id: string): void {
+  const isTextBox = element.name === 'text_box';
+  propertiesModalTitleEl.textContent = isTextBox ? 'Text Box Properties' : 'Text Properties';
+  const body = propertiesModalBodyEl;
+  const mutate = makeElementMutator(id);
+
+  kdTextArea(body, String(element.value ?? ''), v => mutate(current => { current.value = v; }), isTextBox ? 4 : 3);
+
+  const fontInfo = typeof element.getFont === 'function' ? element.getFont() : { width: 1.27, height: 1.27, bold: false, italic: false, thickness: undefined };
+  const fontRow = kdRow(body);
+  kdLabel(fontRow, 'Text size:');
+  kdTextInput(fontRow, (fontInfo.height || 1.27).toFixed(2), v => {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) mutate(current => { const f = current.getFont(); current.setFont(n, n, f.italic, f.bold, f.thickness); });
+  }, true);
+  kdUnit(fontRow, 'mm');
+  kdInlineCheck(fontRow, 'Bold', !!fontInfo.bold, v => mutate(current => { const f = current.getFont(); current.setFont(f.width || 1.27, f.height || 1.27, f.italic, v, f.thickness); }));
+  kdInlineCheck(fontRow, 'Italic', !!fontInfo.italic, v => mutate(current => { const f = current.getFont(); current.setFont(f.width || 1.27, f.height || 1.27, v, f.bold, f.thickness); }));
+  kdLabel(fontRow, 'Color:');
+  kdSwatch(fontRow, element.getFontColorOverride?.(), hex => mutate(current => current.setFontColor(...hexToRgb255(hex))));
+
+  if (isTextBox) {
+    const [borderCol, fillCol] = kdColumns(body);
+    const border = kdSection(borderCol, 'Border');
+    const stroke = element.getStroke();
+    const widthRow = kdRow(border);
+    kdLabel(widthRow, 'Width:');
+    kdTextInput(widthRow, stroke.width.toFixed(2), v => {
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) mutate(current => current.setStroke(n, current.getStroke().type));
+    }, true);
+    kdUnit(widthRow, 'mm');
+    kdLabel(widthRow, 'Color:');
+    kdSwatch(widthRow, element.getStrokeColorOverride?.(), hex => mutate(current => current.setStrokeColor(...hexToRgb255(hex))));
+    const styleRow = kdRow(border);
+    kdLabel(styleRow, 'Style:');
+    kdSelect(styleRow, stroke.type, LINE_STYLE_OPTIONS, v => mutate(current => current.setStroke(current.getStroke().width, v)));
+
+    const fill = kdSection(fillCol, 'Fill');
+    const fillRow = kdRow(fill);
+    kdLabel(fillRow, 'Fill:');
+    kdSelect(fillRow, element.getFill(), FILL_TYPE_OPTIONS, v => mutate(current => current.setFill(v)));
+    const fillColorRow = kdRow(fill);
+    kdLabel(fillColorRow, 'Fill color:');
+    kdSwatch(fillColorRow, element.getFillColorOverride?.(), hex => mutate(current => current.setFillColor(...hexToRgb255(hex))));
+  }
+}
+
+const LABEL_DIALOG_TITLES: Record<string, string> = {
+  local: 'Label Properties', global: 'Global Label Properties',
+  hier: 'Hierarchical Label Properties', directive: 'Directive Label Properties',
+};
+
+/** Mirrors DIALOG_LABEL_PROPERTIES's per-type conditional layout: text row
+ *  (hidden for directive, which has no free text), Shape box (radio
+ *  buttons — input/output/bidirectional/tri_state/passive for global/hier,
+ *  dot/circle/diamond/rectangle for directive, whole box hidden for local),
+ *  Formatting box (size/bold/italic/color — "Pin length" replaces size,
+ *  and bold/italic are hidden, for directive). Sheet pins never reach this
+ *  dialog (updateEditSidebar's dispatch has no sheet-pin case, matching
+ *  real KiCad's own dialog constructor which — per source — never
+ *  specifically branches its FIELD visibility for that type either).
+ *
+ *  Deliberately still missing vs. the real dialog: the Fields grid. Real
+ *  KiCad shows one for every label type (it's literally how a directive
+ *  label's Netclass/Component Class values are stored — KicadElementNetclass
+ *  Flag does mix in WithProperties), but local/global/hier labels have NO
+ *  WithProperties at all in this app's kicad-io layer, and the old sidebar
+ *  version never exposed field editing for directive labels either — adding
+ *  general field management is a real, separate feature, not a restyle. */
+function renderLabelDialog(element: any, labelKind: string | undefined, id: string): void {
+  propertiesModalTitleEl.textContent = LABEL_DIALOG_TITLES[labelKind ?? ''] ?? 'Label Properties';
+  const body = propertiesModalBodyEl;
+  const mutate = makeElementMutator(id);
+  const isDirective = labelKind === 'directive';
+  const hasShape = labelKind === 'global' || labelKind === 'hier' || isDirective;
+
+  if (!isDirective) {
+    const textRow = kdRow(body);
+    kdLabel(textRow, 'Label:');
+    const currentName = typeof element.getName === 'function' ? element.getName() : String(element.value ?? '');
+    kdTextInput(textRow, currentName, v => {
+      const s = session;
+      if (!s?.renameLabel(id, v)) return;
+      lastFullSch = s.getSchematicText() || lastFullSch;
+      updateUndoStackPane();
+    });
+  }
+
+  if (hasShape) {
+    const [shapeCol, formatCol] = kdColumns(body);
+    const shapeSection = kdSection(shapeCol, 'Shape');
+    const currentShape = element.getShape?.() ?? (isDirective ? 'round' : 'input');
+    const shapeOptions = isDirective ? DIRECTIVE_SHAPE_OPTIONS : GLOBAL_HIER_SHAPE_OPTIONS;
+    for (const opt of shapeOptions) {
+      kdRadioRow(shapeSection, `label-shape-${id}`, opt.label, currentShape === opt.value, () => {
+        const s = session;
+        if (!s?.setLabelShape(id, opt.value as KicadGlobalLabelShape | KicadDirectiveLabelShape)) return;
+        lastFullSch = s.getSchematicText() || lastFullSch;
+        updateUndoStackPane();
+      });
+    }
+    renderLabelFormattingSection(formatCol, element, id, isDirective, mutate);
+  }
+  else {
+    renderLabelFormattingSection(body, element, id, isDirective, mutate);
+  }
+}
+
+function renderLabelFormattingSection(container: HTMLElement, element: any, id: string, isDirective: boolean, mutate: (fn: (element: any) => void) => void): void {
+  const formatting = kdSection(container, 'Formatting');
+  if (isDirective) {
+    const lengthRow = kdRow(formatting);
+    kdLabel(lengthRow, 'Pin length:');
+    kdTextInput(lengthRow, Number(element.getPinLength?.() ?? 2.54).toFixed(2), v => {
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) mutate(current => current.setPinLength(n));
+    }, true);
+    kdUnit(lengthRow, 'mm');
+    return;
+  }
+  const fontInfo = typeof element.getFont === 'function' ? element.getFont() : { width: 1.27, height: 1.27, bold: false, italic: false, thickness: undefined };
+  const sizeRow = kdRow(formatting);
+  kdLabel(sizeRow, 'Text size:');
+  kdTextInput(sizeRow, (fontInfo.height || 1.27).toFixed(2), v => {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) mutate(current => { const f = current.getFont(); current.setFont(n, n, f.italic, f.bold, f.thickness); });
+  }, true);
+  kdUnit(sizeRow, 'mm');
+  kdInlineCheck(sizeRow, 'Bold', !!fontInfo.bold, v => mutate(current => { const f = current.getFont(); current.setFont(f.width || 1.27, f.height || 1.27, f.italic, v, f.thickness); }));
+  kdInlineCheck(sizeRow, 'Italic', !!fontInfo.italic, v => mutate(current => { const f = current.getFont(); current.setFont(f.width || 1.27, f.height || 1.27, v, f.bold, f.thickness); }));
+  const colorRow = kdRow(formatting);
+  kdLabel(colorRow, 'Color:');
+  kdSwatch(colorRow, element.getFontColorOverride?.(), hex => mutate(current => current.setFontColor(...hexToRgb255(hex))));
+}
+
+const H_ALIGN_OPTIONS = [{ value: 'left', label: 'Left' }, { value: 'middle', label: 'Center' }, { value: 'right', label: 'Right' }];
+const V_ALIGN_OPTIONS = [{ value: 'top', label: 'Top' }, { value: 'middle', label: 'Center' }, { value: 'bottom', label: 'Bottom' }];
+
+/** Mirrors DIALOG_SYMBOL_PROPERTIES's "General" tab — the only tab built,
+ *  since the other 3 (Pin Functions: alternate pin electrical assignments;
+ *  Pin Map: multi-unit alternate pin swapping; Embedded Files) all need
+ *  data concepts this app doesn't model on a placed symbol instance at all,
+ *  so a tab strip with 3 permanently-empty tabs would be worse than no
+ *  tabs. Same reasoning for what's inside "General" itself: Unit/Body
+ *  style/Mirror dropdowns are omitted (no multi-unit/multi-body-style/
+ *  mirror concept in this app's kicad-io layer for symbol instances — the
+ *  old sidebar never had them either), and the 5 right-side action buttons
+ *  (Update/Change/Edit Symbol, Edit Library Symbol, Simulation Model) are
+ *  omitted per explicit direction — nothing in this app to wire them to.
+ *  Position X/Y is kept despite not being in the real dialog (real KiCad
+ *  repositions purely by canvas drag/arrow-keys) — dropping a working,
+ *  already-useful field to match the real dialog exactly would be a
+ *  regression, not a restyle, so it's folded into General as a deliberate,
+ *  documented departure rather than silently kept from the old layout. */
+function renderSymbolDialog(symbol: any, id: string): void {
+  propertiesModalTitleEl.textContent = 'Symbol Properties';
+  const body = propertiesModalBodyEl;
+  const mutate = makeSymbolMutator(id);
+  const libDef = session?.findLibSymbolForInstance(id) ?? null;
+  const mutateLibDef = (fn: (current: any) => void) => {
+    const s = session;
+    if (!s?.mutateLibSymbolForInstance(id, fn)) return;
+    lastFullSch = s.getSchematicText() || lastFullSch;
+    updateUndoStackPane();
+  };
+
+  const fields = kdSection(body, 'Fields');
+  const properties = symbol.getProperties?.() ?? [];
+  const MANDATORY = new Set(['Reference', 'Value', 'Footprint', 'Datasheet']);
+  const gridRows = properties.map((p: any) => {
+    const justify = p.getJustify?.() ?? { horizontal: 'left', vertical: 'top' };
+    const font = p.getFont?.() ?? { bold: false, italic: false };
+    return {
+      Name: p.propertyName ?? '', Value: p.propertyValue ?? '',
+      Show: !p.isHidden?.(), ShowName: !!p.getShowName?.(),
+      HAlign: justify.horizontal, VAlign: justify.vertical,
+      Italic: !!font.italic, Bold: !!font.bold,
+    };
+  });
+  kdGrid(fields, [
+    { key: 'Name', label: 'Name', type: 'text', readOnly: (row) => MANDATORY.has(String(row.Name)) },
+    { key: 'Value', label: 'Value', type: 'text' },
+    { key: 'Show', label: 'Show', type: 'checkbox' },
+    { key: 'ShowName', label: 'Show Name', type: 'checkbox' },
+    { key: 'HAlign', label: 'H Align', type: 'select', options: H_ALIGN_OPTIONS },
+    { key: 'VAlign', label: 'V Align', type: 'select', options: V_ALIGN_OPTIONS },
+    { key: 'Italic', label: 'Italic', type: 'checkbox' },
+    { key: 'Bold', label: 'Bold', type: 'checkbox' },
+  ], gridRows, {
+    onCellChange: (rowIndex, key, value) => mutate(current => {
+      const prop = current.getProperties?.()?.[rowIndex];
+      if (!prop) return;
+      switch (key) {
+        case 'Name': prop.propertyName = String(value); break;
+        case 'Value': prop.propertyValue = String(value); break;
+        case 'Show': prop.setHidden?.(!value); break;
+        case 'ShowName': prop.setShowName?.(!!value); break;
+        case 'HAlign': prop.setJustify?.(value as any, prop.getJustify?.().vertical); break;
+        case 'VAlign': prop.setJustify?.(prop.getJustify?.().horizontal, value as any); break;
+        case 'Italic': { const f = prop.getFont?.() ?? {}; prop.setFont?.(f.width || 1.27, f.height || 1.27, !!value, f.bold, f.thickness); break; }
+        case 'Bold': { const f = prop.getFont?.() ?? {}; prop.setFont?.(f.width || 1.27, f.height || 1.27, f.italic, !!value, f.thickness); break; }
+      }
+    }),
+    onAddRow: () => {
+      mutate(current => current.setProperty?.(`Field${(current.getProperties?.()?.length ?? 0) + 1}`, ''));
+      showPropertiesModal(id);
+    },
+    onRemoveRow: (rowIndex) => {
+      mutate(current => { const p = current.getProperties?.()?.[rowIndex]; if (p) current.deleteProperty?.(p.propertyName); });
+      showPropertiesModal(id);
+    },
+    canRemoveRow: (rowIndex) => !MANDATORY.has(String(gridRows[rowIndex]?.Name)),
+  });
+
+  const [generalCol, attrCol] = kdColumns(body);
+  const general = kdSection(generalCol, 'General');
+  const origin = symbol.getOrigin?.();
+  if (origin) {
+    const rotation = ((Math.round(Number(origin.rotation ?? 0) / 90) * 90) % 360 + 360) % 360;
+    const angleRow = kdRow(general);
+    kdLabel(angleRow, 'Angle:');
+    kdSelect(angleRow, String(rotation), ['0', '90', '180', '270'].map(v => ({ value: v, label: `${v}°` })),
+      v => mutate(current => { const live = current.getOrigin(); current.setOrigin(live.x, live.y, Number(v)); }));
+    const xRow = kdRow(general);
+    kdLabel(xRow, 'Position X:');
+    kdTextInput(xRow, origin.x.toFixed(2), v => mutate(current => { const live = current.getOrigin(); current.setOrigin(Number(v) || 0, live.y, live.rotation ?? 0); }), true);
+    kdUnit(xRow, 'mm');
+    const yRow = kdRow(general);
+    kdLabel(yRow, 'Position Y:');
+    kdTextInput(yRow, origin.y.toFixed(2), v => mutate(current => { const live = current.getOrigin(); current.setOrigin(live.x, Number(v) || 0, live.rotation ?? 0); }), true);
+    kdUnit(yRow, 'mm');
+  }
+  kdCheckRow(general, 'Show pin numbers', !libDef?.arePinNumbersHidden?.(), v => mutateLibDef(current => current.togglePinNumbers(v)));
+  kdCheckRow(general, 'Show pin names', !libDef?.arePinNameLabelsHidden?.(), v => mutateLibDef(current => current.togglePinNames(v)));
+
+  const attrs = kdSection(attrCol, 'Attributes');
+  kdCheckRow(attrs, 'Exclude from simulation', !!symbol.findFirstChildByName?.('exclude_from_sim')?.value, v => mutate(current => current.setExcludeFromSim(v)));
+  kdCheckRow(attrs, 'Exclude from board', symbol.findFirstChildByName?.('on_board')?.value === false, v => mutate(current => current.setOnBoard(!v)));
+  kdCheckRow(attrs, 'Do not populate', !!symbol.isDnp?.(), v => mutate(current => current.setDnp(v)));
+  kdCheckRow(attrs, 'Exclude from bill of materials', symbol.findFirstChildByName?.('in_bom')?.value === false, v => mutate(current => current.setInBom(!v)));
+  kdCheckRow(attrs, 'Exclude from position files', symbol.findFirstChildByName?.('in_pos_files')?.value === false, v => mutate(current => current.setInPosFiles(!v)));
+
+  const libRow = kdRow(body);
+  kdLabel(libRow, 'Library link:');
+  const libText = document.createElement('span'); libText.style.color = 'var(--text)'; libText.style.fontSize = '11px'; libText.textContent = symbol.getLibId?.() ?? '';
+  libRow.appendChild(libText);
+}
+
 setMode('view');
 ensureSession();
 resizeCanvas();
+void refreshSymbolLibraryButton();
 updateStatusBar();

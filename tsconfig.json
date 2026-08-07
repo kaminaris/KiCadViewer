@@ -11,10 +11,18 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "baseUrl": ".",
     "paths": {
-      "@kicad-io/*": ["../../shared/kicad-io/src/*"],
-      "@kicad-render/*": ["../../shared/kicad-render/*"],
-      "@kicad-layout/*": ["../../shared/kicad-layout/*"]
+      "@kicad-io/*": ["../../shared/kicad-io/src/*", "shared/kicad-io/src/*"],
+      "@kicad-render/*": ["../../shared/kicad-render/*", "shared/kicad-render/*"],
+      "@kicad-layout/*": ["../../shared/kicad-layout/*", "shared/kicad-layout/*"]
     }
   },
-  "include": ["src/**/*.ts", "../../shared/kicad-layout/**/*.ts", "../../shared/kicad-render/**/*.ts", "../../shared/kicad-io/src/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "../../shared/kicad-layout/**/*.ts",
+    "../../shared/kicad-render/**/*.ts",
+    "../../shared/kicad-io/src/**/*.ts",
+    "shared/kicad-layout/**/*.ts",
+    "shared/kicad-render/**/*.ts",
+    "shared/kicad-io/src/**/*.ts"
+  ]
 }

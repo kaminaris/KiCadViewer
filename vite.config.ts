@@ -1,7 +1,13 @@
 import { defineConfig } from 'vite';
 import path from 'node:path';
+import fs from 'node:fs';
 
-const shared = path.resolve(__dirname, '../../shared');
+// The viewer is developed inside BOMManager2, where shared libraries are two
+// levels above this app. GitHub Pages checks out the viewer as its own repo,
+// so the deployment workflow places those same libraries in ./shared.
+const monorepoShared = path.resolve(__dirname, '../../shared');
+const standaloneShared = path.resolve(__dirname, 'shared');
+const shared = fs.existsSync(monorepoShared) ? monorepoShared : standaloneShared;
 
 // Production (GitHub Pages): https://kaminaris.github.io/KiCadViewer/
 // Dev server keeps base '/' so localhost:5173 still works.
