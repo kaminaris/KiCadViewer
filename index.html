@@ -5,7 +5,7 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 	<title>KiCad Viewer</title>
 	<link rel="stylesheet" href="/KiCadViewer/styles.css" />
-  <script type="module" crossorigin src="/KiCadViewer/assets/index-D-ODkH5G.js"></script>
+  <script type="module" crossorigin src="/KiCadViewer/assets/index-DioOOgX_.js"></script>
 </head>
 <body>
 	<header class="top">
@@ -45,6 +45,8 @@
 			<button type="button" id="btn-export">Export .kicad_sch</button>
 		</div>
 		<div class="actions hidden" id="edit-actions">
+			<button type="button" id="btn-index-symbols" title="Index a KiCad symbols directory">Index symbols</button>
+			<input type="file" id="symbol-directory-input" webkitdirectory directory multiple hidden />
 			<button type="button" id="btn-export-edit">Export .kicad_sch</button>
 		</div>
 	</header>
@@ -102,10 +104,34 @@
 				<div class="table-modal-actions"><button type="button" id="table-cancel">Cancel</button><button type="button" id="table-insert">Insert</button></div>
 			</div>
 			<div class="properties-modal hidden" id="properties-modal">
-					<h3>Properties</h3>
+					<h3 id="properties-modal-title">Properties</h3>
 					<div id="properties-modal-body"></div>
 					<div class="table-modal-actions"><button type="button" id="properties-modal-close">Close</button></div>
 				</div>
+			<div class="symbol-chooser hidden" id="symbol-chooser-modal" role="dialog" aria-modal="true" aria-labelledby="symbol-chooser-title">
+				<div class="symbol-chooser-header">
+					<h3 id="symbol-chooser-title">Choose Symbol</h3>
+					<button type="button" class="symbol-chooser-close" id="symbol-chooser-close" aria-label="Close">×</button>
+				</div>
+				<div class="symbol-chooser-search"><span aria-hidden="true">⌕</span><input id="symbol-chooser-filter" type="search" placeholder="Filter symbols…" autocomplete="off" /></div>
+				<div class="symbol-chooser-body">
+					<div class="symbol-chooser-list" id="symbol-chooser-list"></div>
+					<div class="symbol-chooser-preview">
+						<div class="symbol-preview-art" id="symbol-preview-art">
+							<canvas id="symbol-preview-canvas" class="hidden"></canvas>
+							<span id="symbol-preview-placeholder">Select a symbol to preview</span>
+						</div>
+						<div class="symbol-preview-details" id="symbol-preview-details"></div>
+					</div>
+				</div>
+				<div class="symbol-chooser-footer">
+					<label><input id="symbol-repeat-copies" type="checkbox" /> Place repeated copies</label>
+					<label><input id="symbol-all-units" type="checkbox" checked /> Place all units</label>
+					<span class="symbol-chooser-spacer"></span>
+					<button type="button" id="symbol-chooser-cancel">Cancel</button>
+					<button type="button" id="symbol-chooser-ok" class="primary">OK</button>
+				</div>
+			</div>
 				<div class="context-menu hidden" id="context-menu"></div>
 		</div>
 		<aside class="tool-panel hidden" id="tool-panel">
@@ -118,7 +144,7 @@
 
 			<div class="tool-sep"></div>
 
-			<button type="button" class="tool-btn" data-tool="place-symbol" title="Place Symbol — not yet implemented" disabled>
+			<button type="button" class="tool-btn" data-tool="place-symbol" title="Place Symbol (A)">
 				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="7" y="6" width="10" height="12"/><path d="M4 9 H7 M4 15 H7 M17 9 H20 M17 15 H20 M9 6 V4 M15 6 V4 M9 18 V20 M15 18 V20"/></svg>
 			</button>
 			<button type="button" class="tool-btn cyclable" data-tool="power" id="btn-power-tool" title="Power symbol — right-click to cycle GND/PWR_FLAG/rail">
@@ -169,9 +195,10 @@
 			<button type="button" class="tool-btn cyclable" data-tool="rect" id="btn-shape-tool" title="Shapes — right-click to cycle Rectangle/Circle/Arc/Bezier">
 				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="5" y="6" width="14" height="12"/></svg>
 			</button>
-			<button type="button" class="tool-btn" data-tool="image" title="Place Image — not yet implemented" disabled>
+			<button type="button" class="tool-btn" data-tool="image" title="Place Image (file or clipboard)">
 				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17 L10 12 L14 15 L20 10 V19 H4 Z"/></svg>
 			</button>
+			<input id="image-input" type="file" accept="image/png,image/jpeg,image/gif" hidden />
 			<button type="button" class="tool-btn" data-tool="delete" title="Interactive Delete Tool">
 				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 7 H19 M9 7 V5 H15 V7 M7 7 L8 20 H16 L17 7"/><path d="M10 10 V17 M14 10 V17"/></svg>
 			</button>
@@ -179,7 +206,14 @@
 	</main>
 	<footer class="status-bar">
 		<span id="coord-status">X: —  Y: —</span>
-		<span id="grid-status">Grid: 1.27 mm</span>
+		<label class="grid-select-label">Grid:
+			<select id="grid-select" title="Grid spacing">
+				<option value="0.635">0.635 mm (25 mil)</option>
+				<option value="1.27" selected>1.27 mm (50 mil)</option>
+				<option value="2.54">2.54 mm (100 mil)</option>
+				<option value="5.08">5.08 mm (200 mil)</option>
+			</select>
+		</label>
 		<span id="zoom-status">Zoom: —</span>
 	</footer>
 </body>
