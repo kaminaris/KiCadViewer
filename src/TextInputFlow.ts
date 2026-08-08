@@ -25,8 +25,18 @@ export interface TextInputFlowCallbacks {
 	updateHint(): void;
 }
 
-const LABEL_SHAPES: KicadGlobalLabelShape[] = ['input', 'output', 'bidirectional', 'tri_state', 'passive'];
-const DIRECTIVE_SHAPES: KicadDirectiveLabelShape[] = ['round', 'dot', 'diamond', 'rectangle'];
+export const LABEL_SHAPES: KicadGlobalLabelShape[] = ['input', 'output', 'bidirectional', 'tri_state', 'passive'];
+export const DIRECTIVE_LABEL_SHAPES: KicadDirectiveLabelShape[] = ['round', 'dot', 'diamond', 'rectangle'];
+export const TEXT_INPUT_TOOLS: ReadonlySet<EditTool> = new Set<EditTool>(
+	['text', 'label', 'directive-label', 'global-label', 'hier-label']);
+export const TEXT_INPUT_PLACEHOLDERS: Partial<Record<EditTool, string>> = {
+	text: 'Text…',
+	label: 'Net name…',
+	'directive-label': 'Netclass name…',
+	'global-label': 'Global label…',
+	'hier-label': 'Hierarchical label…',
+	power: 'Voltage (e.g. +3.3V)…'
+};
 
 /** Owns floating text, text-box, and table input state and their DOM events. */
 export class TextInputFlow {
@@ -300,8 +310,8 @@ export class TextInputFlow {
 		}
 		else if (tool === 'directive-label') {
 			event.preventDefault();
-			const next = DIRECTIVE_SHAPES[(DIRECTIVE_SHAPES.indexOf(this.cb.getDirectiveLabelShape()) + 1)
-			% DIRECTIVE_SHAPES.length]!;
+			const next = DIRECTIVE_LABEL_SHAPES[(DIRECTIVE_LABEL_SHAPES.indexOf(this.cb.getDirectiveLabelShape()) + 1)
+			% DIRECTIVE_LABEL_SHAPES.length]!;
 			this.cb.setDirectiveLabelShape(next);
 		}
 		else {
