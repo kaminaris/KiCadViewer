@@ -574,6 +574,68 @@ function updateLockedNets(): void {
 
 function snap(n: number): number { return settings.snap(n); }
 
+/** Return the schematic anchor used for grid placement, not a painted bbox
+ * corner. Bboxes include text/graphic extents that are intentionally allowed
+ * to sit off-grid; origins and geometry endpoints are the points KiCad snaps
+ * when an item is placed or pasted. */
+function pasteAnchor(element: any): { x: number; y: number } | null {
+	if (typeof element?.getOrigin === 'function') {
+		const origin = element.getOrigin();
+		if (Number.isFinite(origin?.x) && Number.isFinite(origin?.y)) {
+			return { x: origin.x, y: origin.y };
+		}
+	}
+	if (typeof element?.getPoints === 'function') {
+		const point = element.getPoints()?.[0];
+		if (Number.isFinite(point?.x) && Number.isFinite(point?.y)) {
+			return { x: point.x, y: point.y };
+		}
+	}
+	if (typeof element?.getStartMidEnd === 'function') {
+		const point = element.getStartMidEnd()?.start;
+		if (Number.isFinite(point?.x) && Number.isFinite(point?.y)) {
+			return { x: point.x, y: point.y };
+		}
+	}
+	if (typeof element?.getStartEnd === 'function') {
+		const point = element.getStartEnd()?.start;
+		if (Number.isFinite(point?.x) && Number.isFinite(point?.y)) {
+			return { x: point.x, y: point.y };
+		}
+	}
+	if (typeof element?.getCenter === 'function') {
+		const point = element.getCenter();
+		if (Number.isFinite(point?.x) && Number.isFinite(point?.y)) {
+			return { x: point.x, y: point.y };
+		}
+	}
+	if (typeof element?.getPolyline === 'function') {
+		return pasteAnchor(element.getPolyline());
+	}
+	return null;
+}
+
+/** Group drags are delta-based for mixed selections. Quantize ordinary label
+ * attach points once at drop so a pasted off-grid label cannot retain a
+ * fractional origin merely because it moved as part of a group. */
+function snapSelectionLabels(s: KicadRenderSession): void {
+	for (const id of s.selectionIds) {
+		const item = s.activeScene?.hitTestItems.find(candidate => candidate.id === id);
+		if (item?.kind !== 'label' || item.labelKind === 'sheet-pin') {
+			continue;
+		}
+		const origin = (item.element as any)?.getOrigin?.();
+		if (!origin) {
+			continue;
+		}
+		const x = snap(origin.x);
+		const y = snap(origin.y);
+		if (x !== origin.x || y !== origin.y) {
+			s.moveLabelById(id, x, y, origin.rotation);
+		}
+	}
+}
+
 /** Rectangle-select AND single-item-click modifier semantics — matches real
  *  KiCad's own drag-select mapping exactly (SELECTION_TOOL::setModifiersState,
  *  common/tool/selection_tool.cpp), confirmed against the user's local KiCad
@@ -644,7 +706,8 @@ function resizeHandleAtScreen(s: KicadRenderSession, screenPos: Vec2): {
 }
 
 function resizedBoundsFromHandle(
-	box: SelectionResizeBox, handle: Exclude<ResizeHandle, 'center'>, cursor: Vec2): SelectionResizeBox {
+	box: SelectionResizeBox, handle: Exclude<ResizeHandle, 'center'>, cursor: Vec2
+): SelectionResizeBox {
 	let left = box.x;
 	let right = box.x + box.width;
 	let top = box.y;
@@ -1538,12 +1601,16 @@ function onPointerUp(e: MouseEvent): void {
 	if (mode === 'circuit' && circuitDragMode && (isSymbolGesture || isLabelGesture) && moved) {
 		void commitReroute('autoroute');
 	}
-	else if (mode === 'edit' && (isSymbolGesture || isElementGesture || isResizeGesture || isCurveGesture
+	else if (mode === 'edit' && (isSymbolGesture || isLabelGesture || isElementGesture || isResizeGesture
+		|| isCurveGesture
 		|| isSheetGesture || isSheetPinGesture || isGroupGesture) && moved && session) {
 		// Manual move, no rewire — just persist the mutated AST text. Covers
 		// group-drag too: translateSelection already applied every step's
 		// delta live during the drag, same as every other kind here — this
 		// branch only needs to persist the final text once.
+		if (isGroupGesture) {
+			snapSelectionLabels(session);
+		}
 		appState.refreshSchematicText(session);
 	}
 	else if (mode === 'edit' && isRectGesture && session) {
@@ -1797,8 +1864,10 @@ function copySelectionToClipboard(s: KicadRenderSession, ids: string[]): number 
 	const copied = s.copySelectionText(ids);
 	const hitItems = s.activeScene?.hitTestItems ?? [];
 	clipboard = copied.map(({ id, sourceText }) => {
-		const bbox = hitItems.find(it => it.id === id)?.bbox;
-		return { sourceText, x: bbox?.x ?? 0, y: bbox?.y ?? 0 };
+		const item = hitItems.find(it => it.id === id);
+		const anchor = pasteAnchor(item?.element);
+		const bbox = item?.bbox;
+		return { sourceText, x: anchor?.x ?? bbox?.x ?? 0, y: anchor?.y ?? bbox?.y ?? 0 };
 	});
 	const systemText = s.copySelectionForSystemClipboard(ids);
 	if (systemText) {
@@ -1870,6 +1939,10 @@ function pasteClipboardAt(s: KicadRenderSession, targetWorld: Vec2): void {
  *  only matters when the OS clipboard holds something this app didn't
  *  itself just put there. */
 async function pasteAtWorld(s: KicadRenderSession, targetWorld: Vec2): Promise<void> {
+	// Paste targets are placement anchors, so quantize them before either
+	// clipboard path computes its translation. This also covers Ctrl+V when
+	// the last pointer position was captured between grid ticks.
+	const snappedTarget = new Vec2(snap(targetWorld.x), snap(targetWorld.y));
 	let systemText: string | null = null;
 	try {
 		systemText = (await navigator.clipboard?.readText()) || null;
@@ -1878,7 +1951,7 @@ async function pasteAtWorld(s: KicadRenderSession, targetWorld: Vec2): Promise<v
 		systemText = null;
 	}
 	if (systemText) {
-		const newIds = s.pasteSystemClipboardText(systemText, targetWorld.x, targetWorld.y);
+		const newIds = s.pasteSystemClipboardText(systemText, snappedTarget.x, snappedTarget.y);
 		if (newIds.length > 0) {
 			s.selectMultiple(newIds, 'replace');
 			syncSingleSelectionBookkeeping(s);
@@ -1889,7 +1962,7 @@ async function pasteAtWorld(s: KicadRenderSession, targetWorld: Vec2): Promise<v
 		}
 	}
 	if (clipboard.length > 0) {
-		pasteClipboardAt(s, targetWorld);
+		pasteClipboardAt(s, snappedTarget);
 	}
 	else {
 		setStatus('Nothing to paste.');
@@ -2485,10 +2558,26 @@ function handleEditModeMouseDown(e: MouseEvent, s: KicadRenderSession, screenPos
 			e.preventDefault();
 			return true;
 		}
+		if (hit?.kind === 'label') {
+			// Labels have an absolute attach point. Delta-translating an already
+			// off-grid label preserves the error forever, so use the same
+			// absolute, snapped drag path as circuit-mode labels.
+			selectedRef = null;
+			editSelectedId = hit.id;
+			editSelectedKind = hit.kind;
+			s.select(hit.id);
+			s.pushUndoSnapshot();
+			const element = (s as any).schScene?.hitTestItems?.find((item: any) => item.id === hit.id)?.element;
+			const origin = element?.getOrigin?.() ?? worldPos;
+			dragMoved = false;
+			dragStartPose = { x: origin.x, y: origin.y, rotation: origin.rotation ?? 0 };
+			dragOffset = new Vec2(worldPos.x - origin.x, worldPos.y - origin.y);
+			editGestureTracker.begin({ kind: 'label', id: hit.id, offset: dragOffset, startPose: dragStartPose });
+			e.preventDefault();
+			return true;
+		}
 		if (hit) {
-			// Local/global/hier labels land here too (kind:'label') — draggable
-			// and deletable like any other edit-mode element (see the
-			// Delete/Backspace handler above, which only excludes 'symbol').
+			// Non-label elements use the incremental delta drag path.
 			selectedRef = null;
 			editSelectedId = hit.id;
 			editSelectedKind = hit.kind;
