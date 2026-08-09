@@ -1,9 +1,9 @@
 import type { KicadRenderSession } from '@kicad-render/KicadRenderSession';
-import type { AppMode } from '../AppState';
-import type { PropertyPanel } from '../PropertyPanel';
-import type { PropertyRenderers } from '../PropertyRenderers';
-import type { PropertyDialogRenderers } from '../PropertyDialogRenderers';
-import type { PropertiesDialog } from '../PropertiesDialog';
+import type { AppMode } from '../app/AppState';
+import type { PropertyPanel } from '../ui/PropertyPanel';
+import type { PropertyRenderers } from '../ui/PropertyRenderers';
+import type { PropertyDialogRenderers } from '../ui/PropertyDialogRenderers';
+import type { PropertiesDialog } from '../ui/PropertiesDialog';
 
 export interface PropertiesControllerDeps {
 	getSession(): KicadRenderSession | null;

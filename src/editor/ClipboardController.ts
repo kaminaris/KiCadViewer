@@ -1,6 +1,6 @@
 import { Vec2 } from '@kicad-render/math/Vec2';
 import type { KicadRenderSession } from '@kicad-render/KicadRenderSession';
-import type { AppState } from './AppState';
+import type { AppState } from '../app/AppState';
 
 interface ClipboardEntry {
 	sourceText: string;

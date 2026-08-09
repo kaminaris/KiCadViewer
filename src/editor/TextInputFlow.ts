@@ -2,7 +2,7 @@ import type {
 	EditPreviewState, KicadDirectiveLabelShape, KicadGlobalLabelShape, KicadRenderSession
 }                        from '@kicad-render/KicadRenderSession';
 import { Vec2 }          from '@kicad-render/math/Vec2';
-import type { AppState } from './AppState';
+import type { AppState } from '../app/AppState';
 import type { EditTool } from './Toolbar';
 
 export interface TextInputFlowCallbacks {

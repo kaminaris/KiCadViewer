@@ -5,7 +5,7 @@ import {
 	SymbolLibraryCache,
 	type CachedSymbolFile,
 	type CachedSymbolSummary
-}                             from './SymbolLibraryCache';
+}                             from '../io/SymbolLibraryCache';
 
 type PendingSymbol = { file: CachedSymbolFile; summary: CachedSymbolSummary; libId: string };
 type PendingUnitState = { libId: string; reference: string; nextUnit: number; totalUnits: number };

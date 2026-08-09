@@ -3,7 +3,7 @@ import type {
 	SymbolDirectoryHandle,
 	SymbolLibraryProgress,
 	SymbolLibrarySummary
-} from '../SymbolLibraryCache';
+} from './SymbolLibraryCache';
 
 export interface SymbolLibraryIndexerDeps {
 	setStatus(message: string): void;

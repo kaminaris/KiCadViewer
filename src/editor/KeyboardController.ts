@@ -1,7 +1,7 @@
 import { Vec2 } from '@kicad-render/math/Vec2';
 import type { KicadRenderSession } from '@kicad-render/KicadRenderSession';
-import type { AppMode } from '../AppState';
-import type { EditTool } from '../Toolbar';
+import type { AppMode } from '../app/AppState';
+import type { EditTool } from './Toolbar';
 
 export interface KeyboardControllerCallbacks {
 	syncPendingShapeTracker(): void;

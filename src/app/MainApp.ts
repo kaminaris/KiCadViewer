@@ -12,29 +12,29 @@ import {
 }                                                                           from '@kicad-layout/index';
 import {
 	SymbolLibraryCache,
-}                                                                           from '../SymbolLibraryCache';
-import { StatusBar }                                                        from '../StatusBar';
-import { Settings }                                                         from '../Settings';
-import { AppState, type AppMode }                                           from '../AppState';
-import { SessionController, type SessionControllerState }                   from '../SessionController';
-import { SymbolChooser }                                                    from '../SymbolChooser';
+}                                                                           from '../io/SymbolLibraryCache';
+import { StatusBar }                                                        from './StatusBar';
+import { Settings }                                                         from './Settings';
+import { AppState, type AppMode }                                           from './AppState';
+import { SessionController, type SessionControllerState }                   from './SessionController';
+import { SymbolChooser }                                                    from '../ui/SymbolChooser';
 import {
 	Toolbar,
 	POWER_KIND_LABELS,
 	type EditTool as ToolbarEditTool,
 	type PowerKind
-}                                                                            from '../Toolbar';
+}                                                                            from '../editor/Toolbar';
 import {
 	TextInputFlow,
-}                                                                            from '../TextInputFlow';
-import { ContextMenu }                                                      from '../ContextMenu';
-import { PropertyPanel }                                                    from '../PropertyPanel';
-import { PropertyRenderers, MULTI_EDIT_NAMES as PROPERTY_MULTI_EDIT_NAMES } from '../PropertyRenderers';
-import { PropertyDialogRenderers }                                          from '../PropertyDialogRenderers';
-import { PendingShapeTracker }                                              from '../PendingShape';
-import { EditGestureTracker }                                               from '../EditGesture';
-import { PropertiesDialog }                                                 from '../PropertiesDialog';
-import { ClipboardController }                                              from '../ClipboardController';
+}                                                                            from '../editor/TextInputFlow';
+import { ContextMenu }                                                      from '../editor/ContextMenu';
+import { PropertyPanel }                                                    from '../ui/PropertyPanel';
+import { PropertyRenderers, MULTI_EDIT_NAMES as PROPERTY_MULTI_EDIT_NAMES } from '../ui/PropertyRenderers';
+import { PropertyDialogRenderers }                                          from '../ui/PropertyDialogRenderers';
+import { PendingShapeTracker }                                              from '../editor/PendingShape';
+import { EditGestureTracker }                                               from '../editor/EditGesture';
+import { PropertiesDialog }                                                 from '../ui/PropertiesDialog';
+import { ClipboardController }                                              from '../editor/ClipboardController';
 import { createMainDomRefs }                                                from './domRefs';
 import { FileActions }                                                      from '../io/FileActions';
 import { EditorRuntimeState }                                               from '../editor/EditorRuntimeState';

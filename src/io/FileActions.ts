@@ -1,6 +1,6 @@
 import { Vec2 } from '@kicad-render/math/Vec2';
 import type { KicadRenderSession } from '@kicad-render/KicadRenderSession';
-import type { AppMode } from '../AppState';
+import type { AppMode } from '../app/AppState';
 
 export interface EmbeddedImagePayload {
 	data: string;

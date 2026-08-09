@@ -1,5 +1,5 @@
 import type { KicadRenderSession } from '@kicad-render/KicadRenderSession';
-import type { EditTool } from '../Toolbar';
+import type { EditTool } from './Toolbar';
 
 export interface ToolStateControllerDeps {
 	getSession(): KicadRenderSession | null;

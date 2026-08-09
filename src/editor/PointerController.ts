@@ -2,10 +2,10 @@ import type {
 	KicadRenderSession, SelectionResizeBox, ResizeHandle, EditPreviewState, CurveAnchor, SelectionCurveAnchors
 } from '@kicad-render/KicadRenderSession';
 import { Vec2 } from '@kicad-render/math/Vec2';
-import type { AppMode } from '../AppState';
-import type { EditTool } from '../Toolbar';
-import type { EditGestureTracker } from '../EditGesture';
-import { TEXT_INPUT_TOOLS } from '../TextInputFlow';
+import type { AppMode } from '../app/AppState';
+import type { EditTool } from './Toolbar';
+import type { EditGestureTracker } from './EditGesture';
+import { TEXT_INPUT_TOOLS } from './TextInputFlow';
 import type { EditorRuntimeState } from './EditorRuntimeState';
 
 const RECT_SELECT_MOVE_THRESHOLD_PX = 4;
@@ -99,8 +99,11 @@ export class PointerController {
 				session.select(labelHit.id);
 				session.pushUndoSnapshot();
 				const world = session.screenToWorld(screenPos);
-				const element = (session as any).schScene?.hitTestItems?.find((it: any) => it.id === labelHit.id)?.element;
-				const origin = element?.getOrigin?.() ?? { x: world.x, y: world.y, rotation: 0 };
+				const hitItem = (session as any).schScene?.hitTestItems?.find((it: any) => it.id === labelHit.id);
+				const fieldOrigin = (hitItem as any)?.fieldOrigin;
+				const origin = fieldOrigin
+					? { x: fieldOrigin.x, y: fieldOrigin.y, rotation: fieldOrigin.rotation ?? 0 }
+					: (hitItem?.element as any)?.getOrigin?.() ?? { x: world.x, y: world.y, rotation: 0 };
 				this.deps.runtime.dragMoved = false;
 				this.deps.runtime.dragStartPose = { x: origin.x, y: origin.y, rotation: origin.rotation ?? 0 };
 				this.deps.runtime.dragOffset = new Vec2(world.x - origin.x, world.y - origin.y);
@@ -271,8 +274,11 @@ export class PointerController {
 				this.deps.setEditSelectedKind(hit.kind);
 				session.select(hit.id);
 				session.pushUndoSnapshot();
-				const element = (session as any).schScene?.hitTestItems?.find((item: any) => item.id === hit.id)?.element;
-				const origin = element?.getOrigin?.() ?? worldPos;
+				const hitItem = (session as any).schScene?.hitTestItems?.find((item: any) => item.id === hit.id);
+				const fieldOrigin = (hitItem as any)?.fieldOrigin;
+				const origin = fieldOrigin
+					? { x: fieldOrigin.x, y: fieldOrigin.y, rotation: fieldOrigin.rotation ?? 0 }
+					: (hitItem?.element as any)?.getOrigin?.() ?? worldPos;
 				this.deps.runtime.dragMoved = false;
 				this.deps.runtime.dragStartPose = { x: origin.x, y: origin.y, rotation: origin.rotation ?? 0 };
 				this.deps.runtime.dragOffset = new Vec2(worldPos.x - origin.x, worldPos.y - origin.y);

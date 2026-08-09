@@ -1,6 +1,6 @@
-import type { Settings } from '../Settings';
+import type { Settings } from './Settings';
 import type { MainDomRefs } from './domRefs';
-import type { AppMode } from '../AppState';
+import type { AppMode } from './AppState';
 
 export interface MainBootstrapOptions {
 	dom: MainDomRefs;

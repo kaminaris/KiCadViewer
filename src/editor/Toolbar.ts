@@ -1,5 +1,5 @@
-import { LABEL_TOOL_ICONS, POWER_KIND_ICONS, SHAPE_TOOL_ICONS } from './icons';
-import type { Settings }                                        from './Settings';
+import { LABEL_TOOL_ICONS, POWER_KIND_ICONS, SHAPE_TOOL_ICONS } from '../icons';
+import type { Settings }                                        from '../app/Settings';
 
 export type EditTool =
 	| 'select'

@@ -4,10 +4,10 @@ import type {
 	KicadDirectiveLabelShape,
 	KicadRenderSession
 } from '@kicad-render/KicadRenderSession';
-import type { ContextMenu } from '../ContextMenu';
-import type { ClipboardController } from '../ClipboardController';
-import type { AppState } from '../AppState';
-import type { EditTool, ToolGroupDef } from '../Toolbar';
+import type { ContextMenu } from './ContextMenu';
+import type { ClipboardController } from './ClipboardController';
+import type { AppState } from '../app/AppState';
+import type { EditTool, ToolGroupDef } from './Toolbar';
 
 export interface ContextMenuControllerDeps {
 	canvas: HTMLCanvasElement;
