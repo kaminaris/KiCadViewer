@@ -33,6 +33,14 @@ html, body {
 	letter-spacing: 0.02em;
 }
 
+.app-version {
+	margin-left: 0.5rem;
+	font-size: 11px;
+	font-weight: 400;
+	color: var(--muted);
+	font-variant-numeric: tabular-nums;
+}
+
 .modes button,
 .actions button,
 .file-btn {
@@ -172,11 +180,19 @@ main.edit-mode #general-side-content { display: none; }
 	background: #0a0e13;
 }
 
-#canvas2d {
+#canvas2d,
+#canvas-gl {
 	display: block;
+	position: absolute;
+	inset: 0;
 	width: 100%;
 	height: 100%;
 	touch-action: none;
+}
+
+#canvas2d.hidden,
+#canvas-gl.hidden {
+	display: none;
 }
 
 .tool-panel {

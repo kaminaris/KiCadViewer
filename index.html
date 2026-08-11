@@ -5,11 +5,11 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 	<title>KiCad Viewer</title>
 	<link rel="stylesheet" href="/KiCadViewer/styles.css" />
-  <script type="module" crossorigin src="/KiCadViewer/assets/index-D-o1APsg.js"></script>
+  <script type="module" crossorigin src="/KiCadViewer/assets/index-Cw9nFXi8.js"></script>
 </head>
 <body>
 	<header class="top">
-		<div class="brand">KiCad Viewer</div>
+		<div class="brand">KiCad Viewer<span class="app-version" id="app-version" title="Build info"></span></div>
 		<nav class="modes">
 			<button type="button" id="mode-view" class="active" title="View a schematic or board read-only">View (Read-only)</button>
 			<button type="button" id="mode-circuit">Circuit layout</button>
@@ -91,7 +91,8 @@
 			</div>
 		</aside>
 		<div class="stage" id="stage">
-			<canvas id="canvas2d"></canvas>
+			<canvas id="canvas2d" class="hidden"></canvas>
+			<canvas id="canvas-gl"></canvas>
 			<input type="text" id="edit-text-input" class="edit-text-input hidden" placeholder="Text…" autocomplete="off" />
 			<textarea id="edit-text-box-input" class="edit-text-input edit-text-box-input hidden" placeholder="Text…" autocomplete="off" rows="4"></textarea>
 			<div class="table-modal hidden" id="table-modal">
@@ -215,6 +216,7 @@
 			</select>
 		</label>
 		<span id="zoom-status">Zoom: —</span>
+		<span id="fps-status" title="Render rate — updates while actively interacting (pan/drag/zoom); the app only redraws on demand, so this goes quiet when idle"></span>
 	</footer>
 </body>
 </html>
