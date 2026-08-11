@@ -44,6 +44,8 @@ export interface WireMainAppInteractionsOptions {
 	getMode(): AppMode;
 	getCircuitDragMode(): boolean;
 	getEditTool(): EditTool;
+	getHighlightNetEnabled(): boolean;
+	setHighlightNetEnabled(enabled: boolean): void;
 	getCurrentPowerKind(): PowerKind;
 	getGridSpacingMm(): number;
 	ensurePlacement(ref: string): any | null;
@@ -112,7 +114,13 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 	}
 
 	const screenPosFromEvent = (e: MouseEvent): Vec2 => {
-		const rect = options.dom.canvas.getBoundingClientRect();
+		// .stage's rect, not the canvas's — canvas2d is display:none whenever
+		// WebGL is the active backend, and getBoundingClientRect() on a
+		// display:none element is all zeros. .stage is never hidden and both
+		// canvases fill it exactly (inset:0), so its rect is always right;
+		// .width/.height stay canvas2d's own backing-store pixels either way,
+		// since resize() keeps both canvases' pixel dimensions in sync.
+		const rect = options.dom.stage.getBoundingClientRect();
 		const x = (e.clientX - rect.left) * (options.dom.canvas.width / Math.max(1, rect.width));
 		const y = (e.clientY - rect.top) * (options.dom.canvas.height / Math.max(1, rect.height));
 		return new Vec2(x, y);
@@ -121,6 +129,10 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 	options.dom.modeViewBtn.addEventListener('click', () => options.sessionController.setMode('view'));
 	options.dom.modeCircuitBtn.addEventListener('click', () => options.sessionController.setMode('circuit'));
 	options.dom.modeEditBtn.addEventListener('click', () => options.sessionController.setMode('edit'));
+
+	options.dom.highlightNetButton.addEventListener('click', () => {
+		options.setHighlightNetEnabled(!options.getHighlightNetEnabled());
+	});
 
 	options.dom.fileInput.addEventListener('change', e => {
 		const file = (e.target as HTMLInputElement).files?.[0];
@@ -165,14 +177,18 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 	options.dom.exportEditButton.addEventListener('click', () => options.downloadSchematic());
 	options.dom.undoButton.addEventListener('click', () => void options.sessionController.undo());
 	options.dom.redoButton.addEventListener('click', () => void options.sessionController.redo());
-	options.dom.canvas.addEventListener('wheel', e => {
-		e.preventDefault();
-		options.sessionController.ensureSession().zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15);
-		options.updateStatusBar();
-	}, { passive: false });
+	for (const el of [options.dom.canvas, options.dom.canvasGl]) {
+		el.addEventListener('wheel', e => {
+			e.preventDefault();
+			options.sessionController.ensureSession().zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15);
+			options.updateStatusBar();
+		}, { passive: false });
+	}
 
 	new PointerController({
 		canvas: options.dom.canvas,
+		canvasGl: options.dom.canvasGl,
+		stage: options.dom.stage,
 		runtime: options.runtime,
 		editGestureTracker: options.editGestureTracker,
 		getSession: options.getSession,
@@ -181,6 +197,7 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		getMode: options.getMode,
 		getCircuitDragMode: options.getCircuitDragMode,
 		getEditTool: options.getEditTool,
+		getHighlightNetEnabled: options.getHighlightNetEnabled,
 		getCurrentPowerKind: options.getCurrentPowerKind,
 		getGridSpacingMm: options.getGridSpacingMm,
 		getContextMenuOpen: () => options.contextMenu.isOpen,
@@ -255,6 +272,7 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 
 	new ContextMenuController({
 		canvas: options.dom.canvas,
+		canvasGl: options.dom.canvasGl,
 		contextMenu: options.contextMenu,
 		clipboardController: options.clipboardController,
 		appState: options.appState,

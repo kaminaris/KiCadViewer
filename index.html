@@ -8,9 +8,9 @@
 </head>
 <body>
 	<header class="top">
-		<div class="brand">KiCad Viewer</div>
+		<div class="brand">KiCad Viewer<span class="app-version" id="app-version" title="Build info"></span></div>
 		<nav class="modes">
-			<button type="button" id="mode-view" class="active">Open file</button>
+			<button type="button" id="mode-view" class="active" title="View a schematic or board read-only">View (Read-only)</button>
 			<button type="button" id="mode-circuit">Circuit layout</button>
 			<button type="button" id="mode-edit">Edit</button>
 		</nav>
@@ -90,7 +90,8 @@
 			</div>
 		</aside>
 		<div class="stage" id="stage">
-			<canvas id="canvas2d"></canvas>
+			<canvas id="canvas2d" class="hidden"></canvas>
+			<canvas id="canvas-gl"></canvas>
 			<input type="text" id="edit-text-input" class="edit-text-input hidden" placeholder="Text…" autocomplete="off" />
 			<textarea id="edit-text-box-input" class="edit-text-input edit-text-box-input hidden" placeholder="Text…" autocomplete="off" rows="4"></textarea>
 			<div class="table-modal hidden" id="table-modal">
@@ -137,7 +138,7 @@
 			<button type="button" class="tool-btn active" data-tool="select" title="Select (S)">
 				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M6 3 L6 19 L10 15.5 L13 21 L15.5 19.7 L12.5 14.2 L18 14.2 Z"/></svg>
 			</button>
-			<button type="button" class="tool-btn" data-tool="highlight-net" title="Highlight Net — not yet implemented" disabled>
+			<button type="button" class="tool-btn" id="btn-highlight-net" title="Highlight Net">
 				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 16 H20"/><path d="M14 4 V10 M11 7 H17 M12 5 L16 9 M16 5 L12 9"/></svg>
 			</button>
 
@@ -214,6 +215,7 @@
 			</select>
 		</label>
 		<span id="zoom-status">Zoom: —</span>
+		<span id="fps-status" title="Render rate — updates while actively interacting (pan/drag/zoom); the app only redraws on demand, so this goes quiet when idle"></span>
 	</footer>
 	<script type="module" src="/src/main.ts"></script>
 </body>

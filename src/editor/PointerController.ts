@@ -13,6 +13,15 @@ const RESIZE_HANDLE_ORDER: readonly ResizeHandle[] = ['nw', 'n', 'ne', 'w', 'cen
 
 export interface PointerControllerDeps {
 	canvas: HTMLCanvasElement;
+	/** The WebGL canvas overlaid at the same position — whichever of the two
+	 *  is actually visible needs its own listeners, since a hidden
+	 *  (display:none) canvas never receives pointer events. */
+	canvasGl: HTMLCanvasElement;
+	/** Shared parent of both canvases — used for getBoundingClientRect()
+	 *  instead of `canvas` specifically, since canvas2d is display:none
+	 *  whenever WebGL is active and a hidden element's rect is all zeros.
+	 *  Both canvases fill .stage exactly, so its rect is always right. */
+	stage: HTMLElement;
 	runtime: EditorRuntimeState;
 	editGestureTracker: EditGestureTracker;
 	getSession(): KicadRenderSession | null;
@@ -21,6 +30,7 @@ export interface PointerControllerDeps {
 	getMode(): AppMode;
 	getCircuitDragMode(): boolean;
 	getEditTool(): EditTool;
+	getHighlightNetEnabled(): boolean;
 	getCurrentPowerKind(): 'gnd' | 'flag' | 'rail';
 	getGridSpacingMm(): number;
 	getContextMenuOpen(): boolean;
@@ -63,8 +73,10 @@ export interface PointerControllerDeps {
 /** Owns canvas/window pointer event flow and drag commit behavior. */
 export class PointerController {
 	constructor(protected readonly deps: PointerControllerDeps) {
-		this.deps.canvas.addEventListener('mousedown', event => this.onMouseDown(event));
-		this.deps.canvas.addEventListener('dblclick', event => this.onDoubleClick(event));
+		for (const el of [this.deps.canvas, this.deps.canvasGl]) {
+			el.addEventListener('mousedown', event => this.onMouseDown(event));
+			el.addEventListener('dblclick', event => this.onDoubleClick(event));
+		}
 		window.addEventListener('mousemove', event => this.onPointerMove(event));
 		window.addEventListener('mouseup', event => this.onPointerUp(event));
 	}
@@ -75,6 +87,13 @@ export class PointerController {
 		}
 		const session = this.deps.ensureSession();
 		const screenPos = this.screenPosFromEvent(e);
+		if (this.deps.getHighlightNetEnabled() && e.button === 0) {
+			const highlighted = session.highlightNetAtScreen(screenPos);
+			if (highlighted) {
+				e.preventDefault();
+				return;
+			}
+		}
 		if (this.deps.getMode() === 'edit') {
 			if (this.handleEditModeMouseDown(e, session, screenPos)) {
 				return;
@@ -104,15 +123,10 @@ export class PointerController {
 				const origin = fieldOrigin
 					? { x: fieldOrigin.x, y: fieldOrigin.y, rotation: fieldOrigin.rotation ?? 0 }
 					: (hitItem?.element as any)?.getOrigin?.() ?? { x: world.x, y: world.y, rotation: 0 };
+				const startPose = { x: origin.x, y: origin.y, rotation: origin.rotation ?? 0 };
+				const offset = new Vec2(world.x - origin.x, world.y - origin.y);
 				this.deps.runtime.dragMoved = false;
-				this.deps.runtime.dragStartPose = { x: origin.x, y: origin.y, rotation: origin.rotation ?? 0 };
-				this.deps.runtime.dragOffset = new Vec2(world.x - origin.x, world.y - origin.y);
-				this.deps.editGestureTracker.begin({
-					kind: 'label',
-					id: labelHit.id,
-					offset: this.deps.runtime.dragOffset,
-					startPose: this.deps.runtime.dragStartPose
-				});
+				this.deps.editGestureTracker.begin({ kind: 'label', id: labelHit.id, offset, startPose });
 				e.preventDefault();
 				return;
 			}
@@ -279,12 +293,10 @@ export class PointerController {
 				const origin = fieldOrigin
 					? { x: fieldOrigin.x, y: fieldOrigin.y, rotation: fieldOrigin.rotation ?? 0 }
 					: (hitItem?.element as any)?.getOrigin?.() ?? worldPos;
+				const startPose = { x: origin.x, y: origin.y, rotation: origin.rotation ?? 0 };
+				const offset = new Vec2(worldPos.x - origin.x, worldPos.y - origin.y);
 				this.deps.runtime.dragMoved = false;
-				this.deps.runtime.dragStartPose = { x: origin.x, y: origin.y, rotation: origin.rotation ?? 0 };
-				this.deps.runtime.dragOffset = new Vec2(worldPos.x - origin.x, worldPos.y - origin.y);
-				this.deps.editGestureTracker.begin({
-					kind: 'label', id: hit.id, offset: this.deps.runtime.dragOffset, startPose: this.deps.runtime.dragStartPose
-				});
+				this.deps.editGestureTracker.begin({ kind: 'label', id: hit.id, offset, startPose });
 				e.preventDefault();
 				return true;
 			}
@@ -305,6 +317,12 @@ export class PointerController {
 		}
 
 		if (editTool === 'wire' || editTool === 'bus') {
+			if (e.button === 2) {
+				this.deps.setLineChainStart(null);
+				session.setEditPreview(null);
+				e.preventDefault();
+				return true;
+			}
 			const lineChainStart = this.deps.getLineChainStart();
 			if (!lineChainStart) {
 				this.deps.setLineChainStart(snapped);
@@ -519,6 +537,9 @@ export class PointerController {
 		const pos = this.screenPosFromEvent(e);
 		this.deps.runtime.lastPointerWorld = session.screenToWorld(pos);
 		this.deps.updateStatusBar(pos);
+		if (!this.deps.getHighlightNetEnabled()) {
+			session.clearNetHighlight();
+		}
 
 		if (this.deps.getMode() === 'edit' && this.deps.getEditTool() !== 'select') {
 			const worldPos = session.screenToWorld(pos);
@@ -682,7 +703,6 @@ export class PointerController {
 			: null;
 		const isRectGesture = !!rectGesture;
 		const isGroupGesture = gestureKind === 'group';
-		this.deps.editGestureTracker.moved = moved;
 		this.deps.runtime.draggingPan = false;
 
 		const session = this.deps.getSession();
@@ -714,7 +734,6 @@ export class PointerController {
 		}
 		this.deps.runtime.dragMoved = false;
 		this.deps.runtime.dragUndoCaptured = false;
-		this.deps.runtime.dragStartPose = null;
 		this.deps.updateEditSidebar();
 	}
 
@@ -749,7 +768,10 @@ export class PointerController {
 	}
 
 	protected screenPosFromEvent(e: MouseEvent): Vec2 {
-		const rect = this.deps.canvas.getBoundingClientRect();
+		// .stage's rect, not the canvas's — see PointerControllerDeps.stage's
+		// doc comment for why (canvas2d is display:none whenever WebGL is
+		// active, and getBoundingClientRect() on it would be all zeros).
+		const rect = this.deps.stage.getBoundingClientRect();
 		const x = (e.clientX - rect.left) * (this.deps.canvas.width / Math.max(1, rect.width));
 		const y = (e.clientY - rect.top) * (this.deps.canvas.height / Math.max(1, rect.height));
 		return new Vec2(x, y);
@@ -843,7 +865,14 @@ export class PointerController {
 			if (item?.kind !== 'label' || item.labelKind === 'sheet-pin') {
 				continue;
 			}
-			const origin = (item.element as any)?.getOrigin?.();
+			let origin: { x: number; y: number; rotation?: number } | null = null;
+			if (item.labelKind === 'symbol-field' && item.fieldName) {
+				const prop = (item.element as any)?.getPropertyByName?.(item.fieldName);
+				origin = prop?.getOrigin?.() ?? null;
+			}
+			else {
+				origin = (item.element as any)?.getOrigin?.() ?? null;
+			}
 			if (!origin) {
 				continue;
 			}
@@ -874,12 +903,10 @@ export class PointerController {
 		this.deps.dbg('beginSymbolDrag', placement);
 		session.pushUndoSnapshot('Symbol drag');
 		const world = session.screenToWorld(screenPos);
+		const startPose = { x: placement.x, y: placement.y, rotation: placement.rotation };
+		const offset = new Vec2(world.x - placement.x, world.y - placement.y);
 		this.deps.runtime.dragMoved = false;
-		this.deps.runtime.dragStartPose = { x: placement.x, y: placement.y, rotation: placement.rotation };
-		this.deps.runtime.dragOffset = new Vec2(world.x - placement.x, world.y - placement.y);
-		this.deps.editGestureTracker.begin({
-			kind: 'symbol', ref, instanceId: null, offset: this.deps.runtime.dragOffset, startPose: this.deps.runtime.dragStartPose
-		});
+		this.deps.editGestureTracker.begin({ kind: 'symbol', ref, instanceId: null, offset, startPose });
 	}
 
 	protected beginEditSymbolDrag(ref: string, instanceId: string, screenPos: Vec2): void {
@@ -892,12 +919,10 @@ export class PointerController {
 			return;
 		}
 		const world = session.screenToWorld(screenPos);
+		const startPose = { x: pose.x, y: pose.y, rotation: pose.rotation };
+		const offset = new Vec2(world.x - pose.x, world.y - pose.y);
 		this.deps.runtime.dragMoved = false;
-		this.deps.runtime.dragStartPose = { x: pose.x, y: pose.y, rotation: pose.rotation };
-		this.deps.runtime.dragOffset = new Vec2(world.x - pose.x, world.y - pose.y);
-		this.deps.editGestureTracker.begin({
-			kind: 'symbol', ref, instanceId, offset: this.deps.runtime.dragOffset, startPose: this.deps.runtime.dragStartPose
-		});
+		this.deps.editGestureTracker.begin({ kind: 'symbol', ref, instanceId, offset, startPose });
 	}
 
 	protected beginSheetDrag(paintId: string, screenPos: Vec2): void {
@@ -912,12 +937,10 @@ export class PointerController {
 		}
 		const pos = sheet.getPosition();
 		const world = session.screenToWorld(screenPos);
+		const startPose = { x: pos.x, y: pos.y, rotation: 0 };
+		const offset = new Vec2(world.x - pos.x, world.y - pos.y);
 		this.deps.runtime.dragMoved = false;
-		this.deps.runtime.dragStartPose = { x: pos.x, y: pos.y, rotation: 0 };
-		this.deps.runtime.dragOffset = new Vec2(world.x - pos.x, world.y - pos.y);
-		this.deps.editGestureTracker.begin({
-			kind: 'sheet', id: paintId, offset: this.deps.runtime.dragOffset, startPose: this.deps.runtime.dragStartPose
-		});
+		this.deps.editGestureTracker.begin({ kind: 'sheet', id: paintId, offset, startPose });
 	}
 
 	protected beginSheetPinDrag(paintId: string, screenPos: Vec2): void {
@@ -932,11 +955,9 @@ export class PointerController {
 		}
 		const pos = pin.getOrigin();
 		const world = session.screenToWorld(screenPos);
+		const startPose = { x: pos.x, y: pos.y, rotation: pos.rotation ?? 0 };
+		const offset = new Vec2(world.x - pos.x, world.y - pos.y);
 		this.deps.runtime.dragMoved = false;
-		this.deps.runtime.dragStartPose = { x: pos.x, y: pos.y, rotation: pos.rotation ?? 0 };
-		this.deps.runtime.dragOffset = new Vec2(world.x - pos.x, world.y - pos.y);
-		this.deps.editGestureTracker.begin({
-			kind: 'sheet-pin', id: paintId, offset: this.deps.runtime.dragOffset, startPose: this.deps.runtime.dragStartPose
-		});
+		this.deps.editGestureTracker.begin({ kind: 'sheet-pin', id: paintId, offset, startPose });
 	}
 }

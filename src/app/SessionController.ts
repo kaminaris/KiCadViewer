@@ -9,6 +9,7 @@ import type { AppMode }       from './AppState';
 import type { AppState }      from './AppState';
 import type { Settings }      from './Settings';
 import type { StatusBar }     from './StatusBar';
+import type { MainDomRefs }   from './domRefs';
 
 /** Mutable state still owned by main.ts during the staged refactor. The
  * controller uses this narrow adapter instead of reaching for loose module
@@ -61,55 +62,53 @@ export interface SessionControllerCallbacks {
  * Circuit routing remains in main.ts temporarily because its gesture callers
  * still share the placement and selection variables directly. */
 export class SessionController {
-	protected readonly canvas = document.getElementById('canvas2d') as HTMLCanvasElement;
-	protected readonly stage = document.getElementById('stage')!;
-	protected readonly modeViewBtn = document.getElementById('mode-view')!;
-	protected readonly modeCircuitBtn = document.getElementById('mode-circuit')!;
-	protected readonly modeEditBtn = document.getElementById('mode-edit')!;
-	protected readonly viewActions = document.getElementById('view-actions')!;
-	protected readonly circuitActions = document.getElementById('circuit-actions')!;
-	protected readonly editActions = document.getElementById('edit-actions')!;
-	protected readonly editLeftPane = document.getElementById('edit-left-pane')!;
-	protected readonly toolPanel = document.getElementById('tool-panel')!;
-	protected readonly mainEl = document.querySelector('main')!;
-
 	constructor(
 		protected readonly state: SessionControllerState,
 		protected readonly appState: AppState,
 		protected readonly settings: Settings,
 		protected readonly statusBar: StatusBar,
+		protected readonly dom: MainDomRefs,
 		protected readonly callbacks: SessionControllerCallbacks
 	) {}
 
 	ensureSession(): KicadRenderSession {
 		if (!this.state.session) {
-			this.state.session = new KicadRenderSession(this.canvas, null);
+			this.state.session = new KicadRenderSession(this.dom.canvas, this.dom.canvasGl);
 			this.state.session.onError = error => this.statusBar.setStatus(
 				error instanceof Error ? error.message : String(error));
+			this.state.session.onRender = () => this.statusBar.recordRender();
 			this.state.session.setGridSpacing(this.settings.current.gridSpacingMm);
+			if (!this.state.session.hasWebGL) {
+				// WebGL context creation failed (disabled GPU, headless
+				// environment, etc.) — the session already fell back to
+				// Canvas2D internally; swap which canvas is visible to match.
+				this.dom.canvas.classList.remove('hidden');
+				this.dom.canvasGl.classList.add('hidden');
+				this.statusBar.dbg('WebGL unavailable, using Canvas2D fallback');
+			}
 		}
 		return this.state.session;
 	}
 
 	resizeCanvas(): void {
 		const dpr = window.devicePixelRatio || 1;
-		const width = Math.max(1, Math.floor(this.stage.clientWidth * dpr));
-		const height = Math.max(1, Math.floor(this.stage.clientHeight * dpr));
+		const width = Math.max(1, Math.floor(this.dom.stage.clientWidth * dpr));
+		const height = Math.max(1, Math.floor(this.dom.stage.clientHeight * dpr));
 		this.ensureSession().resize(width, height);
 	}
 
 	setMode(next: AppMode): void {
 		this.state.mode = next;
 		this.state.circuitDragMode = next === 'circuit';
-		this.modeViewBtn.classList.toggle('active', next === 'view');
-		this.modeCircuitBtn.classList.toggle('active', next === 'circuit');
-		this.modeEditBtn.classList.toggle('active', next === 'edit');
-		this.viewActions.classList.toggle('hidden', next !== 'view');
-		this.circuitActions.classList.toggle('hidden', next !== 'circuit');
-		this.editActions.classList.toggle('hidden', next !== 'edit');
-		this.editLeftPane.classList.toggle('hidden', next !== 'edit');
-		this.toolPanel.classList.toggle('hidden', next !== 'edit');
-		this.mainEl.classList.toggle('edit-mode', next === 'edit');
+		this.dom.modeViewBtn.classList.toggle('active', next === 'view');
+		this.dom.modeCircuitBtn.classList.toggle('active', next === 'circuit');
+		this.dom.modeEditBtn.classList.toggle('active', next === 'edit');
+		this.dom.viewActions.classList.toggle('hidden', next !== 'view');
+		this.dom.circuitActions.classList.toggle('hidden', next !== 'circuit');
+		this.dom.editActions.classList.toggle('hidden', next !== 'edit');
+		this.dom.editLeftPane.classList.toggle('hidden', next !== 'edit');
+		this.dom.toolPanel.classList.toggle('hidden', next !== 'edit');
+		this.dom.mainEl.classList.toggle('edit-mode', next === 'edit');
 		if (next !== 'edit') {
 			this.callbacks.closeSymbolChooser();
 			this.callbacks.resetEditToolState();
@@ -142,57 +141,75 @@ export class SessionController {
 		this.callbacks.refreshSidebar();
 	}
 
-	async loadText(text: string, kind: 'schematic' | 'board', filename: string): Promise<void> {
+	/** Returns false (and reports the failure via the status bar) if the file
+	 *  couldn't be parsed/loaded — malformed input or an unsupported KiCad
+	 *  construct shouldn't crash the app for someone just viewing a file. */
+	async loadText(text: string, kind: 'schematic' | 'board', filename: string): Promise<boolean> {
 		const session = this.ensureSession();
 		this.resizeCanvas();
-		session.resetUndoHistory();
-		this.callbacks.clearLastPointer();
-		if (kind === 'board') {
-			await session.loadBoardText(text);
-			this.state.placements = [];
-			this.state.lockedNetlist = null;
-			if (this.state.mode === 'circuit') {
-				this.statusBar.setStatus('Boards are view-only — open a schematic to edit placements.');
+		try {
+			session.resetUndoHistory();
+			this.callbacks.clearLastPointer();
+			if (kind === 'board') {
+				await session.loadBoardText(text);
+				this.state.placements = [];
+				this.state.lockedNetlist = null;
+				if (this.state.mode === 'circuit') {
+					this.statusBar.setStatus('Boards are view-only — open a schematic to edit placements.');
+				}
+			}
+			else {
+				this.appState.setSchematicText(text);
+				this.state.placedFragment = text;
+				this.callbacks.lockNetlistFromText(text, true);
+				await session.loadSchematicText(text, {
+					filename,
+					sheetPath: '/',
+					showDrawingSheet: this.state.mode === 'view'
+				});
+				if (this.state.mode === 'circuit' || this.state.circuitDragMode) {
+					const count = this.callbacks.syncPlacementsFromSession();
+					const nets = this.state.lockedNetlist?.summary.netCount ?? 0;
+					this.statusBar.setStatus(count
+						? (this.callbacks.canLockedAutoroute()
+							? `Edit on — ${ count } parts, ${ nets } nets locked. Drag / R to auto-rewire.`
+							: `Edit on — ${ count } parts (could not lock nets for rewire).`)
+						: 'Schematic loaded but no symbol instances found to edit.');
+				}
 			}
 		}
-		else {
-			this.appState.setSchematicText(text);
-			this.state.placedFragment = text;
-			this.callbacks.lockNetlistFromText(text, true);
-			await session.loadSchematicText(text, {
-				filename,
-				sheetPath: '/',
-				showDrawingSheet: this.state.mode === 'view'
-			});
-			if (this.state.mode === 'circuit' || this.state.circuitDragMode) {
-				const count = this.callbacks.syncPlacementsFromSession();
-				const nets = this.state.lockedNetlist?.summary.netCount ?? 0;
-				this.statusBar.setStatus(count
-					? (this.callbacks.canLockedAutoroute()
-						? `Edit on — ${ count } parts, ${ nets } nets locked. Drag / R to auto-rewire.`
-						: `Edit on — ${ count } parts (could not lock nets for rewire).`)
-					: 'Schematic loaded but no symbol instances found to edit.');
-			}
+		catch (error) {
+			this.statusBar.dbg('loadText failed', { kind, filename, error });
+			this.statusBar.setStatus(
+				`Could not load ${ filename } — ${ error instanceof Error ? error.message : String(error) }`);
+			// Resync the cache to whatever the session actually has loaded (the
+			// failed parse may have left it unchanged) rather than the broken
+			// text optimistically written above.
+			this.appState.refreshSchematicText(session);
+			return false;
 		}
 		this.callbacks.refreshHint();
 		this.callbacks.refreshSidebar();
+		return true;
 	}
 
 	async openKiCadFile(file: File): Promise<void> {
-		const text = await file.text();
-		const name = file.name.toLowerCase();
-		this.statusBar.dbg('openKiCadFile', { name, mode: this.state.mode, bytes: text.length });
-		if (name.endsWith('.kicad_pcb')) {
-			await this.loadText(text, 'board', file.name);
-			if (this.state.mode === 'view') {
-				this.statusBar.setStatus(`Loaded board ${ file.name }`);
+		try {
+			const text = await file.text();
+			const name = file.name.toLowerCase();
+			this.statusBar.dbg('openKiCadFile', { name, mode: this.state.mode, bytes: text.length });
+			if (name.endsWith('.kicad_pcb')) {
+				if (await this.loadText(text, 'board', file.name) && this.state.mode === 'view') {
+					this.statusBar.setStatus(`Loaded board ${ file.name }`);
+				}
 			}
-		}
-		else {
-			await this.loadText(text, 'schematic', file.name);
-			if (this.state.mode === 'view') {
+			else if (await this.loadText(text, 'schematic', file.name) && this.state.mode === 'view') {
 				this.statusBar.setStatus(`Loaded schematic ${ file.name }. Switch to Circuit layout to drag/rotate.`);
 			}
+		}
+		catch (error) {
+			this.statusBar.setStatus(
+				`Could not open ${ file.name } — ${ error instanceof Error ? error.message : String(error) }`);
 		}
 	}
 
@@ -225,7 +242,10 @@ export class SessionController {
 			this.state.placedFragment = result.kicadSchFragment;
 			this.appState.setSchematicText(wrapFullSchematic(result.kicadSchFragment));
 			this.state.circuitDragMode = true;
-			void this.loadText(this.appState.schematicText, 'schematic', 'circuit-place.kicad_sch').then(() => {
+			void this.loadText(this.appState.schematicText, 'schematic', 'circuit-place.kicad_sch').then(loaded => {
+				if (!loaded) {
+					return;
+				}
 				this.state.lockedNetlist = null;
 				this.state.placements = result.placements;
 				this.statusBar.setStatus(

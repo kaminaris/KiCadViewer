@@ -33,16 +33,13 @@ export type EditGesture =
 	| { kind: 'group'; lastSnapped: Vec2 };
 
 /**
- * Owns the active gesture plus the two flags that glue the family together:
- * `moved` (written by every kind, read once at gesture end to decide
- * commit-or-discard) and `undoCaptured` (only the lazily-undo-capturing
- * kinds use it — 'symbol'/'label'/'sheet'/'sheet-pin' drags push undo
- * eagerly at begin() instead, via the caller, not this class).
+ * Owns the active edit gesture — exactly one kind (or 'none') at a time.
+ * moved/undo-capture bookkeeping lives on EditorRuntimeState instead: both
+ * are driven from pointer-move deltas that only the caller sees per frame,
+ * not state this tracker itself could derive.
  */
 export class EditGestureTracker {
 	protected gesture: EditGesture = { kind: 'none' };
-	moved = false;
-	undoCaptured = false;
 
 	get current(): EditGesture {
 		return this.gesture;
@@ -54,12 +51,10 @@ export class EditGestureTracker {
 
 	begin(gesture: EditGesture): void {
 		this.gesture = gesture;
-		this.moved = false;
-		this.undoCaptured = false;
 	}
 
 	/** In-place payload update for the re-anchor-every-frame kinds ('element'
-	 *  and 'group''s lastSnapped) — does not reset moved/undoCaptured. */
+	 *  and 'group''s lastSnapped). */
 	update(gesture: EditGesture): void {
 		this.gesture = gesture;
 	}

@@ -46,6 +46,19 @@ import { wireMainAppInteractions }                                          from
 type EditTool = ToolbarEditTool;
 
 const statusBar = new StatusBar();
+
+/** Safety net for failures outside the explicit try/catches (file loading,
+ *  reroute, etc. already report their own status) — an unhandled error
+ *  should never fail silently for someone who isn't watching devtools. The
+ *  browser still logs the original error/stack to the console as usual. */
+window.addEventListener('error', event => {
+	statusBar.setStatus(`Unexpected error: ${ event.error instanceof Error ? event.error.message : event.message }`);
+});
+window.addEventListener('unhandledrejection', event => {
+	const reason = event.reason;
+	statusBar.setStatus(`Unexpected error: ${ reason instanceof Error ? reason.message : String(reason) }`);
+});
+
 const settings = new Settings();
 settings.load();
 const dom = createMainDomRefs();
@@ -81,11 +94,13 @@ const symbolLibraryIndexer = new SymbolLibraryIndexer(symbolLibraryCache, {
 
 
 let mode: AppMode = 'view';
+let highlightNetEnabled = false;
 /** Circuit-mode dragging (auto-rewire on drop). Always on in circuit mode —
  *  distinct from edit mode's manual, non-rewiring drag. */
 let circuitDragMode = false;
 let session: KicadRenderSession | null = null;
 let recipe: CircuitDesignRecipe | null = null;
+setHighlightNetEnabled(false);
 let icSymbolText = '';
 let placements: CircuitPlacement[] = [];
 let placedFragment = '';
@@ -184,6 +199,17 @@ function snap(n: number): number { return settings.snap(n); }
 function setGridSpacing(mm: number): void {
 	settings.setGridSpacingMm(mm);
 	session?.setGridSpacing(mm);
+}
+
+function setHighlightNetEnabled(enabled: boolean): void {
+	highlightNetEnabled = enabled;
+	dom.highlightNetButton.classList.toggle('active', enabled);
+	dom.highlightNetButton.setAttribute('aria-pressed', String(enabled));
+	dom.highlightNetButton.title = enabled ? 'Highlight Net (click a pin/label/wire to select the net)' : 'Highlight Net';
+	dom.canvas.style.cursor = enabled ? 'crosshair' : '';
+	if (!enabled) {
+		session?.clearNetHighlight();
+	}
 }
 
 dom.gridSelectEl.addEventListener('change', () => {
@@ -307,7 +333,7 @@ toolStateController = new ToolStateController({
 });
 
 let sessionController: SessionController;
-sessionController = new SessionController(sessionControllerState, appState, settings, statusBar, {
+sessionController = new SessionController(sessionControllerState, appState, settings, statusBar, dom, {
 	closeSymbolChooser: () => symbolChooser.clearPlacement(),
 	resetEditToolState: () => toolStateController.resetEditToolState(),
 	refreshHint: updateCircuitHint,
@@ -448,6 +474,8 @@ wireMainAppInteractions({
 	getMode: () => mode,
 	getCircuitDragMode: () => circuitDragMode,
 	getEditTool: () => editTool,
+	getHighlightNetEnabled: () => highlightNetEnabled,
+	setHighlightNetEnabled,
 	getCurrentPowerKind: () => currentPowerKind,
 	getGridSpacingMm: () => settings.current.gridSpacingMm,
 	ensurePlacement: ref => sessionController.ensurePlacement(ref),

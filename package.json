@@ -1,13 +1,13 @@
 {
 	"name": "kicad-viewer",
 	"private": true,
-	"version": "0.1.0",
+	"version": "0.1.2",
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
 		"build": "tsc -p tsconfig.json --noEmit && vite build",
 		"preview": "vite preview",
-		"deploy": "yarn build && npx --yes gh-pages@6 -d dist -b gh-pages"
+		"ghpages": "yarn build && npx --yes gh-pages@6 -d dist -b gh-pages"
 	},
 	"devDependencies": {
 		"typescript": "^5.8.2",

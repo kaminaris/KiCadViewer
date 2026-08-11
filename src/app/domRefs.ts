@@ -22,6 +22,7 @@ export interface MainDomRefs {
 	lockedNetsEl: HTMLElement;
 	stage: HTMLElement;
 	canvas: HTMLCanvasElement;
+	canvasGl: HTMLCanvasElement;
 	modeViewBtn: HTMLElement;
 	modeCircuitBtn: HTMLElement;
 	modeEditBtn: HTMLElement;
@@ -34,6 +35,7 @@ export interface MainDomRefs {
 	editPropertiesEl: HTMLElement;
 	editHierarchyEl: HTMLElement;
 	toolPanel: HTMLElement;
+	highlightNetButton: HTMLButtonElement;
 	mainEl: HTMLElement;
 	editTextInput: HTMLInputElement;
 	editTextBoxInput: HTMLTextAreaElement;
@@ -68,6 +70,7 @@ export function createMainDomRefs(): MainDomRefs {
 		lockedNetsEl: requiredById<HTMLElement>('locked-nets'),
 		stage: requiredById<HTMLElement>('stage'),
 		canvas: requiredById<HTMLCanvasElement>('canvas2d'),
+		canvasGl: requiredById<HTMLCanvasElement>('canvas-gl'),
 		modeViewBtn: requiredById<HTMLElement>('mode-view'),
 		modeCircuitBtn: requiredById<HTMLElement>('mode-circuit'),
 		modeEditBtn: requiredById<HTMLElement>('mode-edit'),
@@ -80,6 +83,7 @@ export function createMainDomRefs(): MainDomRefs {
 		editPropertiesEl: requiredById<HTMLElement>('edit-properties'),
 		editHierarchyEl: requiredById<HTMLElement>('edit-hierarchy'),
 		toolPanel: requiredById<HTMLElement>('tool-panel'),
+		highlightNetButton: requiredById<HTMLButtonElement>('btn-highlight-net'),
 		mainEl: requiredSelector<HTMLElement>('main'),
 		editTextInput: requiredById<HTMLInputElement>('edit-text-input'),
 		editTextBoxInput: requiredById<HTMLTextAreaElement>('edit-text-box-input'),

@@ -11,6 +11,8 @@ import type { EditTool, ToolGroupDef } from './Toolbar';
 
 export interface ContextMenuControllerDeps {
 	canvas: HTMLCanvasElement;
+	/** See PointerControllerDeps.canvasGl — same reasoning. */
+	canvasGl: HTMLCanvasElement;
 	contextMenu: ContextMenu;
 	clipboardController: ClipboardController;
 	appState: AppState;
@@ -40,7 +42,9 @@ export interface ContextMenuControllerDeps {
 
 export class ContextMenuController {
 	constructor(protected readonly deps: ContextMenuControllerDeps) {
-		deps.canvas.addEventListener('contextmenu', e => this.onContextMenu(e));
+		for (const el of [deps.canvas, deps.canvasGl]) {
+			el.addEventListener('contextmenu', e => this.onContextMenu(e));
+		}
 	}
 
 	protected onContextMenu(e: MouseEvent): void {

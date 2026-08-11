@@ -47,7 +47,6 @@ export class TextInputFlow {
 	protected readonly columnsInput = document.getElementById('table-columns') as HTMLInputElement;
 	protected readonly dataInput = document.getElementById('table-data') as HTMLTextAreaElement;
 	protected readonly stage = document.getElementById('stage')!;
-	protected readonly canvas = document.getElementById('canvas2d') as HTMLCanvasElement;
 	protected textAnchor: Vec2 | null = null;
 	protected boxBounds: { x: number; y: number; width: number; height: number } | null = null;
 	protected tableAnchor: Vec2 | null = null;
@@ -140,13 +139,14 @@ export class TextInputFlow {
 			return;
 		}
 		const origin = element.getOrigin?.() ?? { x: 0, y: 0 }, anchor = new Vec2(origin.x, origin.y),
-			screen = session.camera.worldToScreen(anchor), rect = this.canvas.getBoundingClientRect(),
+			screen = session.camera.worldToScreen(anchor),
 			dpr = window.devicePixelRatio || 1;
 		this.editingLabelId = id;
-		const stageRect = this.stage.getBoundingClientRect();
+		// screen.x/y are already stage-relative CSS pixels — both canvases
+		// sit at .stage's own origin (inset:0), so no extra rect math needed.
 		this.textAnchor = anchor;
-		this.input.style.left = `${ rect.left + screen.x / dpr - stageRect.left }px`;
-		this.input.style.top = `${ rect.top + screen.y / dpr - stageRect.top }px`;
+		this.input.style.left = `${ screen.x / dpr }px`;
+		this.input.style.top = `${ screen.y / dpr }px`;
 		this.input.value = element.getName?.() ?? String(element.value ?? '');
 		this.input.placeholder = 'Edit text…';
 		this.input.classList.remove('hidden');
