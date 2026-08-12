@@ -1,14 +1,19 @@
-import type { Settings } from './Settings';
+import type { Settings }    from './Settings';
 import type { MainDomRefs } from './domRefs';
-import type { AppMode } from './AppState';
+import type { AppMode }     from './AppState';
 
 export interface MainBootstrapOptions {
 	dom: MainDomRefs;
 	settings: Settings;
+
 	setMode(mode: AppMode): void;
+
 	ensureSession(): void;
+
 	resizeCanvas(): void;
+
 	refreshSymbolLibraryButton(): Promise<void>;
+
 	updateStatusBar(): void;
 }
 

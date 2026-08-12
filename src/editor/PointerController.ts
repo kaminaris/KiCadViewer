@@ -68,6 +68,13 @@ export interface PointerControllerDeps {
 	showTableModal(anchor: Vec2): void;
 	showTableEditModal(id: string): void;
 	showPropertiesModal(id: string): void;
+	/** Double-click-a-sheet-symbol-to-descend, only meaningful when a whole
+	 *  project (not a single loose file) is open — see
+	 *  SessionController.descendIntoSheetAtScreen. Resolves false when
+	 *  there's nothing to descend into (no project open, or no sheet symbol
+	 *  under the cursor), letting the caller fall through to normal
+	 *  view-mode behavior (pan-drag) unchanged. */
+	descendIntoSheetAtScreen(screenPos: Vec2): Promise<boolean>;
 }
 
 /** Owns canvas/window pointer event flow and drag commit behavior. */
@@ -738,6 +745,10 @@ export class PointerController {
 	}
 
 	protected onDoubleClick(event: MouseEvent): void {
+		if (this.deps.getMode() === 'view') {
+			void this.deps.descendIntoSheetAtScreen(this.screenPosFromEvent(event));
+			return;
+		}
 		if (this.deps.getMode() === 'edit' && this.deps.getEditTool() === 'rule-area' && this.deps.getRuleAreaPoints().length >= 3) {
 			const session = this.deps.ensureSession();
 			session.addRuleArea(this.deps.getRuleAreaPoints().map(point => ({ x: point.x, y: point.y })));

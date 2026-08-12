@@ -11,7 +11,7 @@ import {
 	type LockedNetlist
 }                                                                           from '@kicad-layout/index';
 import {
-	SymbolLibraryCache,
+	SymbolLibraryCache
 }                                                                           from '../io/SymbolLibraryCache';
 import { StatusBar }                                                        from './StatusBar';
 import { Settings }                                                         from './Settings';
@@ -23,10 +23,10 @@ import {
 	POWER_KIND_LABELS,
 	type EditTool as ToolbarEditTool,
 	type PowerKind
-}                                                                            from '../editor/Toolbar';
+}                                                                           from '../editor/Toolbar';
 import {
-	TextInputFlow,
-}                                                                            from '../editor/TextInputFlow';
+	TextInputFlow
+}                                                                           from '../editor/TextInputFlow';
 import { ContextMenu }                                                      from '../editor/ContextMenu';
 import { PropertyPanel }                                                    from '../ui/PropertyPanel';
 import { PropertyRenderers, MULTI_EDIT_NAMES as PROPERTY_MULTI_EDIT_NAMES } from '../ui/PropertyRenderers';
@@ -92,7 +92,6 @@ const symbolLibraryIndexer = new SymbolLibraryIndexer(symbolLibraryCache, {
 	symbolDirectoryInput: dom.symbolDirectoryInput
 });
 
-
 let mode: AppMode = 'view';
 let highlightNetEnabled = false;
 /** Circuit-mode dragging (auto-rewire on drop). Always on in circuit mode —
@@ -151,12 +150,14 @@ let editSelectedKind: string | null = null;
 let currentLabelShape: KicadGlobalLabelShape = 'input';
 let currentDirectiveLabelShape: KicadDirectiveLabelShape = 'round';
 let currentPowerKind: PowerKind = settings.current.powerKind;
+
 function setStatus(msg: string): void { statusBar.setStatus(msg); }
 
 let propertiesController: PropertiesController;
 let toolStateController: ToolStateController;
 
 function updateEditSidebar(): void { propertiesController.updateEditSidebar(); }
+
 function updateUndoStackPane(): void { propertiesController.updateUndoStackPane(); }
 
 function makeSymbolMutator(id: string): (fn: (symbol: any) => void) => void {
@@ -181,7 +182,6 @@ function makeElementMutator(id: string): (fn: (element: any) => void) => void {
 	};
 }
 
-
 function updateLockedNets(): void {
 	if (!lockedNetlist) {
 		dom.lockedNetsEl.textContent = 'No schematic netlist locked.';
@@ -205,7 +205,8 @@ function setHighlightNetEnabled(enabled: boolean): void {
 	highlightNetEnabled = enabled;
 	dom.highlightNetButton.classList.toggle('active', enabled);
 	dom.highlightNetButton.setAttribute('aria-pressed', String(enabled));
-	dom.highlightNetButton.title = enabled ? 'Highlight Net (click a pin/label/wire to select the net)' : 'Highlight Net';
+	dom.highlightNetButton.title = enabled ? 'Highlight Net (click a pin/label/wire to select the net)' :
+		'Highlight Net';
 	dom.canvas.style.cursor = enabled ? 'crosshair' : '';
 	if (!enabled) {
 		session?.clearNetHighlight();

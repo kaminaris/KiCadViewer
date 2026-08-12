@@ -23,6 +23,13 @@
 				Open .kicad_sch / .kicad_pcb
 				<input type="file" id="file-input" accept=".kicad_sch,.kicad_pcb,.kicad_pro" hidden />
 			</label>
+			<button type="button" id="btn-open-project" title="Open a whole project folder (hierarchical sheets, board, .kicad_pro) — Chrome/Edge only">Open Project Folder</button>
+			<button type="button" id="btn-save-project" title="Save the whole open project back to its folder" disabled>Save Project</button>
+			<button type="button" id="btn-new-project" title="Scaffold a new blank project into a chosen folder — Chrome/Edge only">New Project</button>
+			<label class="file-btn">
+				Open Project (.zip)
+				<input type="file" id="zip-input" accept=".zip" hidden />
+			</label>
 		</div>
 		<div class="actions hidden" id="circuit-actions">
 			<label class="file-btn">
@@ -55,6 +62,10 @@
 			<p id="status">Drop a KiCad schematic or board, or switch to Circuit layout for the drag/rewire demo.</p>
 			<p class="hint" id="hint">Wheel zoom · drag pan · Circuit mode: drag parts, R rotate</p>
 			<p class="hint legend"><span class="wire-invalid">■</span> Red wire = forced connection that couldn't route cleanly — still connected, move parts apart to clear it.</p>
+			<section class="debug-nets hidden" id="project-hierarchy-section">
+				<h2>Project Hierarchy</h2>
+				<div id="project-hierarchy"></div>
+			</section>
 			<section class="debug-nets">
 				<h2>Locked pin → net map</h2>
 				<pre id="locked-nets">No schematic netlist locked.</pre>

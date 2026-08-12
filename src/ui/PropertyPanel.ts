@@ -134,17 +134,19 @@ export class PropertyPanel {
 			: '<div class="history-empty">No undo snapshots</div>';
 	}
 
+	/** Hierarchy rendering deliberately lives entirely in
+	 *  SessionController.renderHierarchyPanel() now, not here — this used to
+	 *  also rebuild #edit-hierarchy from session.currentSheets (a per-load,
+	 *  direct-children-only list), but that ran on EVERY call (i.e. every
+	 *  selection/property change, far more often than navigation) and kept
+	 *  clobbering the real, whole-tree hierarchy content with stale
+	 *  one-level data — see renderHierarchyPanel's own doc comment. */
 	refreshSidebar(
-		session: { currentSheets: { name: string; file: string }[] },
+		session: { getUndoStackDebug(): { undo: { label: string; bytes: number }[]; undoDepth: number; redoDepth: number } },
 		renderSelection: () => void
 	): void {
 		renderSelection();
-		const hierarchy = document.getElementById('edit-hierarchy') as HTMLElement;
-		hierarchy.innerHTML = session.currentSheets.length
-			? session.currentSheets.map(sheet => `<div class="hierarchy-row">● ${ sheet.name } (${ sheet.file })</div>`)
-				.join('')
-			: '<div class="hierarchy-row">● Root schematic</div>';
-		this.refreshUndoStack(session as any);
+		this.refreshUndoStack(session);
 	}
 
 	protected colorToHex(value: string | null | undefined): string | null {

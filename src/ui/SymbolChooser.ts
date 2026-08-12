@@ -203,6 +203,61 @@ export class SymbolChooser {
 		}
 	}
 
+	protected normalizeText(value: string): string {
+		return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+	}
+
+	protected scoreSearchQuery(query: string, item: PendingSymbol): number {
+		const cleanedQuery = this.normalizeText(query);
+		if (!cleanedQuery) {
+			return 0;
+		}
+		const terms = cleanedQuery.split(/\s+/).filter(Boolean);
+		if (!terms.length) {
+			return 0;
+		}
+		const candidates = [
+			{ text: item.summary.name, weight: 8, isName: true },
+			{ text: item.libId, weight: 8, isName: true },
+			{ text: item.summary.value, weight: 4, isName: false },
+			{ text: item.summary.description, weight: 2, isName: false },
+			{ text: item.summary.reference, weight: 2, isName: false },
+			{ text: item.summary.keywords, weight: 1, isName: false },
+			{ text: item.file.relativePath, weight: 1, isName: false }
+		];
+
+		let score = 0;
+		for (const term of terms) {
+			let matched = false;
+			for (const cand of candidates) {
+				const normalized = this.normalizeText(cand.text ?? '');
+				if (!normalized) {
+					continue;
+				}
+				if (normalized === term) {
+					score += 8 * cand.weight;
+					matched = true;
+					break;
+				}
+				const starts = normalized.startsWith(term);
+				if (starts) {
+					score += 2 * cand.weight;
+					matched = true;
+					break;
+				}
+				if (normalized.includes(term)) {
+					score += cand.weight;
+					matched = true;
+					break;
+				}
+			}
+			if (!matched) {
+				return -Infinity;
+			}
+		}
+		return score;
+	}
+
 	protected buildFlatItems(filtered: PendingSymbol[]): void {
 		const items: ChooserListItem[] = [];
 		let previousFile = '';
@@ -299,16 +354,28 @@ export class SymbolChooser {
 	}
 
 	protected renderList(): void {
-		const query = this.filterEl.value.trim().toLowerCase();
-		this.buildFlatItems(this.rows.filter(item => {
-			const haystack = `${ item.summary.name } ${ item.summary.value } ${ item.summary.description } ${ item.summary.keywords } ${ item.file.relativePath }`.toLowerCase();
-			return !query || haystack.includes(query);
-		}));
+		const query = this.filterEl.value;
+		const filtered = this.rows
+			.filter(item => this.scoreSearchQuery(query, item) > -Infinity)
+			.sort((a, b) => this.scoreSearchQuery(query, b) - this.scoreSearchQuery(query, a))
+			.map(item => item);
+		this.buildFlatItems(filtered);
 		if (!this.listInnerEl) {
 			this.listEl.replaceChildren();
 			this.listInnerEl = document.createElement('div');
 			this.listInnerEl.style.position = 'relative';
 			this.listEl.appendChild(this.listInnerEl);
+		}
+		if (filtered.length) {
+			const currentMatches = this.pendingSymbol && filtered.some(item => item.file.id === this.pendingSymbol!.file.id && item.summary.name === this.pendingSymbol!.summary.name);
+			if (!currentMatches) {
+				this.pendingSymbol = filtered[0] ?? null;
+				void this.renderPreview(this.pendingSymbol);
+			}
+		}
+		else {
+			this.pendingSymbol = null;
+			void this.renderPreview(null);
 		}
 		this.listInnerEl.style.height = `${ this.totalHeight() }px`;
 		this.listEl.scrollTop = 0;

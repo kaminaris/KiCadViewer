@@ -50,6 +50,12 @@ export interface MainDomRefs {
 	powerToolButton: HTMLButtonElement;
 	fileInput: HTMLInputElement;
 	circuitFileInput: HTMLInputElement;
+	openProjectButton: HTMLButtonElement;
+	saveProjectButton: HTMLButtonElement;
+	newProjectButton: HTMLButtonElement;
+	projectHierarchySection: HTMLElement;
+	projectHierarchyEl: HTMLElement;
+	zipInput: HTMLInputElement;
 	demoButton: HTMLButtonElement;
 	recipeInput: HTMLInputElement;
 	symbolInput: HTMLInputElement;
@@ -62,6 +68,7 @@ export interface MainDomRefs {
 	redoButton: HTMLButtonElement;
 	propertiesModalCloseButton: HTMLElement | null;
 	paneSplitters: HTMLElement[];
+
 	getToolGroupButton(id: string): HTMLButtonElement | null;
 }
 
@@ -98,6 +105,12 @@ export function createMainDomRefs(): MainDomRefs {
 		powerToolButton: requiredById<HTMLButtonElement>('btn-power-tool'),
 		fileInput: requiredById<HTMLInputElement>('file-input'),
 		circuitFileInput: requiredById<HTMLInputElement>('circuit-file-input'),
+		openProjectButton: requiredById<HTMLButtonElement>('btn-open-project'),
+		saveProjectButton: requiredById<HTMLButtonElement>('btn-save-project'),
+		newProjectButton: requiredById<HTMLButtonElement>('btn-new-project'),
+		projectHierarchySection: requiredById<HTMLElement>('project-hierarchy-section'),
+		projectHierarchyEl: requiredById<HTMLElement>('project-hierarchy'),
+		zipInput: requiredById<HTMLInputElement>('zip-input'),
 		demoButton: requiredById<HTMLButtonElement>('btn-demo'),
 		recipeInput: requiredById<HTMLInputElement>('recipe-input'),
 		symbolInput: requiredById<HTMLInputElement>('symbol-input'),

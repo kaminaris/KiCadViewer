@@ -1,28 +1,28 @@
-import type { KicadRenderSession } from '@kicad-render/KicadRenderSession';
-import { Vec2 } from '@kicad-render/math/Vec2';
-import { isEditablePowerPlacement } from '@kicad-layout/index';
-import type { AppMode } from './AppState';
-import type { AppState } from './AppState';
-import type { PendingShapeTracker } from '../editor/PendingShape';
-import type { EditGestureTracker } from '../editor/EditGesture';
-import type { Settings } from './Settings';
-import type { SymbolChooser } from '../ui/SymbolChooser';
-import type { EditTool, PowerKind } from '../editor/Toolbar';
-import { EDIT_TOOL_HOTKEYS, TOOL_GROUPS } from '../editor/Toolbar';
-import type { TextInputFlow } from '../editor/TextInputFlow';
+import type { KicadRenderSession }                                       from '@kicad-render/KicadRenderSession';
+import { Vec2 }                                                          from '@kicad-render/math/Vec2';
+import { isEditablePowerPlacement }                                      from '@kicad-layout/index';
+import type { AppMode }                                                  from './AppState';
+import type { AppState }                                                 from './AppState';
+import type { PendingShapeTracker }                                      from '../editor/PendingShape';
+import type { EditGestureTracker }                                       from '../editor/EditGesture';
+import type { Settings }                                                 from './Settings';
+import type { SymbolChooser }                                            from '../ui/SymbolChooser';
+import type { EditTool, PowerKind }                                      from '../editor/Toolbar';
+import { EDIT_TOOL_HOTKEYS, TOOL_GROUPS }                                from '../editor/Toolbar';
+import type { TextInputFlow }                                            from '../editor/TextInputFlow';
 import { DIRECTIVE_LABEL_SHAPES, LABEL_SHAPES, TEXT_INPUT_PLACEHOLDERS } from '../editor/TextInputFlow';
-import type { ContextMenu } from '../editor/ContextMenu';
-import type { ClipboardController } from '../editor/ClipboardController';
-import type { FileActions } from '../io/FileActions';
-import type { EditorRuntimeState } from '../editor/EditorRuntimeState';
-import { KeyboardController } from '../editor/KeyboardController';
-import type { PropertiesController } from '../editor/PropertiesController';
-import type { ToolStateController } from '../editor/ToolStateController';
-import { PointerController } from '../editor/PointerController';
-import { ContextMenuController } from '../editor/ContextMenuController';
-import type { MainDomRefs } from './domRefs';
-import { runMainBootstrap } from './bootstrap';
-import type { SessionController } from './SessionController';
+import type { ContextMenu }                                              from '../editor/ContextMenu';
+import type { ClipboardController }                                      from '../editor/ClipboardController';
+import type { FileActions }                                              from '../io/FileActions';
+import type { EditorRuntimeState }                                       from '../editor/EditorRuntimeState';
+import { KeyboardController }                                            from '../editor/KeyboardController';
+import type { PropertiesController }                                     from '../editor/PropertiesController';
+import type { ToolStateController }                                      from '../editor/ToolStateController';
+import { PointerController }                                             from '../editor/PointerController';
+import { ContextMenuController }                                         from '../editor/ContextMenuController';
+import type { MainDomRefs }                                              from './domRefs';
+import { runMainBootstrap }                                              from './bootstrap';
+import type { SessionController }                                        from './SessionController';
 
 export interface WireMainAppInteractionsOptions {
 	dom: MainDomRefs;
@@ -40,48 +40,91 @@ export interface WireMainAppInteractionsOptions {
 	propertiesController: PropertiesController;
 	toolStateController: ToolStateController;
 	sessionController: SessionController;
+
 	getSession(): KicadRenderSession | null;
+
 	getMode(): AppMode;
+
 	getCircuitDragMode(): boolean;
+
 	getEditTool(): EditTool;
+
 	getHighlightNetEnabled(): boolean;
+
 	setHighlightNetEnabled(enabled: boolean): void;
+
 	getCurrentPowerKind(): PowerKind;
+
 	getGridSpacingMm(): number;
+
 	ensurePlacement(ref: string): any | null;
+
 	getPlacements(): any[];
+
 	getRuleAreaPoints(): Vec2[];
+
 	setRuleAreaPoints(points: Vec2[]): void;
+
 	getLineChainStart(): Vec2 | null;
+
 	setLineChainStart(value: Vec2 | null): void;
+
 	getShapeAnchor(): Vec2 | null;
+
 	setShapeAnchor(value: Vec2 | null): void;
+
 	getArcPoints(): Vec2[];
+
 	setArcPoints(points: Vec2[]): void;
+
 	getBezierPoints(): Vec2[];
+
 	setBezierPoints(points: Vec2[]): void;
+
 	getEditSelectedId(): string | null;
+
 	setEditSelectedId(id: string | null): void;
+
 	getEditSelectedKind(): string | null;
+
 	setEditSelectedKind(kind: string | null): void;
+
 	setSelectedRef(ref: string | null): void;
+
 	clearSelectionBookkeeping(): void;
+
 	syncPendingShapeTracker(): void;
+
 	syncSingleSelectionBookkeeping(session: KicadRenderSession): void;
+
 	updateStatusBar(screenPos?: Vec2): void;
+
 	updateEditSidebar(): void;
+
 	updateUndoStackPane(): void;
+
 	setStatus(message: string): void;
+
 	dbg(...args: unknown[]): void;
+
 	snap(value: number): number;
+
 	loadDemo(): Promise<void>;
+
 	openKiCadFile(file: File): Promise<void>;
+
 	runPlace(): void;
+
 	commitReroute(connectivity: 'autoroute' | 'clear-wires'): Promise<void>;
+
 	downloadSchematic(): void;
+
 	refreshSchematicText(session: KicadRenderSession): void;
+
 	chooseSymbolDirectory(): Promise<void>;
+
 	indexFallbackDirectory(files: FileList): Promise<void>;
+
 	refreshSymbolLibraryButton(): Promise<void>;
 }
 
@@ -99,7 +142,9 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 			event.preventDefault();
 			const before = splitter.previousElementSibling as HTMLElement | null;
 			const parent = splitter.parentElement;
-			if (!before || !parent) return;
+			if (!before || !parent) {
+				return;
+			}
 			const startY = event.clientY;
 			const startHeight = before.getBoundingClientRect().height;
 			const move = (mv: PointerEvent) => {
@@ -107,7 +152,10 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 				before.style.flex = 'none';
 				before.style.height = `${ next }px`;
 			};
-			const done = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', done); };
+			const done = () => {
+				window.removeEventListener('pointermove', move);
+				window.removeEventListener('pointerup', done);
+			};
 			window.addEventListener('pointermove', move);
 			window.addEventListener('pointerup', done, { once: true });
 		});
@@ -132,6 +180,23 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 
 	options.dom.highlightNetButton.addEventListener('click', () => {
 		options.setHighlightNetEnabled(!options.getHighlightNetEnabled());
+	});
+
+	options.dom.openProjectButton.addEventListener('click', () => {
+		void options.sessionController.openProjectFolder();
+	});
+	options.dom.saveProjectButton.addEventListener('click', () => {
+		void options.sessionController.saveProject();
+	});
+	options.dom.newProjectButton.addEventListener('click', () => {
+		void options.sessionController.newProjectFolder();
+	});
+	options.dom.zipInput.addEventListener('change', e => {
+		const file = (e.target as HTMLInputElement).files?.[0];
+		if (file) {
+			void options.sessionController.openProjectZip(file);
+		}
+		(e.target as HTMLInputElement).value = '';
 	});
 
 	options.dom.fileInput.addEventListener('change', e => {
@@ -227,14 +292,16 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		setArcPoints: options.setArcPoints,
 		getBezierPoints: options.getBezierPoints,
 		setBezierPoints: options.setBezierPoints,
-		showTextInput: (worldAnchor, event) => options.textInputFlow.showText(worldAnchor, event, TEXT_INPUT_PLACEHOLDERS),
+		showTextInput: (worldAnchor, event) => options.textInputFlow.showText(
+			worldAnchor, event, TEXT_INPUT_PLACEHOLDERS),
 		showTextBoxInput: (first, second, event) => options.textInputFlow.showTextBox(first, second, event),
 		placeSymbolAt: snapped => options.symbolChooser.placeAt(snapped),
 		tryPlacePendingImage: snapped => options.fileActions.tryPlacePendingImage(snapped),
 		setStatus: options.setStatus,
 		showTableModal: anchor => options.textInputFlow.showTable(anchor),
 		showTableEditModal: id => options.textInputFlow.showTableEditor(id),
-		showPropertiesModal: id => options.propertiesController.showPropertiesModal(id)
+		showPropertiesModal: id => options.propertiesController.showPropertiesModal(id),
+		descendIntoSheetAtScreen: screenPos => options.sessionController.descendIntoSheetAtScreen(screenPos)
 	});
 
 	new KeyboardController(EDIT_TOOL_HOTKEYS, {
@@ -257,7 +324,8 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		performUndo: () => options.sessionController.undo(),
 		performRedo: () => options.sessionController.redo(),
 		copySelection: session => {
-			options.clipboardController.copySelection(session, options.clipboardController.copyableIds(session, [...session.selectionIds]));
+			options.clipboardController.copySelection(
+				session, options.clipboardController.copyableIds(session, [...session.selectionIds]));
 		},
 		cutSelection: session => options.clipboardController.cutSelection(session),
 		pasteSelection: (session, world) => options.clipboardController.pasteAtWorld(session, world),
@@ -301,8 +369,10 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		showEditLabelInput: id => options.textInputFlow.showEditLabel(id)
 	});
 
-	options.dom.propertiesModalCloseButton?.addEventListener('click', () => options.propertiesController.closePropertiesModal());
-	window.addEventListener('click', e => options.propertiesController.maybeClosePropertiesModalFromWindowClick(e.target));
+	options.dom.propertiesModalCloseButton?.addEventListener(
+		'click', () => options.propertiesController.closePropertiesModal());
+	window.addEventListener(
+		'click', e => options.propertiesController.maybeClosePropertiesModalFromWindowClick(e.target));
 	window.addEventListener('resize', () => options.sessionController.resizeCanvas());
 	options.dom.stage.addEventListener('dragover', e => e.preventDefault());
 	window.addEventListener('paste', event => { options.fileActions.handleWindowPaste(event); });
