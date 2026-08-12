@@ -132,6 +132,9 @@ main.edit-mode {
 .edit-pane header button:hover { color: var(--accent); }
 .edit-pane-body { padding: 8px; overflow: auto; color: var(--text); font-size: 12px; white-space: pre-wrap; }
 .hierarchy-row { padding: 3px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.hierarchy-row.clickable { cursor: pointer; }
+.hierarchy-row.clickable:hover { color: var(--accent); }
+.hierarchy-row.active { color: var(--accent); font-weight: 600; }
 .pane-splitter { height: 5px; min-height: 5px; cursor: row-resize; background: var(--bg); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .edit-filter-grid { padding: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 6px; color: var(--text); font-size: 11px; }
 .edit-filter-grid label { white-space: nowrap; }
