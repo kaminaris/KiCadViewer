@@ -23,11 +23,13 @@ import { ContextMenuController }                                         from '.
 import type { MainDomRefs }                                              from './domRefs';
 import { runMainBootstrap }                                              from './bootstrap';
 import type { SessionController }                                        from './SessionController';
+import type { ActiveDocument }                                           from './ActiveDocument';
 
 export interface WireMainAppInteractionsOptions {
 	dom: MainDomRefs;
 	settings: Settings;
 	appState: AppState;
+	doc: ActiveDocument;
 	runtime: EditorRuntimeState;
 	pendingShapeTracker: PendingShapeTracker;
 	editGestureTracker: EditGestureTracker;
@@ -126,6 +128,13 @@ export interface WireMainAppInteractionsOptions {
 	indexFallbackDirectory(files: FileList): Promise<void>;
 
 	refreshSymbolLibraryButton(): Promise<void>;
+
+	/** Called after the in-editor "Open Project Folder" / "New Project" /
+	 *  "Open .zip" toolbar buttons successfully open a project — keeps the
+	 *  URL bar (and hence reload / copy-link) pointed at whatever project
+	 *  is now actually on screen, matching what Home's equivalent actions
+	 *  do via the router. See MainApp.ts's router wiring. */
+	onProjectOpened(projectId: string): void;
 }
 
 export function wireMainAppInteractions(options: WireMainAppInteractionsOptions): void {
@@ -168,33 +177,34 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		// canvases fill it exactly (inset:0), so its rect is always right;
 		// .width/.height stay canvas2d's own backing-store pixels either way,
 		// since resize() keeps both canvases' pixel dimensions in sync.
+		const canvas = options.doc.canvas;
 		const rect = options.dom.stage.getBoundingClientRect();
-		const x = (e.clientX - rect.left) * (options.dom.canvas.width / Math.max(1, rect.width));
-		const y = (e.clientY - rect.top) * (options.dom.canvas.height / Math.max(1, rect.height));
+		const x = (e.clientX - rect.left) * (canvas.width / Math.max(1, rect.width));
+		const y = (e.clientY - rect.top) * (canvas.height / Math.max(1, rect.height));
 		return new Vec2(x, y);
 	};
 
-	options.dom.modeViewBtn.addEventListener('click', () => options.sessionController.setMode('view'));
-	options.dom.modeCircuitBtn.addEventListener('click', () => options.sessionController.setMode('circuit'));
-	options.dom.modeEditBtn.addEventListener('click', () => options.sessionController.setMode('edit'));
+	// No more View/Circuit/Edit switcher — modeViewBtn/modeCircuitBtn/
+	// modeEditBtn are hidden internal-state markers now (see domRefs.ts),
+	// not real buttons, so nothing click-wires them here anymore.
 
 	options.dom.highlightNetButton.addEventListener('click', () => {
 		options.setHighlightNetEnabled(!options.getHighlightNetEnabled());
 	});
 
 	options.dom.openProjectButton.addEventListener('click', () => {
-		void options.sessionController.openProjectFolder();
+		void options.sessionController.openProjectFolder().then(key => { if (key) options.onProjectOpened(key); });
 	});
 	options.dom.saveProjectButton.addEventListener('click', () => {
 		void options.sessionController.saveProject();
 	});
 	options.dom.newProjectButton.addEventListener('click', () => {
-		void options.sessionController.newProjectFolder();
+		void options.sessionController.newProjectFolder().then(key => { if (key) options.onProjectOpened(key); });
 	});
 	options.dom.zipInput.addEventListener('change', e => {
 		const file = (e.target as HTMLInputElement).files?.[0];
 		if (file) {
-			void options.sessionController.openProjectZip(file);
+			void options.sessionController.openProjectZip(file).then(key => { if (key) options.onProjectOpened(key); });
 		}
 		(e.target as HTMLInputElement).value = '';
 	});
@@ -242,7 +252,7 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 	options.dom.exportEditButton.addEventListener('click', () => options.downloadSchematic());
 	options.dom.undoButton.addEventListener('click', () => void options.sessionController.undo());
 	options.dom.redoButton.addEventListener('click', () => void options.sessionController.redo());
-	for (const el of [options.dom.canvas, options.dom.canvasGl]) {
+	for (const el of [options.doc.canvas, options.doc.canvasGl]) {
 		el.addEventListener('wheel', e => {
 			e.preventDefault();
 			options.sessionController.ensureSession().zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15);
@@ -251,8 +261,8 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 	}
 
 	new PointerController({
-		canvas: options.dom.canvas,
-		canvasGl: options.dom.canvasGl,
+		canvas: options.doc.canvas,
+		canvasGl: options.doc.canvasGl,
 		stage: options.dom.stage,
 		runtime: options.runtime,
 		editGestureTracker: options.editGestureTracker,
@@ -339,8 +349,8 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 	});
 
 	new ContextMenuController({
-		canvas: options.dom.canvas,
-		canvasGl: options.dom.canvasGl,
+		canvas: options.doc.canvas,
+		canvasGl: options.doc.canvasGl,
 		contextMenu: options.contextMenu,
 		clipboardController: options.clipboardController,
 		appState: options.appState,

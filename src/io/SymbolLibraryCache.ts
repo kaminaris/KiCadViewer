@@ -62,7 +62,7 @@ export interface SymbolLibraryProgress {
 
 type StoredSummary = SymbolLibrarySummary & { key: 'summary' };
 
-const DB_NAME = 'kicad-viewer-symbol-library';
+const DB_NAME = 'kionline-symbol-library';
 const DB_VERSION = 1;
 const META_STORE = 'meta';
 const FILE_STORE = 'files';

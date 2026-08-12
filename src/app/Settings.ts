@@ -11,7 +11,7 @@ export interface AppSettings {
 }
 
 const DEFAULT_SETTINGS: AppSettings = { gridSpacingMm: FINE_GRID_MM, powerKind: 'gnd' };
-const STORAGE_KEY = 'kicad-viewer.settings.v1';
+const STORAGE_KEY = 'kionline.settings.v1';
 const POWER_KINDS: readonly PowerKind[] = ['gnd', 'flag', 'rail'];
 
 /**

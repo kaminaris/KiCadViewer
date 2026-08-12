@@ -3,34 +3,94 @@
 <head>
 	<meta charset="UTF-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-	<title>KiCad Viewer</title>
+	<title>KiOnline</title>
 	<link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+	<div class="screen" id="screen-home"></div>
+	<div class="screen hidden" id="screen-project"></div>
+	<div class="screen hidden" id="screen-editor">
 	<header class="top">
-		<div class="brand">KiCad Viewer<span class="app-version" id="app-version" title="Build info"></span></div>
-		<nav class="modes">
-			<button type="button" id="mode-view" class="active" title="View a schematic or board read-only">View (Read-only)</button>
-			<button type="button" id="mode-circuit">Circuit layout</button>
-			<button type="button" id="mode-edit">Edit</button>
-		</nav>
-		<div class="actions" id="history-actions">
-			<button type="button" id="btn-undo" title="Undo (Ctrl+Z)">Undo</button>
-			<button type="button" id="btn-redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+		<div class="top-title-row">
+			<button type="button" class="brand" id="brand-home-btn" title="Back to Project overview">
+				<svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5 H15 L20 10 V19 H4 Z M15 5 V10 H20"/><path d="M8 14 H16 M12 10 V18"/></svg>
+				<span>KiOnline</span><span class="app-version" id="app-version" title="Build info"></span>
+			</button>
+			<nav class="menu-bar" id="main-menu-bar" aria-label="Application menu">
+				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">File</button><div class="menu-popover">
+					<button type="button" class="menu-command" data-action-target="btn-new-project">New Project</button>
+					<button type="button" class="menu-command" data-input-target="file-input">Open…<span>Ctrl+O</span></button>
+					<button type="button" class="menu-command" data-action-target="btn-open-project">Open Project Folder…</button>
+					<button type="button" class="menu-command" data-input-target="zip-input">Open Project Archive…</button>
+					<div class="menu-divider"></div>
+					<button type="button" class="menu-command" data-action-target="btn-save-project">Save Project<span>Ctrl+S</span></button>
+					<button type="button" class="menu-command" data-action-target="btn-export-edit">Export Schematic…</button>
+				</div></div>
+				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Edit</button><div class="menu-popover">
+					<button type="button" class="menu-command" data-action-target="btn-undo">Undo<span>Ctrl+Z</span></button>
+					<button type="button" class="menu-command" data-action-target="btn-redo">Redo<span>Ctrl+Shift+Z</span></button>
+					<div class="menu-divider"></div>
+					<button type="button" class="menu-command" data-shortcut="cut">Cut<span>Ctrl+X</span></button>
+					<button type="button" class="menu-command" data-shortcut="copy">Copy<span>Ctrl+C</span></button>
+					<button type="button" class="menu-command" data-shortcut="paste">Paste<span>Ctrl+V</span></button>
+					<button type="button" class="menu-command" data-shortcut="duplicate">Duplicate<span>Ctrl+D</span></button>
+				</div></div>
+				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">View</button><div class="menu-popover">
+					<button type="button" class="menu-command" data-action-target="view-tab-schematic">Schematic Editor</button>
+					<button type="button" class="menu-command" data-action-target="view-tab-board">PCB Editor</button>
+					<div class="menu-divider"></div>
+					<button type="button" class="menu-command" data-shortcut="zoom-fit">Zoom to Fit<span>Home</span></button>
+				</div></div>
+				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Place</button><div class="menu-popover">
+					<button type="button" class="menu-command" data-tool="place-symbol">Symbol<span>A</span></button>
+					<button type="button" class="menu-command" data-tool="power">Power Port</button>
+					<button type="button" class="menu-command" data-tool="wire">Wire<span>W</span></button>
+					<button type="button" class="menu-command" data-tool="label">Net Label</button>
+					<button type="button" class="menu-command" data-tool="text">Text</button>
+				</div></div>
+				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Inspect</button><div class="menu-popover">
+					<button type="button" class="menu-command" data-action-target="btn-highlight-net">Highlight Net</button>
+				</div></div>
+				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Tools</button><div class="menu-popover">
+					<button type="button" class="menu-command" data-action-target="btn-index-symbols">Manage Symbol Libraries…</button>
+				</div></div>
+			</nav>
+			<nav class="breadcrumb hidden" id="editor-breadcrumb">
+				<span class="breadcrumb-project" id="breadcrumb-project"></span>
+				<span class="breadcrumb-sep" aria-hidden="true">/</span>
+				<span class="breadcrumb-sheet" id="breadcrumb-sheet"></span>
+			</nav>
+			<nav class="view-tabs hidden" id="view-tabs">
+				<button type="button" class="view-tab" id="view-tab-schematic" data-view="schematic">Schematic</button>
+				<button type="button" class="view-tab" id="view-tab-board" data-view="board">PCB</button>
+			</nav>
 		</div>
-		<div class="actions" id="view-actions">
-			<label class="file-btn">
-				Open .kicad_sch / .kicad_pcb
-				<input type="file" id="file-input" accept=".kicad_sch,.kicad_pcb,.kicad_pro" hidden />
-			</label>
-			<button type="button" id="btn-open-project" title="Open a whole project folder (hierarchical sheets, board, .kicad_pro) — Chrome/Edge only">Open Project Folder</button>
-			<button type="button" id="btn-save-project" title="Save the whole open project back to its folder" disabled>Save Project</button>
-			<button type="button" id="btn-new-project" title="Scaffold a new blank project into a chosen folder — Chrome/Edge only">New Project</button>
-			<label class="file-btn">
-				Open Project (.zip)
-				<input type="file" id="zip-input" accept=".zip" hidden />
-			</label>
+		<div class="command-toolbar" role="toolbar" aria-label="Main toolbar">
+			<div class="toolbar-section" id="view-actions">
+				<button type="button" class="toolbar-button" id="btn-new-project" title="New Project"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5 H14 L19 10 V20 H4 Z M14 5 V10 H19 M12 12 V18 M9 15 H15"/></svg></button>
+				<button type="button" class="toolbar-button" data-input-target="file-input" title="Open Schematic or PCB"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8 H10 L12 10 H21 V19 H3 Z"/><path d="M3 8 V5 H10 L12 7 H18"/></svg></button>
+				<button type="button" class="toolbar-button" id="btn-open-project" title="Open Project Folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8 H10 L12 10 H21 V19 H3 Z"/><path d="M12 12 V17 M9.5 14.5 L12 12 L14.5 14.5"/></svg></button>
+				<button type="button" class="toolbar-button" data-input-target="zip-input" title="Open Project Archive"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8 H10 L12 10 H21 V19 H3 Z"/><path d="M12 11 V17 M9 14 L12 17 L15 14"/></svg></button>
+				<button type="button" class="toolbar-button" id="btn-save-project" title="Save Project" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4 H17 L20 7 V20 H5 Z M8 4 V10 H16 V4 M8 20 V14 H17 V20"/></svg></button>
+			</div>
+			<div class="toolbar-divider" aria-hidden="true"></div>
+			<nav class="toolbar-section toolbar-view-switcher" aria-label="Editor views">
+				<button type="button" class="toolbar-button" data-action-target="view-tab-schematic" title="Schematic Editor"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="7" width="12" height="10"/><path d="M3 10 H6 M3 14 H6 M18 10 H21 M18 14 H21 M10 7 V4 M14 7 V4 M10 17 V20 M14 17 V20"/></svg></button>
+				<button type="button" class="toolbar-button" data-action-target="view-tab-board" title="PCB Editor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5 H19 V19 H5 Z M8 8 H12 V12 H8 Z M14 12 H17 V16 H14 Z"/><path d="M12 10 H16 M10 12 V16"/></svg></button>
+			</nav>
+			<div class="toolbar-divider" aria-hidden="true"></div>
+			<div class="toolbar-section hidden" id="edit-actions">
+				<button type="button" class="toolbar-button" id="btn-index-symbols" title="Manage Symbol Libraries"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5 H15 L20 10 V19 H4 Z M15 5 V10 H20"/><path d="M8 14 H16 M12 11 V17"/></svg></button>
+				<button type="button" class="toolbar-button" id="btn-export-edit" title="Export Schematic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4 H17 L20 7 V20 H5 Z M17 4 V8 H20"/><path d="M12 10 V17 M9 14 L12 17 L15 14"/></svg></button>
+			</div>
+			<input type="file" id="file-input" accept=".kicad_sch,.kicad_pcb,.kicad_pro" hidden />
+			<input type="file" id="zip-input" accept=".zip" hidden />
+			<input type="file" id="symbol-directory-input" webkitdirectory directory multiple hidden />
 		</div>
+		<!-- Circuit Layout (auto-place/auto-wire demo) is parked, not deleted —
+			no button reaches setMode('circuit') anymore, so this stays
+			permanently hidden until it comes back as a project-overview tile
+			rather than a competing top-level mode. -->
 		<div class="actions hidden" id="circuit-actions">
 			<label class="file-btn">
 				Open .kicad_sch
@@ -50,55 +110,34 @@
 			<button type="button" id="btn-clear-wires">Clear wires</button>
 			<button type="button" id="btn-export">Export .kicad_sch</button>
 		</div>
-		<div class="actions hidden" id="edit-actions">
-			<button type="button" id="btn-index-symbols" title="Index a KiCad symbols directory">Index symbols</button>
-			<input type="file" id="symbol-directory-input" webkitdirectory directory multiple hidden />
-			<button type="button" id="btn-export-edit">Export .kicad_sch</button>
-		</div>
+		<button type="button" id="mode-view" hidden></button>
+		<button type="button" id="mode-circuit" hidden></button>
+		<button type="button" id="mode-edit" hidden></button>
+		<button type="button" id="btn-undo" hidden></button>
+		<button type="button" id="btn-redo" hidden></button>
 	</header>
 	<main>
-		<aside class="side">
-			<div id="general-side-content">
-			<p id="status">Drop a KiCad schematic or board, or switch to Circuit layout for the drag/rewire demo.</p>
-			<p class="hint" id="hint">Wheel zoom · drag pan · Circuit mode: drag parts, R rotate</p>
-			<p class="hint legend"><span class="wire-invalid">■</span> Red wire = forced connection that couldn't route cleanly — still connected, move parts apart to clear it.</p>
-			<section class="debug-nets hidden" id="project-hierarchy-section">
-				<h2>Project Hierarchy</h2>
-				<div id="project-hierarchy"></div>
+		<aside class="edit-left-pane" id="left-dock">
+			<section class="edit-pane" data-pane="properties">
+				<header>Properties <button type="button" aria-label="Close">×</button></header>
+				<div id="edit-properties" class="edit-pane-body">No objects selected</div>
 			</section>
-			<section class="debug-nets">
-				<h2>Locked pin → net map</h2>
-				<pre id="locked-nets">No schematic netlist locked.</pre>
+			<div class="pane-splitter" data-before="properties"></div>
+			<section class="edit-pane" data-pane="undo-stack">
+				<header>Undo Stack <button type="button" aria-label="Close">×</button></header>
+				<div id="edit-undo-stack" class="edit-pane-body">No history</div>
 			</section>
-			<pre id="score" class="score"></pre>
-			</div>
-			<div id="edit-left-pane" class="edit-left-pane hidden">
-				<section class="edit-pane" data-pane="properties">
-					<header>Properties <button type="button" aria-label="Close">×</button></header>
-					<div id="edit-properties" class="edit-pane-body">No objects selected</div>
-				</section>
-				<div class="pane-splitter" data-before="properties"></div>
-				<section class="edit-pane" data-pane="hierarchy">
-					<header>Schematic Hierarchy <button type="button" aria-label="Close">×</button></header>
-					<div id="edit-hierarchy" class="edit-pane-body">No hierarchy loaded</div>
-				</section>
-				<div class="pane-splitter" data-before="hierarchy"></div>
-				<section class="edit-pane" data-pane="undo-stack">
-					<header>Undo Stack <button type="button" aria-label="Close">×</button></header>
-					<div id="edit-undo-stack" class="edit-pane-body">No history</div>
-				</section>
-				<div class="pane-splitter" data-before="undo-stack"></div>
-				<section class="edit-pane" data-pane="filter">
-					<header>Selection Filter <button type="button" aria-label="Close">×</button></header>
-					<div class="edit-filter-grid">
-						<label><input type="checkbox" checked> All items</label><label><input type="checkbox" checked> Rule Areas</label>
-						<label><input type="checkbox" checked> Symbols</label><label><input type="checkbox" checked> Pins</label>
-						<label><input type="checkbox" checked> Wires</label><label><input type="checkbox" checked> Labels</label>
-						<label><input type="checkbox" checked> Graphics</label><label><input type="checkbox" checked> Images</label>
-						<label><input type="checkbox" checked> Text</label><label><input type="checkbox" checked> Other items</label>
-					</div>
-				</section>
-			</div>
+			<div class="pane-splitter" data-before="undo-stack"></div>
+			<section class="edit-pane" data-pane="filter">
+				<header>Selection Filter <button type="button" aria-label="Close">×</button></header>
+				<div class="edit-filter-grid">
+					<label><input type="checkbox" checked> All items</label><label><input type="checkbox" checked> Rule Areas</label>
+					<label><input type="checkbox" checked> Symbols</label><label><input type="checkbox" checked> Pins</label>
+					<label><input type="checkbox" checked> Wires</label><label><input type="checkbox" checked> Labels</label>
+					<label><input type="checkbox" checked> Graphics</label><label><input type="checkbox" checked> Images</label>
+					<label><input type="checkbox" checked> Text</label><label><input type="checkbox" checked> Other items</label>
+				</div>
+			</section>
 		</aside>
 		<div class="stage" id="stage">
 			<canvas id="canvas2d" class="hidden"></canvas>
@@ -216,6 +255,7 @@
 		</aside>
 	</main>
 	<footer class="status-bar">
+		<span id="status" class="status-message">Ready</span>
 		<span id="coord-status">X: —  Y: —</span>
 		<label class="grid-select-label">Grid:
 			<select id="grid-select" title="Grid spacing">
@@ -228,6 +268,7 @@
 		<span id="zoom-status">Zoom: —</span>
 		<span id="fps-status" title="Render rate — updates while actively interacting (pan/drag/zoom); the app only redraws on demand, so this goes quiet when idle"></span>
 	</footer>
+	</div>
 	<script type="module" src="/src/main.ts"></script>
 </body>
 </html>

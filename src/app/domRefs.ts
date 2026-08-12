@@ -19,21 +19,34 @@ function requiredSelector<T extends Element>(selector: string): T {
 }
 
 export interface MainDomRefs {
-	lockedNetsEl: HTMLElement;
+	screenHomeEl: HTMLElement;
+	screenProjectEl: HTMLElement;
+	screenEditorEl: HTMLElement;
+	brandHomeButton: HTMLButtonElement;
 	stage: HTMLElement;
 	canvas: HTMLCanvasElement;
 	canvasGl: HTMLCanvasElement;
+	/** Hidden, non-interactive now — setMode() still toggles their .active
+	 *  class / .disabled state internally (kept so PointerController/
+	 *  ContextMenuController/KeyboardController's existing mode-gated logic
+	 *  needs no changes), but nothing in the visible UI reaches them
+	 *  anymore. See breadcrumbEl/viewTabsEl for what replaced them. */
 	modeViewBtn: HTMLElement;
 	modeCircuitBtn: HTMLElement;
 	modeEditBtn: HTMLElement;
 	viewActions: HTMLElement;
 	circuitActions: HTMLElement;
 	editActions: HTMLElement;
+	breadcrumbEl: HTMLElement;
+	breadcrumbProjectEl: HTMLElement;
+	breadcrumbSheetEl: HTMLElement;
+	viewTabsEl: HTMLElement;
+	viewTabSchematicBtn: HTMLButtonElement;
+	viewTabBoardBtn: HTMLButtonElement;
 	indexSymbolsButton: HTMLButtonElement;
 	symbolDirectoryInput: HTMLInputElement;
-	editLeftPane: HTMLElement;
 	editPropertiesEl: HTMLElement;
-	editHierarchyEl: HTMLElement;
+	editUndoStackEl: HTMLElement;
 	toolPanel: HTMLElement;
 	highlightNetButton: HTMLButtonElement;
 	mainEl: HTMLElement;
@@ -53,8 +66,6 @@ export interface MainDomRefs {
 	openProjectButton: HTMLButtonElement;
 	saveProjectButton: HTMLButtonElement;
 	newProjectButton: HTMLButtonElement;
-	projectHierarchySection: HTMLElement;
-	projectHierarchyEl: HTMLElement;
 	zipInput: HTMLInputElement;
 	demoButton: HTMLButtonElement;
 	recipeInput: HTMLInputElement;
@@ -74,7 +85,10 @@ export interface MainDomRefs {
 
 export function createMainDomRefs(): MainDomRefs {
 	return {
-		lockedNetsEl: requiredById<HTMLElement>('locked-nets'),
+		screenHomeEl: requiredById<HTMLElement>('screen-home'),
+		screenProjectEl: requiredById<HTMLElement>('screen-project'),
+		screenEditorEl: requiredById<HTMLElement>('screen-editor'),
+		brandHomeButton: requiredById<HTMLButtonElement>('brand-home-btn'),
 		stage: requiredById<HTMLElement>('stage'),
 		canvas: requiredById<HTMLCanvasElement>('canvas2d'),
 		canvasGl: requiredById<HTMLCanvasElement>('canvas-gl'),
@@ -84,11 +98,16 @@ export function createMainDomRefs(): MainDomRefs {
 		viewActions: requiredById<HTMLElement>('view-actions'),
 		circuitActions: requiredById<HTMLElement>('circuit-actions'),
 		editActions: requiredById<HTMLElement>('edit-actions'),
+		breadcrumbEl: requiredById<HTMLElement>('editor-breadcrumb'),
+		breadcrumbProjectEl: requiredById<HTMLElement>('breadcrumb-project'),
+		breadcrumbSheetEl: requiredById<HTMLElement>('breadcrumb-sheet'),
+		viewTabsEl: requiredById<HTMLElement>('view-tabs'),
+		viewTabSchematicBtn: requiredById<HTMLButtonElement>('view-tab-schematic'),
+		viewTabBoardBtn: requiredById<HTMLButtonElement>('view-tab-board'),
 		indexSymbolsButton: requiredById<HTMLButtonElement>('btn-index-symbols'),
 		symbolDirectoryInput: requiredById<HTMLInputElement>('symbol-directory-input'),
-		editLeftPane: requiredById<HTMLElement>('edit-left-pane'),
 		editPropertiesEl: requiredById<HTMLElement>('edit-properties'),
-		editHierarchyEl: requiredById<HTMLElement>('edit-hierarchy'),
+		editUndoStackEl: requiredById<HTMLElement>('edit-undo-stack'),
 		toolPanel: requiredById<HTMLElement>('tool-panel'),
 		highlightNetButton: requiredById<HTMLButtonElement>('btn-highlight-net'),
 		mainEl: requiredSelector<HTMLElement>('main'),
@@ -108,8 +127,6 @@ export function createMainDomRefs(): MainDomRefs {
 		openProjectButton: requiredById<HTMLButtonElement>('btn-open-project'),
 		saveProjectButton: requiredById<HTMLButtonElement>('btn-save-project'),
 		newProjectButton: requiredById<HTMLButtonElement>('btn-new-project'),
-		projectHierarchySection: requiredById<HTMLElement>('project-hierarchy-section'),
-		projectHierarchyEl: requiredById<HTMLElement>('project-hierarchy'),
 		zipInput: requiredById<HTMLInputElement>('zip-input'),
 		demoButton: requiredById<HTMLButtonElement>('btn-demo'),
 		recipeInput: requiredById<HTMLInputElement>('recipe-input'),

@@ -7,16 +7,20 @@ import { Vec2 }                                                             from
 import {
 	wrapFullSchematic,
 	type CircuitDesignRecipe,
-	type CircuitPlacement,
-	type LockedNetlist
+	type CircuitPlacement
 }                                                                           from '@kicad-layout/index';
 import {
 	SymbolLibraryCache
 }                                                                           from '../io/SymbolLibraryCache';
 import { StatusBar }                                                        from './StatusBar';
-import { Settings }                                                         from './Settings';
-import { AppState, type AppMode }                                           from './AppState';
-import { SessionController, type SessionControllerState }                   from './SessionController';
+import { Settings }                                                        from './Settings';
+import { AppState }                                                         from './AppState';
+import { SessionController }                                                from './SessionController';
+import { ActiveDocument }                                                   from './ActiveDocument';
+import { ProjectRegistry }                                                  from './ProjectRegistry';
+import { Router, type Route }                                               from './Router';
+import { HomeScreen }                                                       from '../ui/HomeScreen';
+import { ProjectOverviewScreen }                                            from '../ui/ProjectOverviewScreen';
 import { SymbolChooser }                                                    from '../ui/SymbolChooser';
 import {
 	Toolbar,
@@ -42,6 +46,7 @@ import { PropertiesController }                                             from
 import { ToolStateController }                                              from '../editor/ToolStateController';
 import { SymbolLibraryIndexer }                                             from '../io/SymbolLibraryIndexer';
 import { wireMainAppInteractions }                                          from './wireMainAppInteractions';
+import { MenuBar, wireToolbarCommandForwarding }                             from './MenuBar';
 
 type EditTool = ToolbarEditTool;
 
@@ -62,23 +67,37 @@ window.addEventListener('unhandledrejection', event => {
 const settings = new Settings();
 settings.load();
 const dom = createMainDomRefs();
-const propertyPanel = new PropertyPanel();
+new MenuBar(document.getElementById('main-menu-bar') as HTMLElement);
+wireToolbarCommandForwarding();
+
+/** The single document this page load owns — see the harmonic-munching-
+ *  trinket plan for why this collapsed from the earlier TabDocument/
+ *  WorkspaceController pair (real "tabs" are now actual browser tabs,
+ *  coordinated by a separate SharedWorker/IndexedDB layer, not an in-page
+ *  list). Constructed this early because, unlike the old `workspace`, it
+ *  has no dependency on anything defined further down the file. */
+const doc = new ActiveDocument(dom.canvas, dom.canvasGl);
+
+/** One shared instance — SessionController and the Home/Project screens all
+ *  read/write the same IndexedDB-backed project list through it. */
+const registry = new ProjectRegistry();
+
+const propertyPanel = new PropertyPanel(dom.editPropertiesEl, dom.editUndoStackEl);
 const propertyRenderers = new PropertyRenderers(propertyPanel, {
-	getSession: () => session,
+	getSession: () => doc.session,
 	refreshSchematicText: activeSession => appState.refreshSchematicText(activeSession),
 	refreshUndoStack: updateUndoStackPane
 });
 const propertiesDialog = new PropertiesDialog();
 const propertyDialogRenderers = new PropertyDialogRenderers(propertiesDialog, {
-	getSession: () => session,
+	getSession: () => doc.session,
 	mutateElement: id => makeElementMutator(id),
 	mutateSymbol: id => makeSymbolMutator(id),
 	mutateLibrary: id => fn => {
-		const activeSession = session;
-		if (!activeSession?.mutateLibSymbolForInstance(id, fn)) {
+		if (!doc.session?.mutateLibSymbolForInstance(id, fn)) {
 			return;
 		}
-		appState.refreshSchematicText(activeSession);
+		appState.refreshSchematicText(doc.session);
 		updateUndoStackPane();
 	},
 	refresh: activeSession => appState.refreshSchematicText(activeSession),
@@ -92,64 +111,36 @@ const symbolLibraryIndexer = new SymbolLibraryIndexer(symbolLibraryCache, {
 	symbolDirectoryInput: dom.symbolDirectoryInput
 });
 
-let mode: AppMode = 'view';
-let highlightNetEnabled = false;
-/** Circuit-mode dragging (auto-rewire on drop). Always on in circuit mode —
- *  distinct from edit mode's manual, non-rewiring drag. */
-let circuitDragMode = false;
-let session: KicadRenderSession | null = null;
-let recipe: CircuitDesignRecipe | null = null;
-setHighlightNetEnabled(false);
-let icSymbolText = '';
-let placements: CircuitPlacement[] = [];
-let placedFragment = '';
-const appState = new AppState();
+const appState = new AppState(doc);
 const runtime = new EditorRuntimeState();
-/** Locked pin↔net map from the opened schematic (recipe-free rewire). */
-let lockedNetlist: LockedNetlist | null = null;
-let selectedRef: string | null = null;
-let rerouting = false;
 
-// ---- Edit mode: hand-drawn wires/junctions/no-connects/graphics ----
-let editTool: EditTool = 'select';
-/** Wire/bus tools: last committed chain point (world, snapped), or null if no chain in progress. */
-let lineChainStart: Vec2 | null = null;
-/** Line/rect/circle/text-box tools: first-click anchor, or null before it. */
-let shapeAnchor: Vec2 | null = null;
-/** Arc tool: 0, 1 ([start]), or 2 ([start, end]) points clicked so far. */
-let arcPoints: Vec2[] = [];
-/** Bezier tool: 0..4 points (start, control 1, control 2, end). */
-let bezierPoints: Vec2[] = [];
-let ruleAreaPoints: Vec2[] = [];
 const pendingShapeTracker = new PendingShapeTracker();
 const editGestureTracker = new EditGestureTracker();
 
+/** currentPowerKind is deliberately NOT per-document — one shared "last
+ *  used power kind," seeded from and persisted to Settings. */
+let currentPowerKind: PowerKind = settings.current.powerKind;
+
 function syncPendingShapeTracker(): void {
-	if (lineChainStart) {
-		pendingShapeTracker.set({ kind: 'chain', start: lineChainStart });
+	if (doc.lineChainStart) {
+		pendingShapeTracker.set({ kind: 'chain', start: doc.lineChainStart });
 	}
-	else if (shapeAnchor) {
-		pendingShapeTracker.set({ kind: 'anchor', start: shapeAnchor });
+	else if (doc.shapeAnchor) {
+		pendingShapeTracker.set({ kind: 'anchor', start: doc.shapeAnchor });
 	}
-	else if (arcPoints.length) {
-		pendingShapeTracker.set({ kind: 'arc', points: arcPoints });
+	else if (doc.arcPoints.length) {
+		pendingShapeTracker.set({ kind: 'arc', points: doc.arcPoints });
 	}
-	else if (bezierPoints.length) {
-		pendingShapeTracker.set({ kind: 'bezier', points: bezierPoints });
+	else if (doc.bezierPoints.length) {
+		pendingShapeTracker.set({ kind: 'bezier', points: doc.bezierPoints });
 	}
-	else if (ruleAreaPoints.length) {
-		pendingShapeTracker.set({ kind: 'rule-area', points: ruleAreaPoints });
+	else if (doc.ruleAreaPoints.length) {
+		pendingShapeTracker.set({ kind: 'rule-area', points: doc.ruleAreaPoints });
 	}
 	else {
 		pendingShapeTracker.clear();
 	}
 }
-
-let editSelectedId: string | null = null;
-let editSelectedKind: string | null = null;
-let currentLabelShape: KicadGlobalLabelShape = 'input';
-let currentDirectiveLabelShape: KicadDirectiveLabelShape = 'round';
-let currentPowerKind: PowerKind = settings.current.powerKind;
 
 function setStatus(msg: string): void { statusBar.setStatus(msg); }
 
@@ -162,54 +153,40 @@ function updateUndoStackPane(): void { propertiesController.updateUndoStackPane(
 
 function makeSymbolMutator(id: string): (fn: (symbol: any) => void) => void {
 	return fn => {
-		const activeSession = session;
-		if (!activeSession?.mutateSymbolByPaintId(id, fn)) {
+		if (!doc.session?.mutateSymbolByPaintId(id, fn)) {
 			return;
 		}
-		appState.refreshSchematicText(activeSession);
+		appState.refreshSchematicText(doc.session);
 		updateUndoStackPane();
 	};
 }
 
 function makeElementMutator(id: string): (fn: (element: any) => void) => void {
 	return fn => {
-		const activeSession = session;
-		if (!activeSession?.mutateElementByPaintId(id, fn)) {
+		if (!doc.session?.mutateElementByPaintId(id, fn)) {
 			return;
 		}
-		appState.refreshSchematicText(activeSession);
+		appState.refreshSchematicText(doc.session);
 		updateUndoStackPane();
 	};
-}
-
-function updateLockedNets(): void {
-	if (!lockedNetlist) {
-		dom.lockedNetsEl.textContent = 'No schematic netlist locked.';
-		return;
-	}
-	const rows = Object.entries(lockedNetlist.pinNetsByRef)
-		.flatMap(([ref, pins]) => Object.entries(pins).map(([pin, net]) => `${ ref }.${ pin }  →  ${ net }`))
-		.sort((a, b) => a.localeCompare(b));
-	dom.lockedNetsEl.textContent = `${ lockedNetlist.summary.netCount } nets · ${ rows.length } locked pins\n\n${ rows.join(
-		'\n') }`;
 }
 
 function snap(n: number): number { return settings.snap(n); }
 
 function setGridSpacing(mm: number): void {
 	settings.setGridSpacingMm(mm);
-	session?.setGridSpacing(mm);
+	doc.session?.setGridSpacing(mm);
 }
 
 function setHighlightNetEnabled(enabled: boolean): void {
-	highlightNetEnabled = enabled;
+	doc.highlightNetEnabled = enabled;
 	dom.highlightNetButton.classList.toggle('active', enabled);
 	dom.highlightNetButton.setAttribute('aria-pressed', String(enabled));
 	dom.highlightNetButton.title = enabled ? 'Highlight Net (click a pin/label/wire to select the net)' :
 		'Highlight Net';
-	dom.canvas.style.cursor = enabled ? 'crosshair' : '';
+	doc.canvas.style.cursor = enabled ? 'crosshair' : '';
 	if (!enabled) {
-		session?.clearNetHighlight();
+		doc.session?.clearNetHighlight();
 	}
 }
 
@@ -221,51 +198,44 @@ dom.gridSelectEl.addEventListener('change', () => {
 });
 
 function updateStatusBar(screenPos?: Vec2): void {
-	statusBar.updateCoordZoom(session, screenPos);
+	statusBar.updateCoordZoom(doc.session, screenPos);
 }
 
-const sessionControllerState: SessionControllerState = {
-	get mode() { return mode; },
-	set mode(value) { mode = value; },
-	get circuitDragMode() { return circuitDragMode; },
-	set circuitDragMode(value) { circuitDragMode = value; },
-	get session() { return session; },
-	set session(value) { session = value; },
-	get lockedNetlist() { return lockedNetlist; },
-	set lockedNetlist(value) { lockedNetlist = value; },
-	get placements() { return placements; },
-	set placements(value) { placements = value; },
-	get placedFragment() { return placedFragment; },
-	set placedFragment(value) { placedFragment = value; },
-	get selectedRef() { return selectedRef; },
-	set selectedRef(value) { selectedRef = value; },
-	get editSelectedId() { return editSelectedId; },
-	set editSelectedId(value) { editSelectedId = value; },
-	get rerouting() { return rerouting; },
-	set rerouting(value) { rerouting = value; },
-	get recipe() { return recipe; },
-	set recipe(value) { recipe = value; },
-	get icSymbolText() { return icSymbolText; },
-	set icSymbolText(value) { icSymbolText = value; }
-};
+function updateSelectionStatus(): void {
+	const activeSession = doc.session;
+	if (!activeSession) {
+		return;
+	}
+	const sole = activeSession.selection;
+	if (!sole) {
+		return;
+	}
+	const item = activeSession.activeScene?.hitTestItems.find(it => it.id === sole);
+	if (!item || (item.kind !== 'wire' && item.kind !== 'bus')) {
+		return;
+	}
+	const connectionName = activeSession.connectionNameForPaintId(sole);
+	statusBar.setStatus(`Connection Name: ${ connectionName ?? '(unresolved)' }`);
+}
 
 const symbolChooser = new SymbolChooser(symbolLibraryCache, {
-	getSession: () => session,
+	getSession: () => doc.session,
 	refreshSchematicText: activeSession => appState.refreshSchematicText(activeSession),
-	setSelectedReference: reference => { selectedRef = reference; },
+	setSelectedReference: reference => { doc.selectedRef = reference; },
 	setStatus,
 	setEditTool: tool => toolStateController.setEditTool(tool)
 });
 const contextMenu = new ContextMenu(dom.stage);
 
 const textInputFlow = new TextInputFlow(appState, {
-	getSession: () => session,
-	getTool: () => editTool,
-	getHitElement: id => (session as any)?.schScene?.hitTestItems?.find((item: any) => item.id === id)?.element,
-	getLabelShape: () => currentLabelShape,
-	setLabelShape: shape => { currentLabelShape = shape; },
-	getDirectiveLabelShape: () => currentDirectiveLabelShape,
-	setDirectiveLabelShape: shape => { currentDirectiveLabelShape = shape; },
+	getSession: () => doc.session,
+	getTool: () => doc.editTool,
+	getHitElement: id => (doc.session as any)?.schScene?.hitTestItems?.find(
+		(item: any) => item.id === id)?.element,
+	getLabelShape: () => doc.currentLabelShape,
+	setLabelShape: shape => { doc.currentLabelShape = shape; },
+	getDirectiveLabelShape: () => doc.currentDirectiveLabelShape,
+	setDirectiveLabelShape: shape => { doc.currentDirectiveLabelShape = shape; },
 	setStatus,
 	updateHint: updateCircuitHint
 });
@@ -276,23 +246,23 @@ const clipboardController = new ClipboardController(appState, {
 	setStatus
 });
 const fileActions = new FileActions(dom.imageInput, {
-	getMode: () => mode,
-	getSession: () => session,
+	getMode: () => doc.mode,
+	getSession: () => doc.session,
 	getLastPointerWorld: () => runtime.lastPointerWorld,
 	snap,
 	setEditTool: tool => toolStateController.setEditTool(tool),
 	setStatus,
 	refreshSchematicText: activeSession => { appState.refreshSchematicText(activeSession); },
 	setImageSelection: id => {
-		editSelectedId = id;
-		editSelectedKind = 'image';
+		doc.editSelectedId = id;
+		doc.editSelectedKind = 'image';
 	},
 	refreshSidebar: updateEditSidebar,
 	openKiCadFile: file => sessionController.openKiCadFile(file)
 });
 propertiesController = new PropertiesController({
-	getSession: () => session,
-	getMode: () => mode,
+	getSession: () => doc.session,
+	getMode: () => doc.mode,
 	editPropertiesEl: dom.editPropertiesEl,
 	propertiesModalEl: dom.propertiesModalEl,
 	propertyPanel,
@@ -302,15 +272,15 @@ propertiesController = new PropertiesController({
 	multiEditNames: PROPERTY_MULTI_EDIT_NAMES
 });
 toolStateController = new ToolStateController({
-	getSession: () => session,
-	getEditTool: () => editTool,
-	setEditToolValue: tool => { editTool = tool; },
+	getSession: () => doc.session,
+	getEditTool: () => doc.editTool,
+	setEditToolValue: tool => { doc.editTool = tool; },
 	clearSymbolPlacement: () => symbolChooser.clearPlacement(),
-	clearLineChainStart: () => { lineChainStart = null; },
-	clearShapeAnchor: () => { shapeAnchor = null; },
-	clearArcPoints: () => { arcPoints = []; },
-	clearBezierPoints: () => { bezierPoints = []; },
-	clearRuleAreaPoints: () => { ruleAreaPoints = []; },
+	clearLineChainStart: () => { doc.lineChainStart = null; },
+	clearShapeAnchor: () => { doc.shapeAnchor = null; },
+	clearArcPoints: () => { doc.arcPoints = []; },
+	clearBezierPoints: () => { doc.bezierPoints = []; },
+	clearRuleAreaPoints: () => { doc.ruleAreaPoints = []; },
 	clearPendingShapeTracker: () => pendingShapeTracker.clear(),
 	endGesture: () => { editGestureTracker.end(); },
 	clearPendingTableState: () => {
@@ -318,8 +288,8 @@ toolStateController = new ToolStateController({
 	},
 	hidePropertiesModal: () => { propertiesController.closePropertiesModal(); },
 	resetLabelShapes: () => {
-		currentLabelShape = 'input';
-		currentDirectiveLabelShape = 'round';
+		doc.currentLabelShape = 'input';
+		doc.currentDirectiveLabelShape = 'round';
 	},
 	hideTextInput: () => { textInputFlow.reset(); },
 	closeContextMenu: () => contextMenu.close(),
@@ -330,11 +300,11 @@ toolStateController = new ToolStateController({
 		}
 	},
 	updateHint: updateCircuitHint,
-	clearEditPreview: () => { session?.setEditPreview(null); }
+	clearEditPreview: () => { doc.session?.setEditPreview(null); }
 });
 
 let sessionController: SessionController;
-sessionController = new SessionController(sessionControllerState, appState, settings, statusBar, dom, {
+sessionController = new SessionController(doc, appState, settings, statusBar, dom, {
 	closeSymbolChooser: () => symbolChooser.clearPlacement(),
 	resetEditToolState: () => toolStateController.resetEditToolState(),
 	refreshHint: updateCircuitHint,
@@ -348,15 +318,39 @@ sessionController = new SessionController(sessionControllerState, appState, sett
 	ensurePlacement: ref => sessionController.ensurePlacement(ref),
 	canAutoroute: () => sessionController.canAutoroute(),
 	commitReroute: () => sessionController.commitReroute('autoroute'),
-	updateLockedNets
-});
+	refreshBreadcrumb: updateBreadcrumb
+}, registry);
+
+/** Project / sheet name + Schematic|PCB tabs — replaced the old View/
+ *  Circuit/Edit mode switcher (see the harmonic-munching-trinket plan).
+ *  Hidden entirely outside a project (scratch/single-file mode has no
+ *  companion view to switch to). */
+function updateBreadcrumb(): void {
+	const projectContext = doc.projectContext;
+	if (!projectContext) {
+		dom.breadcrumbEl.classList.add('hidden');
+		dom.viewTabsEl.classList.add('hidden');
+		return;
+	}
+	dom.breadcrumbEl.classList.remove('hidden');
+	dom.viewTabsEl.classList.remove('hidden');
+	dom.breadcrumbProjectEl.textContent = projectContext.rootName;
+	dom.breadcrumbSheetEl.textContent = doc.kind === 'board'
+		? 'PCB'
+		: (doc.currentSheetNode?.name || projectContext.rootName);
+	dom.viewTabSchematicBtn.classList.toggle('active', doc.kind === 'schematic');
+	dom.viewTabBoardBtn.classList.toggle('active', doc.kind === 'board');
+	dom.viewTabBoardBtn.disabled = !projectContext.project.mainBoard;
+}
 
 function updateCircuitHint(): void {
+	const mode = doc.mode;
+	const editTool = doc.editTool;
 	if (mode === 'edit') {
 		const shapeHint = (editTool === 'global-label' || editTool === 'hier-label')
-			? ` · shape: ${ currentLabelShape } (Tab to cycle)`
+			? ` · shape: ${ doc.currentLabelShape } (Tab to cycle)`
 			: editTool === 'directive-label'
-				? ` · shape: ${ currentDirectiveLabelShape } (Tab to cycle)`
+				? ` · shape: ${ doc.currentDirectiveLabelShape } (Tab to cycle)`
 				: '';
 		const groupHint = toolbar.findGroup(editTool) ? ' · right-click button to cycle label kind' : '';
 		const powerHint = editTool === 'power'
@@ -372,7 +366,7 @@ function updateCircuitHint(): void {
 		statusBar.setHint('Wheel zoom · drag pan · open a local KiCad file');
 		return;
 	}
-	const n = placements.length;
+	const n = doc.placements.length;
 	if (!n) {
 		statusBar.setHint('Edit on · open a .kicad_sch (netlist locks on load for auto-rewire)');
 		return;
@@ -399,19 +393,27 @@ function updateCircuitHint(): void {
 function syncSingleSelectionBookkeeping(s: KicadRenderSession): void {
 	const sole = s.selection;
 	const item = sole ? s.activeScene?.hitTestItems.find(it => it.id === sole) : undefined;
-	editSelectedId = sole;
-	editSelectedKind = item?.kind ?? null;
-	selectedRef = (item?.kind === 'symbol' && item.refDesignator) ? item.refDesignator : null;
+	doc.editSelectedId = sole;
+	doc.editSelectedKind = item?.kind ?? null;
+	doc.selectedRef = (item?.kind === 'symbol' && item.refDesignator) ? item.refDesignator : null;
+	updateSelectionStatus();
+	// Cross-tab selection sync (harmonic-munching-trinket plan Phase 7) — a
+	// PCB tab on the same project outlines the matching footprint. No-op
+	// outside a loaded project; refs=[] is still a meaningful publish (see
+	// clearSelectionBookkeeping) when the schematic selection collapses to
+	// nothing here (0 or 2+ items selected).
+	sessionController.publishSelection(doc.selectedRef ? [doc.selectedRef] : []);
 }
 
 function clearSelectionBookkeeping(): void {
-	selectedRef = null;
-	editSelectedId = null;
-	editSelectedKind = null;
+	doc.selectedRef = null;
+	doc.editSelectedId = null;
+	doc.editSelectedKind = null;
+	sessionController.publishSelection([]);
 }
 
 const toolbar = new Toolbar(settings, {
-	getActiveTool: () => editTool,
+	getActiveTool: () => doc.editTool,
 	setActiveTool: tool => toolStateController.setEditTool(tool),
 	onToolClick: tool => {
 		if (tool === 'image') {
@@ -427,7 +429,7 @@ const toolbar = new Toolbar(settings, {
 	},
 	onPowerKindChanged: () => {
 		currentPowerKind = toolbar.powerKind;
-		if (editTool === 'power') {
+		if (doc.editTool === 'power') {
 			toolStateController.resetEditToolState();
 			updateCircuitHint();
 		}
@@ -440,7 +442,7 @@ dom.recipeInput.addEventListener('change', async (e) => {
 	if (!file) {
 		return;
 	}
-	recipe = JSON.parse(await file.text()) as CircuitDesignRecipe;
+	doc.recipe = JSON.parse(await file.text()) as CircuitDesignRecipe;
 	setStatus(`Recipe loaded (${ file.name }).`);
 	updateCircuitHint();
 });
@@ -450,7 +452,7 @@ dom.symbolInput.addEventListener('change', async (e) => {
 	if (!file) {
 		return;
 	}
-	icSymbolText = await file.text();
+	doc.icSymbolText = await file.text();
 	setStatus(`Symbol loaded (${ file.name }).`);
 	updateCircuitHint();
 });
@@ -459,6 +461,7 @@ wireMainAppInteractions({
 	dom,
 	settings,
 	appState,
+	doc,
 	runtime,
 	pendingShapeTracker,
 	editGestureTracker,
@@ -471,31 +474,31 @@ wireMainAppInteractions({
 	propertiesController,
 	toolStateController,
 	sessionController,
-	getSession: () => session,
-	getMode: () => mode,
-	getCircuitDragMode: () => circuitDragMode,
-	getEditTool: () => editTool,
-	getHighlightNetEnabled: () => highlightNetEnabled,
+	getSession: () => doc.session,
+	getMode: () => doc.mode,
+	getCircuitDragMode: () => doc.circuitDragMode,
+	getEditTool: () => doc.editTool,
+	getHighlightNetEnabled: () => doc.highlightNetEnabled,
 	setHighlightNetEnabled,
 	getCurrentPowerKind: () => currentPowerKind,
 	getGridSpacingMm: () => settings.current.gridSpacingMm,
 	ensurePlacement: ref => sessionController.ensurePlacement(ref),
-	getPlacements: () => placements,
-	getRuleAreaPoints: () => ruleAreaPoints,
-	setRuleAreaPoints: points => { ruleAreaPoints = points; },
-	getLineChainStart: () => lineChainStart,
-	setLineChainStart: value => { lineChainStart = value; },
-	getShapeAnchor: () => shapeAnchor,
-	setShapeAnchor: value => { shapeAnchor = value; },
-	getArcPoints: () => arcPoints,
-	setArcPoints: points => { arcPoints = points; },
-	getBezierPoints: () => bezierPoints,
-	setBezierPoints: points => { bezierPoints = points; },
-	getEditSelectedId: () => editSelectedId,
-	setEditSelectedId: id => { editSelectedId = id; },
-	getEditSelectedKind: () => editSelectedKind,
-	setEditSelectedKind: kind => { editSelectedKind = kind; },
-	setSelectedRef: ref => { selectedRef = ref; },
+	getPlacements: () => doc.placements,
+	getRuleAreaPoints: () => doc.ruleAreaPoints,
+	setRuleAreaPoints: points => { doc.ruleAreaPoints = points; },
+	getLineChainStart: () => doc.lineChainStart,
+	setLineChainStart: value => { doc.lineChainStart = value; },
+	getShapeAnchor: () => doc.shapeAnchor,
+	setShapeAnchor: value => { doc.shapeAnchor = value; },
+	getArcPoints: () => doc.arcPoints,
+	setArcPoints: points => { doc.arcPoints = points; },
+	getBezierPoints: () => doc.bezierPoints,
+	setBezierPoints: points => { doc.bezierPoints = points; },
+	getEditSelectedId: () => doc.editSelectedId,
+	setEditSelectedId: id => { doc.editSelectedId = id; },
+	getEditSelectedKind: () => doc.editSelectedKind,
+	setEditSelectedKind: kind => { doc.editSelectedKind = kind; },
+	setSelectedRef: ref => { doc.selectedRef = ref; },
 	clearSelectionBookkeeping,
 	syncPendingShapeTracker,
 	syncSingleSelectionBookkeeping,
@@ -510,9 +513,115 @@ wireMainAppInteractions({
 	runPlace: () => sessionController.runPlace(),
 	commitReroute: connectivity => sessionController.commitReroute(connectivity),
 	downloadSchematic: () => sessionController.downloadSchematic(
-		recipe?.ic.mpn || 'circuit', placedFragment.trim() ? wrapFullSchematic(placedFragment) : ''),
+		doc.recipe?.ic.mpn || 'circuit', doc.placedFragment.trim() ? wrapFullSchematic(doc.placedFragment) : ''),
 	refreshSchematicText: activeSession => { appState.refreshSchematicText(activeSession); },
 	chooseSymbolDirectory: () => symbolLibraryIndexer.chooseDirectory(),
 	indexFallbackDirectory: files => symbolLibraryIndexer.indexFallbackDirectory(files),
-	refreshSymbolLibraryButton: () => symbolLibraryIndexer.refreshButton()
+	refreshSymbolLibraryButton: () => symbolLibraryIndexer.refreshButton(),
+	onProjectOpened: projectId => router.navigate(
+		{ screen: 'editor', projectId, view: 'schematic', sheet: null }, { replace: true })
 });
+
+/**
+ * Router wiring — Home / Project overview / Editor are three sibling
+ * `.screen` containers (see index.html), of which exactly one is visible at
+ * a time; which one, and what the Editor screen shows, is entirely a
+ * function of `router.route`. See the harmonic-munching-trinket plan's
+ * Phase 2–4. Constructed last: everything it drives (sessionController,
+ * doc, dom) already exists above.
+ */
+const router = new Router();
+
+// Editor screen otherwise has no way back to Project overview / Home short
+// of the browser's own back button (not discoverable, and a dead end for
+// e.g. a zip-opened project reached via a fresh tab, which can't silently
+// reopen itself the way a folder project can via requestPermission()).
+dom.brandHomeButton.addEventListener('click', () => {
+	router.navigate(doc.projectContext ? { screen: 'project', projectId: doc.projectContext.key } : { screen: 'home' });
+});
+
+// Schematic/PCB view-switcher tabs — client-side navigation within the
+// already-open project (no reload, unlike Project overview's "open in new
+// tab"), replacing what used to require going back to Project overview.
+dom.viewTabSchematicBtn.addEventListener('click', () => {
+	if (!doc.projectContext || doc.kind === 'schematic') {
+		return;
+	}
+	router.navigate({ screen: 'editor', projectId: doc.projectContext.key, view: 'schematic', sheet: null });
+});
+dom.viewTabBoardBtn.addEventListener('click', () => {
+	if (!doc.projectContext || doc.kind === 'board') {
+		return;
+	}
+	router.navigate({ screen: 'editor', projectId: doc.projectContext.key, view: 'board', sheet: null });
+});
+
+const homeScreen = new HomeScreen(dom.screenHomeEl, registry, {
+	openFolder: () => {
+		void sessionController.openProjectFolder().then(key => {
+			if (key) {
+				router.navigate({ screen: 'editor', projectId: key, view: 'schematic', sheet: null });
+			}
+		});
+	},
+	newProject: () => {
+		void sessionController.newProjectFolder().then(key => {
+			if (key) {
+				router.navigate({ screen: 'editor', projectId: key, view: 'schematic', sheet: null });
+			}
+		});
+	},
+	openZip: file => {
+		void sessionController.openProjectZip(file).then(key => {
+			if (key) {
+				router.navigate({ screen: 'editor', projectId: key, view: 'schematic', sheet: null });
+			}
+		});
+	},
+	openProject: projectId => router.navigate({ screen: 'project', projectId }),
+	openScratchEditor: () => router.navigate({ screen: 'editor', projectId: null, view: 'schematic', sheet: null })
+});
+
+const projectOverviewScreen = new ProjectOverviewScreen(dom.screenProjectEl, registry, {
+	openView: (projectId, view) => router.navigate({ screen: 'editor', projectId, view, sheet: null }),
+	openViewNewTab: (projectId, view) => {
+		const params = new URLSearchParams({ project: projectId, view });
+		window.open(`${ window.location.pathname }?${ params.toString() }`, '_blank');
+	},
+	back: () => router.navigate({ screen: 'home' })
+});
+
+function showScreen(name: Route['screen']): void {
+	dom.screenHomeEl.classList.toggle('hidden', name !== 'home');
+	dom.screenProjectEl.classList.toggle('hidden', name !== 'project');
+	dom.screenEditorEl.classList.toggle('hidden', name !== 'editor');
+}
+
+async function applyRoute(route: Route): Promise<void> {
+	if (route.screen === 'home') {
+		showScreen('home');
+		void homeScreen.refresh();
+		return;
+	}
+	if (route.screen === 'project') {
+		showScreen('project');
+		void projectOverviewScreen.load(route.projectId);
+		return;
+	}
+	// .stage is display:none until this line runs, so resizeCanvas() here
+	// (before openFromRegistryRoute's own loadText → resizeCanvas call) is
+	// what gives the canvas its real dimensions instead of the 1×1 fallback
+	// a hidden element's clientWidth/clientHeight would otherwise produce.
+	showScreen('editor');
+	sessionController.resizeCanvas();
+	// projectId === null is the "scratch" editor (no project) — nothing to
+	// load from the registry; the user picks a file via the editor's own
+	// "Open .kicad_sch / .kicad_pcb" input, same as before project support
+	// existed.
+	if (route.projectId !== null) {
+		await sessionController.openFromRegistryRoute(route.projectId, route.view, route.sheet);
+	}
+}
+
+router.onChange(route => { void applyRoute(route); });
+void applyRoute(router.route);

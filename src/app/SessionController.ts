@@ -11,18 +11,29 @@ import { KicadProject }                                                 from '@k
 import { KicadSchematic }                                               from '@kicad-io/Project/KicadSchematic';
 import { KicadParser }                                                  from '@kicad-io/KicadParser';
 import { BrowserFsAdapter, getDirectoryPicker, type FsDirectoryHandle } from './BrowserFsAdapter';
+import { IndexedDbFsAdapter }                                           from './IndexedDbFsAdapter';
 import { ZipArchive }                                                   from './ZipArchive';
 import { ZipFsAdapter }                                                 from './ZipFsAdapter';
+import { ProjectContext }                                               from './ProjectContext';
+import { ProjectRegistry }                                              from './ProjectRegistry';
+import type { ProjectStore }                                            from './ProjectStore';
+import { SyncedProjectStore }                                           from './SyncedProjectStore';
+import { createProjectSyncTransport }                                   from './transport/createProjectSyncTransport';
+import type { DocumentKind }                                            from './ActiveDocument';
 import type { AppMode }                                                 from './AppState';
 import type { AppState }                                                from './AppState';
 import type { Settings }                                                from './Settings';
 import type { StatusBar }                                               from './StatusBar';
 import type { MainDomRefs }                                             from './domRefs';
 
-/** Mutable state still owned by main.ts during the staged refactor. The
- * controller uses this narrow adapter instead of reaching for loose module
- * globals directly; routing/placement ownership moves here in the next pass. */
+/** The subset of ActiveDocument's fields SessionController actually reads/
+ * writes — a narrow interface (rather than depending on ActiveDocument
+ * directly) so this class doesn't implicitly gain access to editor-gesture
+ * fields (editTool, arcPoints, ...) it has no business touching. MainApp.ts
+ * passes its one ActiveDocument instance here directly; TypeScript's
+ * structural typing accepts it with no adapter code needed. */
 export interface SessionControllerState {
+	kind: DocumentKind;
 	mode: AppMode;
 	circuitDragMode: boolean;
 	session: KicadRenderSession | null;
@@ -34,6 +45,19 @@ export interface SessionControllerState {
 	rerouting: boolean;
 	recipe: CircuitDesignRecipe | null;
 	icSymbolText: string;
+	/** Which node of the active tab's project hierarchy is CURRENTLY loaded
+	 *  into its render session — the render session only ever holds one
+	 *  document at a time, so this tracks which tree node that corresponds
+	 *  to, both for hierarchy-panel highlighting and so saveProject() knows
+	 *  which node to re-sync from the live (possibly edited) session text
+	 *  before writing the whole tree back out. */
+	currentSheetNode: KicadSchematic | null;
+	/** The whole open project (root schematic + full hierarchy + board +
+	 *  .kicad_pro) this document's sheet came from — null in plain
+	 *  single-file mode. */
+	projectContext: ProjectContext | null;
+	readonly canvas: HTMLCanvasElement;
+	readonly canvasGl: HTMLCanvasElement;
 }
 
 export interface SessionControllerCallbacks {
@@ -44,6 +68,12 @@ export interface SessionControllerCallbacks {
 	refreshHint(): void;
 
 	refreshSidebar(): void;
+
+	/** Breadcrumb (project / sheet name) + Schematic/PCB view-tabs — the
+	 *  chrome that replaced the old View/Circuit/Edit mode switcher. Called
+	 *  everywhere refreshHint/refreshSidebar already are, since a project/
+	 *  sheet/kind change is exactly when the breadcrumb needs to catch up. */
+	refreshBreadcrumb(): void;
 
 	clearLastPointer(): void;
 
@@ -63,28 +93,14 @@ export interface SessionControllerCallbacks {
 
 	commitReroute(): Promise<void>;
 
-	updateLockedNets(): void;
 }
 
 /** Owns render-session construction, mode presentation, and document loading.
  * Circuit routing remains in main.ts temporarily because its gesture callers
  * still share the placement and selection variables directly. */
 export class SessionController {
-	/** The whole open project (root schematic + full hierarchy + board +
-	 *  .kicad_pro), when opened via openProjectFolder() — null in plain
-	 *  single-file mode (the pre-existing openKiCadFile/loadText path,
-	 *  unaffected by any of this). */
-	protected currentProject: KicadProject | null = null;
-	/** The adapter backing currentProject's storage — kept alongside it so
-	 *  saveProject() can write through the same picked directory handle. */
-	protected fsAdapter: BrowserFsAdapter | null = null;
-	/** Which node of currentProject's hierarchy is CURRENTLY loaded into the
-	 *  render session — the render session only ever holds one document at
-	 *  a time, so this tracks which tree node that corresponds to, both for
-	 *  hierarchy-panel highlighting and so saveProject() knows which node to
-	 *  re-sync from the live (possibly edited) session text before writing
-	 *  the whole tree back out. */
-	protected currentSheetNode: KicadSchematic | null = null;
+	protected projectStore: ProjectStore | null = null;
+	protected projectStoreId: string | null = null;
 
 	constructor(
 		protected readonly state: SessionControllerState,
@@ -92,12 +108,101 @@ export class SessionController {
 		protected readonly settings: Settings,
 		protected readonly statusBar: StatusBar,
 		protected readonly dom: MainDomRefs,
-		protected readonly callbacks: SessionControllerCallbacks
-	) {}
+		protected readonly callbacks: SessionControllerCallbacks,
+		protected readonly registry: ProjectRegistry = new ProjectRegistry()
+	) {
+		// The one place Phase 5/6's ProjectStore hooks into the existing edit
+		// flow — appState.refreshSchematicText is already the single choke
+		// point every mutation call site (ContextMenuController,
+		// ClipboardController, PropertiesController, this class's own
+		// undo/redo, ...) funnels a committed edit through, so installing the
+		// handler here covers all of them without touching any of their call
+		// sites. No-ops outside a loaded project (no projectContext/
+		// currentSheetNode to key a cache entry against).
+		this.appState.setTextCommitHandler(text => {
+			const sheetPath = this.state.currentSheetNode?.path;
+			if (!this.state.projectContext || !sheetPath) {
+				return;
+			}
+			void this.ensureProjectStore(this.state.projectContext.key).saveSheet(sheetPath, text);
+		});
+		// Graceful disconnect on tab close — best-effort (a crash/force-close
+		// skips this, which is fine: see SharedWorkerTransport/
+		// BroadcastChannelTransport's own doc comments on why a stale peer
+		// entry left behind that way isn't a correctness problem).
+		window.addEventListener('beforeunload', () => this.projectStore?.dispose());
+	}
+
+	/** Lazily constructs (or swaps, disposing the old one) the ProjectStore
+	 *  backing whichever project is currently open, and connects it to the
+	 *  cross-tab transport so peers on the same project learn this tab is
+	 *  here. See the harmonic-munching-trinket plan's Phase 5/6. */
+	protected ensureProjectStore(projectId: string): ProjectStore {
+		if (!this.projectStore || this.projectStoreId !== projectId) {
+			this.projectStore?.dispose();
+			const store = new SyncedProjectStore(projectId, createProjectSyncTransport(projectId));
+			store.onSheetChanged((sheetPath, text, origin) => {
+				if (origin === 'remote') {
+					void this.handleRemoteSheetChanged(sheetPath, text);
+				}
+			});
+			store.onSelection(refs => this.handleRemoteSelection(refs));
+			store.connect(this.state.kind, this.state.currentSheetNode?.path ?? null);
+			this.projectStore = store;
+			this.projectStoreId = projectId;
+		}
+		return this.projectStore;
+	}
+
+	/** A peer tab on the same project just saved a change to the sheet this
+	 *  page currently has open — pull it in live rather than waiting for a
+	 *  reload. Reuses loadText (not a lighter-weight patch) for the same
+	 *  reason the rest of this class does: it's the one path that already
+	 *  keeps the render session, undo history, and hierarchy panel
+	 *  consistent with whatever text it's given. Silently ignored if this
+	 *  page has since navigated to a different sheet/kind — an editor with
+	 *  a live model-changed hook is still only ever showing one document at
+	 *  a time. */
+	protected async handleRemoteSheetChanged(sheetPath: string, text: string): Promise<void> {
+		if (this.state.kind !== 'schematic' || this.state.currentSheetNode?.path !== sheetPath) {
+			return;
+		}
+		if (this.state.currentSheetNode) {
+			this.state.currentSheetNode.data = text;
+		}
+		await this.loadText(text, 'schematic', sheetPath);
+		this.statusBar.setStatus(`Sheet "${ sheetPath }" updated in another tab.`);
+	}
+
+	/** Publishes this tab's current selection to peers on the same project —
+	 *  the schematic side of the R23 example (see the harmonic-munching-
+	 *  trinket plan's Phase 7). No-op outside a loaded project. Empty refs
+	 *  is a real, meaningful publish (selection cleared), not skipped. */
+	publishSelection(refs: string[]): void {
+		if (!this.state.projectContext) {
+			return;
+		}
+		this.ensureProjectStore(this.state.projectContext.key).publishSelection(refs);
+	}
+
+	/** A peer tab selected (or cleared selection of) something — the PCB
+	 *  side of the R23 example. Boards have no click-select of their own to
+	 *  reconcile this against, so this only ever drives the outline cue
+	 *  (KicadRenderSession.setFootprintHighlight), never touches
+	 *  state.selectedRef/editSelectedId (those are this tab's own
+	 *  schematic-editing selection, unrelated). Only the first ref is used
+	 *  — the plan's example is a single symbol, and boards have no
+	 *  multi-highlight UI to extend to yet. */
+	protected handleRemoteSelection(refs: string[]): void {
+		if (this.state.kind !== 'board') {
+			return;
+		}
+		this.state.session?.setFootprintHighlight(refs[0] ?? null);
+	}
 
 	ensureSession(): KicadRenderSession {
 		if (!this.state.session) {
-			this.state.session = new KicadRenderSession(this.dom.canvas, this.dom.canvasGl);
+			this.state.session = new KicadRenderSession(this.state.canvas, this.state.canvasGl);
 			this.state.session.onError = error => this.statusBar.setStatus(
 				error instanceof Error ? error.message : String(error));
 			this.state.session.onRender = () => this.statusBar.recordRender();
@@ -106,8 +211,8 @@ export class SessionController {
 				// WebGL context creation failed (disabled GPU, headless
 				// environment, etc.) — the session already fell back to
 				// Canvas2D internally; swap which canvas is visible to match.
-				this.dom.canvas.classList.remove('hidden');
-				this.dom.canvasGl.classList.add('hidden');
+				this.state.canvas.classList.remove('hidden');
+				this.state.canvasGl.classList.add('hidden');
 				this.statusBar.dbg('WebGL unavailable, using Canvas2D fallback');
 			}
 		}
@@ -121,16 +226,34 @@ export class SessionController {
 		this.ensureSession().resize(width, height);
 	}
 
+	/** Board tabs are view-only — no board editing tools exist yet, so
+	 *  Circuit/Edit mode stay unreachable for a board-kind tab, both by
+	 *  disabling the buttons here and by setMode() itself refusing to leave
+	 *  'view' for one. Re-run on every tab activation (not just on an
+	 *  explicit setMode call) so switching straight into a board tab
+	 *  immediately reflects the constraint. */
+	refreshModeAvailability(): void {
+		const disableNonView = this.state.kind === 'board';
+		(this.dom.modeCircuitBtn as HTMLButtonElement).disabled = disableNonView;
+		(this.dom.modeEditBtn as HTMLButtonElement).disabled = disableNonView;
+	}
+
 	setMode(next: AppMode): void {
+		if (this.state.kind === 'board') {
+			next = 'view';
+		}
+		this.refreshModeAvailability();
 		this.state.mode = next;
 		this.state.circuitDragMode = next === 'circuit';
 		this.dom.modeViewBtn.classList.toggle('active', next === 'view');
 		this.dom.modeCircuitBtn.classList.toggle('active', next === 'circuit');
 		this.dom.modeEditBtn.classList.toggle('active', next === 'edit');
-		this.dom.viewActions.classList.toggle('hidden', next !== 'view');
-		this.dom.circuitActions.classList.toggle('hidden', next !== 'circuit');
+		// view-actions (Open/Save/New/zip) is project management, not a
+		// mode-specific toolbar — stays visible regardless of schematic vs.
+		// board now that 'view' mode is board-exclusive. edit-actions
+		// (Index symbols/Export) genuinely IS schematic-only. circuit-
+		// actions stays permanently hidden — see index.html's comment.
 		this.dom.editActions.classList.toggle('hidden', next !== 'edit');
-		this.dom.editLeftPane.classList.toggle('hidden', next !== 'edit');
 		this.dom.toolPanel.classList.toggle('hidden', next !== 'edit');
 		this.dom.mainEl.classList.toggle('edit-mode', next === 'edit');
 		if (next !== 'edit') {
@@ -163,6 +286,7 @@ export class SessionController {
 		}
 		this.callbacks.refreshHint();
 		this.callbacks.refreshSidebar();
+		this.callbacks.refreshBreadcrumb();
 	}
 
 	/** Returns false (and reports the failure via the status bar) if the file
@@ -176,6 +300,14 @@ export class SessionController {
 	): Promise<boolean> {
 		const session = this.ensureSession();
 		this.resizeCanvas();
+		// No more user-facing View/Circuit/Edit switcher — the kind loaded
+		// IS the mode now: a board is always 'view' (no board-editing tools
+		// exist), a schematic is always 'edit' (KiCad's own eeschema has no
+		// separate "view" state either — the select tool is just the
+		// default/neutral one). Re-run on every load, not just a kind
+		// change, so switching sheets never leaves a stale mode behind.
+		this.state.kind = kind;
+		this.setMode(kind === 'board' ? 'view' : 'edit');
 		try {
 			session.resetUndoHistory();
 			this.callbacks.clearLastPointer();
@@ -216,13 +348,17 @@ export class SessionController {
 		}
 		this.callbacks.refreshHint();
 		this.callbacks.refreshSidebar();
-		// Centralized here (not scattered across openProjectFolder/
-		// navigateToSheet/newProjectFolder/openProjectZip, all of which
-		// funnel through this one method) — by the time this runs,
-		// currentProject/currentSheetNode already reflect whatever this
-		// particular load was for, whether that's a plain single file
-		// (both null, renders the fallback) or a step in a project flow.
-		this.renderHierarchyPanel();
+		this.callbacks.refreshBreadcrumb();
+		if (this.state.projectContext) {
+			// Re-announce presence on every navigation within an open project
+			// (switching sheets, or Schematic ↔ PCB) — no-ops if this is the
+			// very first load (ensureProjectStore's own connect() call just
+			// announced the same thing) or on LocalProjectStore (no
+			// transport, Phase 5's no-project/scratch case never reaches
+			// here anyway since projectContext is null there).
+			this.ensureProjectStore(this.state.projectContext.key)
+				.updatePresence(this.state.kind, this.state.currentSheetNode?.path ?? null);
+		}
 		return true;
 	}
 
@@ -232,12 +368,12 @@ export class SessionController {
 			const name = file.name.toLowerCase();
 			this.statusBar.dbg('openKiCadFile', { name, mode: this.state.mode, bytes: text.length });
 			if (name.endsWith('.kicad_pcb')) {
-				if (await this.loadText(text, 'board', file.name) && this.state.mode === 'view') {
+				if (await this.loadText(text, 'board', file.name)) {
 					this.statusBar.setStatus(`Loaded board ${ file.name }`);
 				}
 			}
-			else if (await this.loadText(text, 'schematic', file.name) && this.state.mode === 'view') {
-				this.statusBar.setStatus(`Loaded schematic ${ file.name }. Switch to Circuit layout to drag/rotate.`);
+			else if (await this.loadText(text, 'schematic', file.name)) {
+				this.statusBar.setStatus(`Loaded schematic ${ file.name }.`);
 			}
 		}
 		catch (error) {
@@ -250,7 +386,7 @@ export class SessionController {
 	 * Opens a whole project folder (Chrome/Edge only — File System Access
 	 * API) and loads its root schematic. Sits alongside openKiCadFile/
 	 * loadText, which stay exactly as they are for single-file use — this
-	 * ADDITIONALLY populates currentProject/fsAdapter/currentSheetNode so
+	 * ADDITIONALLY populates projectContext/currentSheetNode so
 	 * saveProject() and hierarchy navigation (navigateToSheet) have
 	 * something to work with. KicadSchematic.loadFromPath (kicad-io) already
 	 * recursively loads the ENTIRE sheet hierarchy eagerly — reading from a
@@ -258,12 +394,12 @@ export class SessionController {
 	 * the gateway-backed web/ Viewer's lazy per-sheet fetch, there's no
 	 * reason to defer loading sub-sheets here.
 	 */
-	async openProjectFolder(): Promise<void> {
+	async openProjectFolder(): Promise<string | null> {
 		const picker = getDirectoryPicker();
 		if (!picker) {
 			this.statusBar.setStatus(
 				'This browser can\'t open a project folder (needs Chrome or Edge) — use "Open .kicad_sch / .kicad_pcb" for a single file instead.');
-			return;
+			return null;
 		}
 		let dirHandle: FsDirectoryHandle;
 		try {
@@ -271,43 +407,45 @@ export class SessionController {
 		}
 		catch (error) {
 			if (error instanceof DOMException && error.name === 'AbortError') {
-				return;
+				return null;
 			}
 			this.statusBar.setStatus(
 				`Could not open folder — ${ error instanceof Error ? error.message : String(error) }`);
-			return;
+			return null;
 		}
 		try {
 			const adapter = new BrowserFsAdapter(dirHandle);
 			const proFile = await adapter.findProjectFile();
 			if (!proFile) {
 				this.statusBar.setStatus(`No .kicad_pro found directly inside "${ dirHandle.name }".`);
-				return;
+				return null;
 			}
 			const project = await KicadProject.openFromProjectRoot(adapter.loadFile, adapter.pathUtils, proFile);
 			if (!project.mainSchematic) {
 				this.statusBar.setStatus(`"${ proFile }" has no matching .kicad_sch next to it.`);
-				return;
+				return null;
 			}
-			this.currentProject = project;
-			this.fsAdapter = adapter;
-			this.currentSheetNode = project.mainSchematic;
+			const key = `folder:${ dirHandle.name }:${ proFile }`;
+			this.state.projectContext = new ProjectContext(key, project, adapter, dirHandle.name);
+			this.state.currentSheetNode = project.mainSchematic;
 			this.dom.saveProjectButton.disabled = false;
+			const sheetCount = this.countSheetsRecursive(project.mainSchematic);
+			void this.registry.upsertProject({
+				id: key, name: dirHandle.name, kind: 'folder', dirHandle, proFile, lastOpenedAt: Date.now(), sheetCount
+			});
 			const loaded = await this.loadText(project.mainSchematic.data, 'schematic', project.mainSchematic.path);
-			if (loaded && this.state.mode === 'view') {
-				const sheetCount = this.countSheetsRecursive(project.mainSchematic);
-				this.statusBar.setStatus(
-					`Loaded project "${ dirHandle.name }" — ${ sheetCount } sheet(s) in hierarchy. Switch to Circuit layout to drag/rotate.`);
+			if (loaded) {
+				this.statusBar.setStatus(`Loaded project "${ dirHandle.name }" — ${ sheetCount } sheet(s) in hierarchy.`);
 			}
+			return key;
 		}
 		catch (error) {
-			this.currentProject = null;
-			this.fsAdapter = null;
-			this.currentSheetNode = null;
+			this.state.projectContext = null;
+			this.state.currentSheetNode = null;
 			this.dom.saveProjectButton.disabled = true;
-			this.renderHierarchyPanel();
 			this.statusBar.setStatus(
 				`Could not open project — ${ error instanceof Error ? error.message : String(error) }`);
+			return null;
 		}
 	}
 
@@ -325,15 +463,16 @@ export class SessionController {
 			sheetPath: '/',
 			showDrawingSheet: options?.showDrawingSheet ?? true
 		};
-		if (!this.currentProject?.mainSchematic || !this.currentSheetNode) {
+		const mainSchematic = this.state.projectContext?.project.mainSchematic;
+		if (!mainSchematic || !this.state.currentSheetNode) {
 			return docInfo;
 		}
-		const chain = this.getSheetPathChain(this.currentProject.mainSchematic, this.currentSheetNode);
+		const chain = this.getSheetPathChain(mainSchematic, this.state.currentSheetNode);
 		const segments = chain.slice(1).map(node => (node.name || node.path || '(unnamed)').trim()).filter(Boolean);
 		docInfo.sheetPath = segments.length ? `/${ segments.join('/') }` : '/';
-		docInfo.filename = this.basenameFromPath(this.currentSheetNode.path || filename);
-		const flattened = this.flattenSheets(this.currentProject.mainSchematic);
-		const index = flattened.findIndex(node => node === this.currentSheetNode);
+		docInfo.filename = this.basenameFromPath(this.state.currentSheetNode.path || filename);
+		const flattened = this.flattenSheets(mainSchematic);
+		const index = flattened.findIndex(node => node === this.state.currentSheetNode);
 		if (index >= 0) {
 			docInfo.sheetNumber = index + 1;
 			docInfo.sheetCount = flattened.length;
@@ -366,82 +505,129 @@ export class SessionController {
 		return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 	}
 
-	/**
-	 * Renders the WHOLE hierarchy (not just the currently-displayed sheet's
-	 * direct children — a per-load one-level list, which is what the OLD
-	 * edit-mode hierarchy panel used to show via session.currentSheets, and
-	 * which is exactly why it used to say "Root schematic" and never update:
-	 * a leaf sheet with no sub-sheets of its own has an empty
-	 * session.currentSheets regardless of where it sits in the real tree).
-	 * Writes the SAME clickable, currentSheetNode-highlighted rows into BOTH
-	 * the view-mode Project Hierarchy panel AND the edit-mode Schematic
-	 * Hierarchy panel — they're the same tree, just shown in two places, and
-	 * must never drift out of sync. This is the ONLY place either panel's
-	 * content is written; PropertyPanel.refreshSidebar (called on every
-	 * property/selection change, far more often than navigation) no longer
-	 * touches hierarchy at all, which is what let the old mechanism
-	 * overwrite this with stale content on every unrelated sidebar refresh.
-	 */
-	protected renderHierarchyPanel(): void {
-		this.dom.projectHierarchyEl.replaceChildren();
-		this.dom.editHierarchyEl.replaceChildren();
-		if (!this.currentProject?.mainSchematic) {
-			this.dom.projectHierarchySection.classList.add('hidden');
-			this.renderSingleFileHierarchyFallback();
-			return;
-		}
-		this.dom.projectHierarchySection.classList.remove('hidden');
-		this.appendHierarchyRow(this.currentProject.mainSchematic, 0, this.dom.projectHierarchyEl);
-		this.appendHierarchyRow(this.currentProject.mainSchematic, 0, this.dom.editHierarchyEl);
-	}
-
-	/** No project open — falls back to the pre-existing behavior: list
-	 *  whichever direct sub-sheet references the ONE currently-loaded file
-	 *  has (not navigable, just informational — a loose single file has no
-	 *  sibling files to resolve them against). Only the edit-mode panel
-	 *  shows this; the view-mode Project Hierarchy panel stays hidden. */
-	protected renderSingleFileHierarchyFallback(): void {
-		const sheets = this.state.session?.currentSheets ?? [];
-		if (!sheets.length) {
-			const row = document.createElement('div');
-			row.className = 'hierarchy-row';
-			row.textContent = '● Root schematic';
-			this.dom.editHierarchyEl.appendChild(row);
-			return;
-		}
-		for (const sheet of sheets) {
-			const row = document.createElement('div');
-			row.className = 'hierarchy-row';
-			row.textContent = `● ${ sheet.name } (${ sheet.file })`;
-			this.dom.editHierarchyEl.appendChild(row);
-		}
-	}
-
-	protected appendHierarchyRow(node: KicadSchematic, depth: number, target: HTMLElement): void {
-		const row = document.createElement('div');
-		row.className = node === this.currentSheetNode ? 'hierarchy-row clickable active' : 'hierarchy-row clickable';
-		row.style.paddingLeft = `${ depth * 12 }px`;
-		row.textContent = `● ${ node.name || '(root)' }`;
-		row.title = node.path;
-		row.addEventListener('click', () => { void this.navigateToSheet(node); });
-		target.appendChild(row);
-		for (const child of node.sheets) {
-			this.appendHierarchyRow(child, depth + 1, target);
-		}
-	}
-
 	/** Navigates to any node already loaded in currentProject's hierarchy —
 	 *  used by both the hierarchy panel's click-to-descend and canvas
-	 *  double-click on a sheet symbol (see descendIntoSheetAtScreen). */
+	 *  double-click on a sheet symbol (see descendIntoSheetAtScreen).
+	 *  Replaces the current document in place. */
 	async navigateToSheet(node: KicadSchematic): Promise<void> {
 		if (!node.rootElement) {
 			return;
 		}
-		this.currentSheetNode = node;
+		this.state.currentSheetNode = node;
 		const loaded = await this.loadText(node.data, 'schematic', node.path || node.name);
 		if (loaded) {
 			this.statusBar.setStatus(`Viewing sheet "${ node.name }".`);
 		}
+	}
+
+	protected findSheetByPath(root: KicadSchematic, sheetPath: string): KicadSchematic | null {
+		return this.flattenSheets(root).find(node => node.path === sheetPath) ?? null;
+	}
+
+	/**
+	 * Entry point for the router's 'editor' screen (see Router.ts /
+	 * harmonic-munching-trinket plan Phase 4) — given a projectId from the
+	 * URL, ensures state.projectContext matches it (reopening from the
+	 * registry when this page doesn't already have it loaded — e.g. a
+	 * fresh tab opened via "open in new tab", or a page reload), then loads
+	 * the requested view/sheet into the canvas. Folds in what the plan
+	 * called reopenProjectFromRegistry() — reopening and resolving a route
+	 * are the same operation once the registry is the source of truth for
+	 * "which project", so there's no separate method worth keeping apart
+	 * from this one.
+	 *
+	 * Two reopen paths: a 'folder' project needs requestPermission() on its
+	 * live dirHandle (a real per-browser-session gesture-gated prompt); an
+	 * 'imported' one needs nothing at all — IndexedDbFsAdapter reads
+	 * straight from IndexedDB, which every tab of this origin already has
+	 * access to, so multi-tab support for an imported project is actually
+	 * MORE robust than for a folder one.
+	 */
+	async openFromRegistryRoute(projectId: string, view: DocumentKind, sheetPath: string | null): Promise<void> {
+		if (this.state.projectContext?.key !== projectId) {
+			const record = await this.registry.getProject(projectId);
+			if (!record) {
+				this.statusBar.setStatus(
+					`Unknown project "${ projectId }" — it may have been opened in a different browser, or its registry entry didn't survive a browser data clear.`);
+				return;
+			}
+			try {
+				if (record.kind === 'imported') {
+					const adapter = new IndexedDbFsAdapter(projectId);
+					if (!record.proFile) {
+						this.statusBar.setStatus(`"${ record.name }" is missing its project file path — reimport it from Home.`);
+						return;
+					}
+					const project = await KicadProject.openFromProjectRoot(adapter.loadFile, adapter.pathUtils, record.proFile);
+					this.state.projectContext = new ProjectContext(projectId, project, adapter, record.name);
+					this.state.currentSheetNode = project.mainSchematic ?? null;
+					this.dom.saveProjectButton.disabled = false;
+					void this.registry.upsertProject({ ...record, lastOpenedAt: Date.now() });
+				}
+				else if (!record.dirHandle) {
+					this.statusBar.setStatus(`"${ record.name }" can't be reopened automatically — open it again from Home.`);
+					return;
+				}
+				else {
+					if (record.dirHandle.requestPermission) {
+						const permission = await record.dirHandle.requestPermission({ mode: 'readwrite' });
+						if (permission !== 'granted') {
+							this.statusBar.setStatus(`Permission to "${ record.name }" was not granted.`);
+							return;
+						}
+					}
+					const adapter = new BrowserFsAdapter(record.dirHandle);
+					const proFile = record.proFile ?? await adapter.findProjectFile();
+					if (!proFile) {
+						this.statusBar.setStatus(`No .kicad_pro found directly inside "${ record.name }".`);
+						return;
+					}
+					const project = await KicadProject.openFromProjectRoot(adapter.loadFile, adapter.pathUtils, proFile);
+					this.state.projectContext = new ProjectContext(projectId, project, adapter, record.name);
+					this.state.currentSheetNode = project.mainSchematic ?? null;
+					this.dom.saveProjectButton.disabled = false;
+					void this.registry.upsertProject({ ...record, lastOpenedAt: Date.now() });
+				}
+			}
+			catch (error) {
+				this.statusBar.setStatus(
+					`Could not reopen project — ${ error instanceof Error ? error.message : String(error) }`);
+				return;
+			}
+		}
+		// Common case: openProjectFolder/newProjectFolder/openProjectZip (or a
+		// prior call to this same method) already left the canvas showing
+		// exactly this route — e.g. Home's "Open Folder" flow immediately
+		// navigates the router here right after the picker flow already
+		// loaded the root schematic. Reloading it a second time would just
+		// reset undo history and re-parse for nothing.
+		const mainSchematicPath = this.state.projectContext!.project.mainSchematic?.path;
+		const alreadyAtRoute = this.state.kind === view
+			&& (view === 'board' || this.state.currentSheetNode?.path === (sheetPath ?? mainSchematicPath));
+		if (alreadyAtRoute) {
+			return;
+		}
+		const project = this.state.projectContext!.project;
+		if (view === 'board') {
+			if (!project.mainBoard) {
+				this.statusBar.setStatus(`"${ this.state.projectContext!.rootName }" has no board file.`);
+				return;
+			}
+			if (await this.loadText(project.mainBoard.data, 'board', project.mainBoard.path)) {
+				this.statusBar.setStatus(`Loaded board "${ this.state.projectContext!.rootName }".`);
+			}
+			return;
+		}
+		if (!project.mainSchematic) {
+			this.statusBar.setStatus(`"${ this.state.projectContext!.rootName }" has no schematic file.`);
+			return;
+		}
+		const target = sheetPath ? this.findSheetByPath(project.mainSchematic, sheetPath) : project.mainSchematic;
+		if (!target) {
+			this.statusBar.setStatus(`Sheet "${ sheetPath }" not found in project.`);
+			return;
+		}
+		await this.navigateToSheet(target);
 	}
 
 	/** Double-click-a-sheet-symbol-to-descend, matching real KiCad's own
@@ -452,14 +638,14 @@ export class SessionController {
 	 *  entry by name (sheet names are the effective identifier KiCad's own
 	 *  UI treats as unique among one parent's direct children). */
 	async descendIntoSheetAtScreen(screenPos: Vec2): Promise<boolean> {
-		if (!this.currentSheetNode || !this.state.session) {
+		if (!this.state.currentSheetNode || !this.state.session) {
 			return false;
 		}
 		const sheetRef = this.state.session.sheetAtScreen(screenPos);
 		if (!sheetRef) {
 			return false;
 		}
-		const node = this.currentSheetNode.sheets.find(s => s.name === sheetRef.name);
+		const node = this.state.currentSheetNode.sheets.find(s => s.name === sheetRef.name);
 		if (!node) {
 			return false;
 		}
@@ -469,29 +655,37 @@ export class SessionController {
 
 	/**
 	 * Saves the whole open project back to its folder. Re-parses the LIVE
-	 * session text into currentSheetNode first — currentProject's tree was
+	 * session text into currentSheetNode first — the project tree was
 	 * populated once at open time and the render session holds its own
 	 * separate, possibly-since-edited AST for whichever ONE sheet is
-	 * currently displayed (this app only ever renders one document at a
-	 * time), so without this re-sync, saveAll() would silently write back
-	 * the as-opened snapshot instead of the user's edits — the same class of
-	 * bug Phase A's KicadSchematic.saveAll() fix targeted, one layer up.
+	 * currently displayed, so without this re-sync, saveAll() would
+	 * silently write back the as-opened snapshot instead of the user's
+	 * edits — the same class of bug Phase A's KicadSchematic.saveAll() fix
+	 * targeted, one layer up.
+	 *
+	 * Single-document seam: with real browser tabs as the multi-view unit
+	 * (see harmonic-munching-trinket plan), a project can be open across
+	 * SEVERAL tabs at once, each with its own live edits this page has no
+	 * way to see. The eventual fix is self-contained to this method: before
+	 * `saveAll()`, pull each other tab's live sheet text via the
+	 * SharedWorker/IndexedDB sync layer (Phase 6) instead of only
+	 * re-syncing this page's own currentSheetNode below.
 	 */
 	async saveProject(): Promise<void> {
-		if (!this.currentProject || !this.fsAdapter) {
+		const projectContext = this.state.projectContext;
+		if (!projectContext || !projectContext.fsAdapter) {
 			this.statusBar.setStatus('No project open to save — use Open Project Folder first.');
 			return;
 		}
-		const session = this.state.session;
 		try {
-			if (this.currentSheetNode && session) {
-				const liveText = this.appState.refreshSchematicText(session);
+			if (this.state.currentSheetNode && this.state.session) {
+				const liveText = this.state.session.getSchematicText();
 				if (liveText) {
-					this.currentSheetNode.data = liveText;
-					this.currentSheetNode.rootElement = new KicadParser().parse(liveText);
+					this.state.currentSheetNode.data = liveText;
+					this.state.currentSheetNode.rootElement = new KicadParser().parse(liveText);
 				}
 			}
-			await this.currentProject.saveAll(this.fsAdapter.saveFile);
+			await projectContext.project.saveAll(projectContext.fsAdapter.saveFile);
 			this.statusBar.setStatus('Project saved.');
 		}
 		catch (error) {
@@ -503,15 +697,15 @@ export class SessionController {
 	/** Scaffolds a brand-new blank project (schematic + board + .kicad_pro,
 	 *  KicadProject.createNew()/saveAll() from Phase A) into a folder the
 	 *  user picks, then opens it the same way openProjectFolder() would. */
-	async newProjectFolder(): Promise<void> {
+	async newProjectFolder(): Promise<string | null> {
 		const picker = getDirectoryPicker();
 		if (!picker) {
 			this.statusBar.setStatus('This browser can\'t create a project folder (needs Chrome or Edge).');
-			return;
+			return null;
 		}
 		const name = window.prompt('New project name?', 'NewProject')?.trim();
 		if (!name) {
-			return;
+			return null;
 		}
 		let dirHandle: FsDirectoryHandle;
 		try {
@@ -519,74 +713,91 @@ export class SessionController {
 		}
 		catch (error) {
 			if (error instanceof DOMException && error.name === 'AbortError') {
-				return;
+				return null;
 			}
 			this.statusBar.setStatus(
 				`Could not open folder — ${ error instanceof Error ? error.message : String(error) }`);
-			return;
+			return null;
 		}
 		try {
 			const adapter = new BrowserFsAdapter(dirHandle);
 			const project = KicadProject.createNew(name, '', adapter.pathUtils);
 			await project.saveAll(adapter.saveFile);
-			this.currentProject = project;
-			this.fsAdapter = adapter;
-			this.currentSheetNode = project.mainSchematic ?? null;
+			const key = `folder:${ dirHandle.name }:${ name }.kicad_pro`;
+			this.state.projectContext = new ProjectContext(key, project, adapter, dirHandle.name);
+			this.state.currentSheetNode = project.mainSchematic ?? null;
 			this.dom.saveProjectButton.disabled = false;
+			void this.registry.upsertProject({
+				id: key, name: dirHandle.name, kind: 'folder', dirHandle, proFile: `${ name }.kicad_pro`,
+				lastOpenedAt: Date.now(), sheetCount: project.mainSchematic ? this.countSheetsRecursive(project.mainSchematic) : undefined
+			});
 			if (project.mainSchematic) {
 				await this.loadText(project.mainSchematic.data, 'schematic', project.mainSchematic.path);
 			}
 			this.statusBar.setStatus(`Created new project "${ name }" in "${ dirHandle.name }".`);
-			this.renderHierarchyPanel();
+			return key;
 		}
 		catch (error) {
 			this.statusBar.setStatus(
 				`Could not create project — ${ error instanceof Error ? error.message : String(error) }`);
+			return null;
 		}
 	}
 
 	/**
-	 * Opens a whole project from an uploaded .zip — works in every modern
+	 * Imports a whole project from an uploaded .zip — works in every modern
 	 * browser (native DecompressionStream, not File-System-Access-API-gated
 	 * like openProjectFolder), so this is the cross-browser project-open
-	 * path. Read-only: fsAdapter is deliberately left null (no writable
-	 * adapter exists for an in-memory zip), so Save Project stays disabled
-	 * for a zip-opened project — matches "load zip... extract", not
-	 * "edit and re-download as zip".
+	 * path. The zip itself is only ever read here, once: every .kicad_pro/
+	 * .kicad_sch/.kicad_pcb entry gets extracted straight into an
+	 * IndexedDbFsAdapter keyed to this project, and everything from this
+	 * point on — this initial load included — goes through THAT adapter,
+	 * never back through ZipArchive/ZipFsAdapter. That's what makes the
+	 * project reopenable from a second browser tab (or a reload) with no
+	 * re-upload: the extracted copy in IndexedDB, not the original file, is
+	 * the project's actual home now. Writable, unlike the old zip-backed
+	 * flow — saveFile persists into the same IndexedDB store, so Save
+	 * Project works here too.
 	 */
-	async openProjectZip(file: File): Promise<void> {
+	async openProjectZip(file: File): Promise<string | null> {
 		try {
 			const archive = await ZipArchive.open(file);
 			const zipAdapter = new ZipFsAdapter(archive);
 			const proFile = zipAdapter.findProjectFile();
 			if (!proFile) {
 				this.statusBar.setStatus(`No .kicad_pro found inside "${ file.name }".`);
-				return;
+				return null;
 			}
-			const project = await KicadProject.openFromProjectRoot(zipAdapter.loadFile, zipAdapter.pathUtils, proFile);
+			const key = `imported:${ file.name }:${ file.size }`;
+			const fsAdapter = new IndexedDbFsAdapter(key);
+			for (const path of archive.listEntries()) {
+				if (/\.(kicad_pro|kicad_sch|kicad_pcb)$/i.test(path)) {
+					await fsAdapter.saveFile(path, await archive.readText(path));
+				}
+			}
+			const project = await KicadProject.openFromProjectRoot(fsAdapter.loadFile, fsAdapter.pathUtils, proFile);
 			if (!project.mainSchematic) {
 				this.statusBar.setStatus(`"${ proFile }" has no matching .kicad_sch next to it in the zip.`);
-				return;
+				return null;
 			}
-			this.currentProject = project;
-			this.fsAdapter = null;
-			this.currentSheetNode = project.mainSchematic;
-			this.dom.saveProjectButton.disabled = true;
+			this.state.projectContext = new ProjectContext(key, project, fsAdapter, file.name);
+			this.state.currentSheetNode = project.mainSchematic;
+			this.dom.saveProjectButton.disabled = false;
+			const sheetCount = this.countSheetsRecursive(project.mainSchematic);
+			void this.registry.upsertProject({ id: key, name: file.name, kind: 'imported', proFile, lastOpenedAt: Date.now(), sheetCount });
 			const loaded = await this.loadText(project.mainSchematic.data, 'schematic', project.mainSchematic.path);
-			if (loaded && this.state.mode === 'view') {
-				const sheetCount = this.countSheetsRecursive(project.mainSchematic);
-				this.statusBar.setStatus(
-					`Loaded project "${ file.name }" — ${ sheetCount } sheet(s) in hierarchy (read-only, extracted from zip).`);
+			if (loaded) {
+				this.statusBar.setStatus(`Imported project "${ file.name }" — ${ sheetCount } sheet(s) in hierarchy.`);
 			}
+			return key;
 		}
 		catch (error) {
-			this.currentProject = null;
-			this.fsAdapter = null;
-			this.currentSheetNode = null;
+			this.state.projectContext = null;
+			this.state.currentSheetNode = null;
 			this.dom.saveProjectButton.disabled = true;
-			this.renderHierarchyPanel();
 			this.statusBar.setStatus(
-				`Could not open zip — ${ error instanceof Error ? error.message : String(error) }`);
+				`Could not import zip — ${ error instanceof Error ? error.message : String(error) }`);
+			return null;
 		}
 	}
 
@@ -613,7 +824,6 @@ export class SessionController {
 		}
 		try {
 			this.state.lockedNetlist = null;
-			this.callbacks.updateLockedNets();
 			const result = placeFromInputs({ recipe, icSymbolText, icMpnFallback: recipe.ic.mpn });
 			this.state.placements = result.placements;
 			this.state.placedFragment = result.kicadSchFragment;
@@ -662,7 +872,6 @@ export class SessionController {
 			this.statusBar.dbg('lockNetlist failed', error);
 			this.statusBar.setScore(error instanceof Error ? error.message : String(error));
 		}
-		this.callbacks.updateLockedNets();
 	}
 
 	protected placementFromPose(pose: {

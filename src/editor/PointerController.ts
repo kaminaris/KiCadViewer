@@ -80,12 +80,17 @@ export interface PointerControllerDeps {
 /** Owns canvas/window pointer event flow and drag commit behavior. */
 export class PointerController {
 	constructor(protected readonly deps: PointerControllerDeps) {
-		for (const el of [this.deps.canvas, this.deps.canvasGl]) {
+		for (const el of [deps.canvas, deps.canvasGl]) {
 			el.addEventListener('mousedown', event => this.onMouseDown(event));
 			el.addEventListener('dblclick', event => this.onDoubleClick(event));
 		}
 		window.addEventListener('mousemove', event => this.onPointerMove(event));
 		window.addEventListener('mouseup', event => this.onPointerUp(event));
+	}
+
+	protected selectAndSync(session: KicadRenderSession, id: string | null): void {
+		session.select(id);
+		this.deps.syncSingleSelectionBookkeeping(session);
 	}
 
 	protected onMouseDown(e: MouseEvent): void {
@@ -114,7 +119,7 @@ export class PointerController {
 			this.deps.dbg('mousedown hit', symbolHit);
 			if (symbolHit?.refDesignator) {
 				this.deps.setSelectedRef(symbolHit.refDesignator);
-				session.select(symbolHit.id);
+				this.selectAndSync(session, symbolHit.id);
 				this.beginSymbolDrag(symbolHit.refDesignator, screenPos);
 				e.preventDefault();
 				return;
@@ -122,7 +127,7 @@ export class PointerController {
 			const labelHit = session.hitTestLabelAtScreen(screenPos);
 			if (labelHit?.id && labelHit.labelKind && labelHit.labelKind !== 'local') {
 				this.deps.setSelectedRef(null);
-				session.select(labelHit.id);
+				this.selectAndSync(session, labelHit.id);
 				session.pushUndoSnapshot();
 				const world = session.screenToWorld(screenPos);
 				const hitItem = (session as any).schScene?.hitTestItems?.find((it: any) => it.id === labelHit.id);
@@ -138,7 +143,7 @@ export class PointerController {
 				return;
 			}
 			this.deps.setSelectedRef(null);
-			session.select(null);
+			this.selectAndSync(session, null);
 		}
 		this.deps.runtime.draggingPan = true;
 		this.deps.runtime.dragStart = screenPos;
@@ -266,7 +271,7 @@ export class PointerController {
 				this.deps.setSelectedRef(hit.refDesignator);
 				this.deps.setEditSelectedId(hit.id);
 				this.deps.setEditSelectedKind(hit.kind);
-				session.select(hit.id);
+				this.selectAndSync(session, hit.id);
 				this.beginEditSymbolDrag(hit.refDesignator, hit.id, screenPos);
 				e.preventDefault();
 				return true;
@@ -275,7 +280,7 @@ export class PointerController {
 				this.deps.setSelectedRef(null);
 				this.deps.setEditSelectedId(hit.id);
 				this.deps.setEditSelectedKind(hit.kind);
-				session.select(hit.id);
+				this.selectAndSync(session, hit.id);
 				this.beginSheetDrag(hit.id, screenPos);
 				e.preventDefault();
 				return true;
@@ -284,7 +289,7 @@ export class PointerController {
 				this.deps.setSelectedRef(null);
 				this.deps.setEditSelectedId(hit.id);
 				this.deps.setEditSelectedKind(hit.kind);
-				session.select(hit.id);
+				this.selectAndSync(session, hit.id);
 				this.beginSheetPinDrag(hit.id, screenPos);
 				e.preventDefault();
 				return true;
@@ -293,7 +298,7 @@ export class PointerController {
 				this.deps.setSelectedRef(null);
 				this.deps.setEditSelectedId(hit.id);
 				this.deps.setEditSelectedKind(hit.kind);
-				session.select(hit.id);
+				this.selectAndSync(session, hit.id);
 				session.pushUndoSnapshot();
 				const hitItem = (session as any).schScene?.hitTestItems?.find((item: any) => item.id === hit.id);
 				const fieldOrigin = (hitItem as any)?.fieldOrigin;
@@ -311,7 +316,7 @@ export class PointerController {
 				this.deps.setSelectedRef(null);
 				this.deps.setEditSelectedId(hit.id);
 				this.deps.setEditSelectedKind(hit.kind);
-				session.select(hit.id);
+				this.selectAndSync(session, hit.id);
 				session.pushUndoSnapshot();
 				this.deps.editGestureTracker.begin({ kind: 'element', id: hit.id, lastSnapped: snapped });
 				e.preventDefault();

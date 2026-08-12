@@ -540,9 +540,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"kicad-viewer@workspace:.":
+"kionline@workspace:.":
   version: 0.0.0-use.local
-  resolution: "kicad-viewer@workspace:."
+  resolution: "kionline@workspace:."
   dependencies:
     typescript: "npm:^5.8.2"
     vite: "npm:^6.2.0"

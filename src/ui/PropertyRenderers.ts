@@ -267,6 +267,8 @@ export class PropertyRenderers {
 			`${ kind === 'bus' ? 'Bus' : (typeof element.getSize === 'function' ? 'Bus Entry' : 'Wire') } (${ id.slice(
 				0, 8) })`
 		);
+		const connectionName = this.host.getSession()?.connectionNameForPaintId?.(id);
+		this.row(basic, 'Connection', connectionName ?? '—');
 		const line = this.section('Line');
 		const stroke = element.getStroke();
 		this.row(line, 'Width (mm)', stroke.width.toFixed(2), true, value => {

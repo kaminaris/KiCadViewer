@@ -5,14 +5,12 @@ import type { Vec2 }               from '@kicad-render/math/Vec2';
 const DEBUG = true;
 
 /**
- * Owns the bottom/side status text elements (status/score/hint/coord/zoom)
+ * Owns the bottom status text elements (status/coord/zoom)
  * and the debug-log helper — pure DOM writes, no business logic. Callers
  * decide WHAT to show; this class only knows HOW to show it.
  */
 export class StatusBar {
 	protected readonly statusEl = document.getElementById('status')!;
-	protected readonly scoreEl = document.getElementById('score')!;
-	protected readonly hintEl = document.getElementById('hint')!;
 	protected readonly coordStatusEl = document.getElementById('coord-status')!;
 	protected readonly zoomStatusEl = document.getElementById('zoom-status')!;
 	protected readonly fpsStatusEl = document.getElementById('fps-status')!;
@@ -36,7 +34,7 @@ export class StatusBar {
 
 	dbg(...args: unknown[]): void {
 		if (DEBUG) {
-			console.log('[kicad-viewer]', ...args);
+			console.log('[kionline]', ...args);
 		}
 	}
 
@@ -44,12 +42,11 @@ export class StatusBar {
 		this.statusEl.textContent = msg;
 	}
 
-	setScore(text: string): void {
-		this.scoreEl.textContent = text;
+	setScore(_text: string): void {
 	}
 
 	setHint(text: string): void {
-		this.hintEl.textContent = text;
+		this.statusEl.textContent = text;
 	}
 
 	/** rAF-throttled coord/zoom readout — coalesces rapid mousemove-driven

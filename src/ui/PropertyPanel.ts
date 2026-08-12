@@ -2,8 +2,7 @@
  *  renderers remain in main.ts while the panel owns row construction and the
  *  sidebar target. */
 export class PropertyPanel {
-	protected readonly target = document.getElementById('edit-properties') as HTMLElement;
-	protected readonly undoTarget = document.getElementById('edit-undo-stack') as HTMLElement;
+	constructor(protected readonly target: HTMLElement, protected readonly undoTarget: HTMLElement) {}
 
 	section(title: string): HTMLElement {
 		const section = document.createElement('section');
@@ -134,13 +133,6 @@ export class PropertyPanel {
 			: '<div class="history-empty">No undo snapshots</div>';
 	}
 
-	/** Hierarchy rendering deliberately lives entirely in
-	 *  SessionController.renderHierarchyPanel() now, not here — this used to
-	 *  also rebuild #edit-hierarchy from session.currentSheets (a per-load,
-	 *  direct-children-only list), but that ran on EVERY call (i.e. every
-	 *  selection/property change, far more often than navigation) and kept
-	 *  clobbering the real, whole-tree hierarchy content with stale
-	 *  one-level data — see renderHierarchyPanel's own doc comment. */
 	refreshSidebar(
 		session: { getUndoStackDebug(): { undo: { label: string; bytes: number }[]; undoDepth: number; redoDepth: number } },
 		renderSelection: () => void
