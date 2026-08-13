@@ -46,6 +46,6 @@
     { "name": "EN", "members": ["U1.4", "R1.1"] }
   ],
   "calculations": {},
-  "notes": ["Bundled demo for KiCadViewer SPA"],
+  "notes": ["Bundled demo for KiOnline SPA"],
   "confidence": "high"
 }

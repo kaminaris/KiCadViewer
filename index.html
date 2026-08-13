@@ -3,35 +3,122 @@
 <head>
 	<meta charset="UTF-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-	<title>KiCad Viewer</title>
+	<title>KiOnline</title>
 	<link rel="stylesheet" href="/KiCadViewer/styles.css" />
-  <script type="module" crossorigin src="/KiCadViewer/assets/index-CASpA6LY.js"></script>
+  <script type="module" crossorigin src="/KiCadViewer/assets/index-CvjYc5Rl.js"></script>
 </head>
 <body>
+	<div class="screen" id="screen-home"></div>
+	<div class="screen hidden" id="screen-project"></div>
+	<div class="screen hidden" id="screen-editor">
 	<header class="top">
-		<div class="brand">KiCad Viewer<span class="app-version" id="app-version" title="Build info"></span></div>
-		<nav class="modes">
-			<button type="button" id="mode-view" class="active" title="View a schematic or board read-only">View (Read-only)</button>
-			<button type="button" id="mode-circuit">Circuit layout</button>
-			<button type="button" id="mode-edit">Edit</button>
-		</nav>
-		<div class="actions" id="history-actions">
-			<button type="button" id="btn-undo" title="Undo (Ctrl+Z)">Undo</button>
-			<button type="button" id="btn-redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+		<div class="top-title-row">
+			<button type="button" class="brand" id="brand-home-btn" title="Back to Project overview">
+				<svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5 H15 L20 10 V19 H4 Z M15 5 V10 H20"/><path d="M8 14 H16 M12 10 V18"/></svg>
+				<span>KiOnline</span><span class="app-version" id="app-version" title="Build info"></span>
+			</button>
+			<nav class="menu-bar" id="main-menu-bar" aria-label="Application menu">
+				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">File</button><div class="menu-popover">
+					<button type="button" class="menu-command" data-action-target="btn-new-project">New Project</button>
+					<button type="button" class="menu-command" data-input-target="file-input">Open…<span>Ctrl+O</span></button>
+					<button type="button" class="menu-command" data-action-target="btn-open-project">Open Project Folder…</button>
+					<button type="button" class="menu-command" data-input-target="zip-input">Open Project Archive…</button>
+					<div class="menu-divider"></div>
+					<button type="button" class="menu-command" data-action-target="btn-save-project">Save Project<span>Ctrl+S</span></button>
+					<button type="button" class="menu-command" data-action-target="btn-export-edit">Export Current Document…</button>
+				</div></div>
+				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Edit</button><div class="menu-popover">
+					<button type="button" class="menu-command" data-action-target="btn-undo">Undo<span>Ctrl+Z</span></button>
+					<button type="button" class="menu-command" data-action-target="btn-redo">Redo<span>Ctrl+Shift+Z</span></button>
+					<div class="menu-divider"></div>
+					<button type="button" class="menu-command" data-shortcut="cut">Cut<span>Ctrl+X</span></button>
+					<button type="button" class="menu-command" data-shortcut="copy">Copy<span>Ctrl+C</span></button>
+					<button type="button" class="menu-command" data-shortcut="paste">Paste<span>Ctrl+V</span></button>
+					<button type="button" class="menu-command" data-shortcut="duplicate">Duplicate<span>Ctrl+D</span></button>
+				</div></div>
+				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">View</button><div class="menu-popover">
+					<button type="button" class="menu-command" data-action-target="view-tab-schematic">Schematic Editor</button>
+					<button type="button" class="menu-command" data-action-target="view-tab-board">PCB Editor</button>
+					<div class="menu-divider"></div>
+					<button type="button" class="menu-command" data-shortcut="zoom-fit">Zoom to Fit<span>Home</span></button>
+				</div></div>
+				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Place</button><div class="menu-popover">
+					<button type="button" class="menu-command" data-tool="select">Select<span>S</span></button>
+					<button type="button" class="menu-command" data-action-target="btn-highlight-net">Highlight Net</button>
+					<div class="menu-divider"></div>
+					<button type="button" class="menu-command" data-tool="place-symbol">Symbol<span>A</span></button>
+					<button type="button" class="menu-command" data-tool="power">Power Port</button>
+					<button type="button" class="menu-command" data-tool="wire">Wire<span>W</span></button>
+					<button type="button" class="menu-command" data-tool="bus">Bus</button>
+					<button type="button" class="menu-command" data-tool="bus-entry">Wire to Bus Entry</button>
+					<button type="button" class="menu-command" data-tool="no-connect">No Connect<span>X</span></button>
+					<button type="button" class="menu-command" data-tool="junction">Junction<span>J</span></button>
+					<button type="button" class="menu-command" data-tool="label">Local Label</button>
+					<button type="button" class="menu-command" data-tool="directive-label">Directive Label</button>
+					<button type="button" class="menu-command" data-tool="global-label">Global Label<span>G</span></button>
+					<button type="button" class="menu-command" data-tool="hier-label">Hierarchical Label<span>H</span></button>
+					<button type="button" class="menu-command" data-tool="rule-area">Rule Area</button>
+					<button type="button" class="menu-command" data-tool="hier-sheet" disabled>Hierarchical Sheet</button>
+					<button type="button" class="menu-command" data-tool="sheet-pin" disabled>Place Sheet Pin</button>
+					<button type="button" class="menu-command" data-tool="sync-sheet-pins" disabled>Sync Sheet Pins</button>
+					<div class="menu-divider"></div>
+					<button type="button" class="menu-command" data-tool="text">Text</button>
+					<button type="button" class="menu-command" data-tool="text-box">Text Box</button>
+					<button type="button" class="menu-command" data-tool="table">Table</button>
+					<button type="button" class="menu-command" data-tool="line">Line<span>L</span></button>
+					<button type="button" class="menu-command" data-tool="rect">Rectangle</button>
+					<button type="button" class="menu-command" data-tool="circle">Circle<span>C</span></button>
+					<button type="button" class="menu-command" data-tool="arc">Arc<span>A</span></button>
+					<button type="button" class="menu-command" data-tool="bezier">Bezier Curve<span>B</span></button>
+					<button type="button" class="menu-command" data-tool="image">Image</button>
+					<button type="button" class="menu-command" data-tool="delete">Interactive Delete</button>
+				</div></div>
+				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Inspect</button><div class="menu-popover">
+					<button type="button" class="menu-command" data-action-target="btn-highlight-net">Highlight Net</button>
+				</div></div>
+				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Tools</button><div class="menu-popover">
+					<button type="button" class="menu-command" data-action-target="btn-index-symbols">Manage Symbol Libraries…</button>
+				</div></div>
+				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Preferences</button><div class="menu-popover">
+					<button type="button" class="menu-command" data-action-target="btn-preferences">Preferences…<span>Ctrl+,</span></button>
+				</div></div>
+			</nav>
+			<nav class="breadcrumb hidden" id="editor-breadcrumb">
+				<span class="breadcrumb-project" id="breadcrumb-project"></span>
+				<span class="breadcrumb-sep" aria-hidden="true">/</span>
+				<span class="breadcrumb-sheet" id="breadcrumb-sheet"></span>
+			</nav>
+			<nav class="view-tabs hidden" id="view-tabs">
+				<button type="button" class="view-tab" id="view-tab-schematic" data-view="schematic">Schematic</button>
+				<button type="button" class="view-tab" id="view-tab-board" data-view="board">PCB</button>
+			</nav>
 		</div>
-		<div class="actions" id="view-actions">
-			<label class="file-btn">
-				Open .kicad_sch / .kicad_pcb
-				<input type="file" id="file-input" accept=".kicad_sch,.kicad_pcb,.kicad_pro" hidden />
-			</label>
-			<button type="button" id="btn-open-project" title="Open a whole project folder (hierarchical sheets, board, .kicad_pro) — Chrome/Edge only">Open Project Folder</button>
-			<button type="button" id="btn-save-project" title="Save the whole open project back to its folder" disabled>Save Project</button>
-			<button type="button" id="btn-new-project" title="Scaffold a new blank project into a chosen folder — Chrome/Edge only">New Project</button>
-			<label class="file-btn">
-				Open Project (.zip)
-				<input type="file" id="zip-input" accept=".zip" hidden />
-			</label>
+		<div class="command-toolbar" role="toolbar" aria-label="Main toolbar">
+			<div class="toolbar-section" id="view-actions">
+				<button type="button" class="toolbar-button" id="btn-new-project" title="New Project"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5 H14 L19 10 V20 H4 Z M14 5 V10 H19 M12 12 V18 M9 15 H15"/></svg></button>
+				<button type="button" class="toolbar-button" data-input-target="file-input" title="Open Schematic or PCB"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8 H10 L12 10 H21 V19 H3 Z"/><path d="M3 8 V5 H10 L12 7 H18"/></svg></button>
+				<button type="button" class="toolbar-button" id="btn-open-project" title="Open Project Folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8 H10 L12 10 H21 V19 H3 Z"/><path d="M12 12 V17 M9.5 14.5 L12 12 L14.5 14.5"/></svg></button>
+				<button type="button" class="toolbar-button" data-input-target="zip-input" title="Open Project Archive"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8 H10 L12 10 H21 V19 H3 Z"/><path d="M12 11 V17 M9 14 L12 17 L15 14"/></svg></button>
+				<button type="button" class="toolbar-button" id="btn-save-project" title="Save Project" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4 H17 L20 7 V20 H5 Z M8 4 V10 H16 V4 M8 20 V14 H17 V20"/></svg></button>
+			</div>
+			<div class="toolbar-divider" aria-hidden="true"></div>
+			<nav class="toolbar-section toolbar-view-switcher" aria-label="Editor views">
+				<button type="button" class="toolbar-button" data-action-target="view-tab-schematic" title="Schematic Editor"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="7" width="12" height="10"/><path d="M3 10 H6 M3 14 H6 M18 10 H21 M18 14 H21 M10 7 V4 M14 7 V4 M10 17 V20 M14 17 V20"/></svg></button>
+				<button type="button" class="toolbar-button" data-action-target="view-tab-board" title="PCB Editor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5 H19 V19 H5 Z M8 8 H12 V12 H8 Z M14 12 H17 V16 H14 Z"/><path d="M12 10 H16 M10 12 V16"/></svg></button>
+			</nav>
+			<div class="toolbar-divider" aria-hidden="true"></div>
+			<div class="toolbar-section hidden" id="edit-actions">
+				<button type="button" class="toolbar-button" id="btn-index-symbols" title="Manage Symbol Libraries"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5 H15 L20 10 V19 H4 Z M15 5 V10 H20"/><path d="M8 14 H16 M12 11 V17"/></svg></button>
+				<button type="button" class="toolbar-button" id="btn-export-edit" title="Export Schematic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4 H17 L20 7 V20 H5 Z M17 4 V8 H20"/><path d="M12 10 V17 M9 14 L12 17 L15 14"/></svg></button>
+			</div>
+			<input type="file" id="file-input" accept=".kicad_sch,.kicad_pcb,.kicad_pro" hidden />
+			<input type="file" id="zip-input" accept=".zip" hidden />
+			<input type="file" id="symbol-directory-input" webkitdirectory directory multiple hidden />
 		</div>
+		<!-- Circuit Layout (auto-place/auto-wire demo) is parked, not deleted —
+			no button reaches setMode('circuit') anymore, so this stays
+			permanently hidden until it comes back as a project-overview tile
+			rather than a competing top-level mode. -->
 		<div class="actions hidden" id="circuit-actions">
 			<label class="file-btn">
 				Open .kicad_sch
@@ -51,55 +138,106 @@
 			<button type="button" id="btn-clear-wires">Clear wires</button>
 			<button type="button" id="btn-export">Export .kicad_sch</button>
 		</div>
-		<div class="actions hidden" id="edit-actions">
-			<button type="button" id="btn-index-symbols" title="Index a KiCad symbols directory">Index symbols</button>
-			<input type="file" id="symbol-directory-input" webkitdirectory directory multiple hidden />
-			<button type="button" id="btn-export-edit">Export .kicad_sch</button>
-		</div>
+		<button type="button" id="mode-view" hidden></button>
+		<button type="button" id="mode-circuit" hidden></button>
+		<button type="button" id="mode-edit" hidden></button>
+		<button type="button" id="btn-undo" hidden></button>
+		<button type="button" id="btn-redo" hidden></button>
+		<button type="button" id="btn-preferences" hidden></button>
 	</header>
 	<main>
-		<aside class="side">
-			<div id="general-side-content">
-			<p id="status">Drop a KiCad schematic or board, or switch to Circuit layout for the drag/rewire demo.</p>
-			<p class="hint" id="hint">Wheel zoom · drag pan · Circuit mode: drag parts, R rotate</p>
-			<p class="hint legend"><span class="wire-invalid">■</span> Red wire = forced connection that couldn't route cleanly — still connected, move parts apart to clear it.</p>
-			<section class="debug-nets hidden" id="project-hierarchy-section">
-				<h2>Project Hierarchy</h2>
-				<div id="project-hierarchy"></div>
+		<aside class="edit-left-pane" id="left-dock">
+			<section class="edit-pane" data-pane="properties">
+				<header>Properties <button type="button" aria-label="Close">×</button></header>
+				<div id="edit-properties" class="edit-pane-body">No objects selected</div>
 			</section>
-			<section class="debug-nets">
-				<h2>Locked pin → net map</h2>
-				<pre id="locked-nets">No schematic netlist locked.</pre>
+			<div class="pane-splitter" data-before="properties"></div>
+			<section class="edit-pane" data-pane="undo-stack">
+				<header>Undo Stack <button type="button" aria-label="Close">×</button></header>
+				<div id="edit-undo-stack" class="edit-pane-body">No history</div>
 			</section>
-			<pre id="score" class="score"></pre>
-			</div>
-			<div id="edit-left-pane" class="edit-left-pane hidden">
-				<section class="edit-pane" data-pane="properties">
-					<header>Properties <button type="button" aria-label="Close">×</button></header>
-					<div id="edit-properties" class="edit-pane-body">No objects selected</div>
-				</section>
-				<div class="pane-splitter" data-before="properties"></div>
-				<section class="edit-pane" data-pane="hierarchy">
-					<header>Schematic Hierarchy <button type="button" aria-label="Close">×</button></header>
-					<div id="edit-hierarchy" class="edit-pane-body">No hierarchy loaded</div>
-				</section>
-				<div class="pane-splitter" data-before="hierarchy"></div>
-				<section class="edit-pane" data-pane="undo-stack">
-					<header>Undo Stack <button type="button" aria-label="Close">×</button></header>
-					<div id="edit-undo-stack" class="edit-pane-body">No history</div>
-				</section>
-				<div class="pane-splitter" data-before="undo-stack"></div>
-				<section class="edit-pane" data-pane="filter">
-					<header>Selection Filter <button type="button" aria-label="Close">×</button></header>
-					<div class="edit-filter-grid">
-						<label><input type="checkbox" checked> All items</label><label><input type="checkbox" checked> Rule Areas</label>
-						<label><input type="checkbox" checked> Symbols</label><label><input type="checkbox" checked> Pins</label>
-						<label><input type="checkbox" checked> Wires</label><label><input type="checkbox" checked> Labels</label>
-						<label><input type="checkbox" checked> Graphics</label><label><input type="checkbox" checked> Images</label>
-						<label><input type="checkbox" checked> Text</label><label><input type="checkbox" checked> Other items</label>
-					</div>
-				</section>
-			</div>
+			<div class="pane-splitter" data-before="undo-stack"></div>
+			<section class="edit-pane" data-pane="filter">
+				<header>Selection Filter <button type="button" aria-label="Close">×</button></header>
+				<div class="edit-filter-grid">
+					<label><input type="checkbox" checked> All items</label><label><input type="checkbox" checked> Rule Areas</label>
+					<label><input type="checkbox" checked> Symbols</label><label><input type="checkbox" checked> Pins</label>
+					<label><input type="checkbox" checked> Wires</label><label><input type="checkbox" checked> Labels</label>
+					<label><input type="checkbox" checked> Graphics</label><label><input type="checkbox" checked> Images</label>
+					<label><input type="checkbox" checked> Text</label><label><input type="checkbox" checked> Other items</label>
+				</div>
+			</section>
+		</aside>
+		<aside class="tool-panel board-toggle-panel hidden" id="board-toggle-panel" aria-label="PCB display controls">
+			<button type="button" class="tool-btn active" data-board-toggle="grid" title="Show Grid" aria-label="Show Grid" aria-pressed="true">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 5 H19 V19 H5 Z M9.7 5 V19 M14.3 5 V19 M5 9.7 H19 M5 14.3 H19"/></svg>
+			</button>
+			<button type="button" class="tool-btn" disabled title="Grid Overrides — not yet implemented" aria-label="Grid Overrides">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 5 H19 V19 H5 Z M5 15 L15 5 M9 19 L19 9"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-board-toggle="polar" title="Polar Coordinates" aria-label="Polar Coordinates" aria-pressed="false">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 19 H19 M5 19 V5 M5 19 L17 8 M8 19 A3 3 0 0 0 6.8 16.8"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-board-toggle="units" title="Switch Units" aria-label="Units: Millimeters">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 7 V17 M5 12 H19 M10 9 V15 M14 9 V15 M18 9 V15"/></svg>
+			</button>
+			<button type="button" class="tool-btn" disabled title="Crosshair Modes — not yet implemented" aria-label="Crosshair Modes">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M12 4 V20 M4 12 H20 M9 9 L15 15 M15 9 L9 15"/></svg>
+			</button>
+
+			<div class="tool-sep"></div>
+
+			<button type="button" class="tool-btn" disabled title="Line Modes — not yet implemented" aria-label="Line Modes">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 18 H12 V12 H19 M5 8 L9 12"/></svg>
+			</button>
+
+			<div class="tool-sep"></div>
+
+			<button type="button" class="tool-btn active" data-board-toggle="ratsnest" title="Show Ratsnest" aria-label="Show Ratsnest" aria-pressed="true">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 17 L11 8 L19 15 M5 17 L19 15"/><circle cx="5" cy="17" r="1.4" fill="currentColor" stroke="none"/><circle cx="11" cy="8" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="15" r="1.4" fill="currentColor" stroke="none"/></svg>
+			</button>
+			<button type="button" class="tool-btn" disabled title="Ratsnest Line Mode — not yet implemented" aria-label="Ratsnest Line Mode">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 17 L11 8 L19 15 M5 17 L19 15" stroke-dasharray="2 2"/><circle cx="5" cy="17" r="1.4" fill="currentColor" stroke="none"/><circle cx="11" cy="8" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="15" r="1.4" fill="currentColor" stroke="none"/></svg>
+			</button>
+
+			<div class="tool-sep"></div>
+
+			<button type="button" class="tool-btn" data-board-toggle="high-contrast" title="High Contrast Mode" aria-label="High Contrast Mode" aria-pressed="false">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 6 H19 M5 10 H14 M5 14 H19 M5 18 H11"/></svg>
+			</button>
+			<button type="button" class="tool-btn" disabled title="Highlight Net — not yet implemented" aria-label="Highlight Net">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 17 H10 L14 8 H19 M10 17 L14 20"/><circle cx="5" cy="17" r="1.3" fill="currentColor" stroke="none"/><circle cx="19" cy="8" r="1.3" fill="currentColor" stroke="none"/></svg>
+			</button>
+
+			<div class="tool-sep"></div>
+
+			<button type="button" class="tool-btn active" data-board-toggle="zone-filled" title="Draw Zone Fills" aria-label="Draw Zone Fills" aria-pressed="true">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 5 H19 V19 H5 Z M7 17 L17 7 M7 12 L12 7 M12 17 L17 12"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-board-toggle="zone-outline" title="Draw Zone Outlines" aria-label="Draw Zone Outlines" aria-pressed="false">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 5 H19 V19 H5 Z"/></svg>
+			</button>
+
+			<div class="tool-sep"></div>
+
+			<button type="button" class="tool-btn" disabled title="Pad Display Mode — not yet implemented" aria-label="Pad Display Mode">
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><circle cx="12" cy="12" r="2"/></svg>
+			</button>
+			<button type="button" class="tool-btn" disabled title="Via Display Mode — not yet implemented" aria-label="Via Display Mode">
+				<svg class="tool-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/></svg>
+			</button>
+			<button type="button" class="tool-btn" disabled title="Track Display Mode — not yet implemented" aria-label="Track Display Mode">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 17 L10 12 L14 15 L19 7"/><path d="M5 20 L10 15 L14 18 L19 10"/></svg>
+			</button>
+
+			<div class="tool-sep"></div>
+
+			<button type="button" class="tool-btn active" data-board-toggle="appearance" title="Show Layers Manager" aria-label="Show Layers Manager" aria-pressed="true">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 8 L12 4 L19 8 L12 12 Z M5 12 L12 16 L19 12 M5 16 L12 20 L19 16"/></svg>
+			</button>
+			<button type="button" class="tool-btn" disabled title="Show Properties — not yet implemented" aria-label="Show Properties">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 5 H19 V19 H5 Z M8 9 H16 M8 13 H16 M8 17 H13"/></svg>
+			</button>
 		</aside>
 		<div class="stage" id="stage">
 			<canvas id="canvas2d" class="hidden"></canvas>
@@ -215,8 +353,35 @@
 				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 7 H19 M9 7 V5 H15 V7 M7 7 L8 20 H16 L17 7"/><path d="M10 10 V17 M14 10 V17"/></svg>
 			</button>
 		</aside>
+		<aside class="tool-panel board-tool-panel hidden" id="board-tool-panel" aria-label="PCB tools">
+			<button type="button" class="tool-btn active" data-tool="select" title="Select (Esc)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M6 3 L6 19 L10 15.5 L13 21 L15.5 19.7 L12.5 14.2 L18 14.2 Z"/></svg>
+			</button>
+			<div class="tool-sep"></div>
+			<button type="button" class="tool-btn" data-tool="route" title="Route Single Track (X)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 18 L10 12 L14 15 L20 7"/><circle cx="4" cy="18" r="1.5" fill="currentColor" stroke="none"/><circle cx="20" cy="7" r="1.5" fill="currentColor" stroke="none"/></svg>
+			</button>
+			<button type="button" class="tool-btn" disabled title="Route Differential Pair — coming with the interactive router">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 16 L10 10 L14 13 L20 5 M4 20 L10 14 L14 17 L20 9"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="via" title="Place Via (V)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/></svg>
+			</button>
+			<div class="tool-sep"></div>
+			<button type="button" class="tool-btn" disabled title="Tune Track Length — coming after basic routing">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 14 H8 C9 14 9 8 11 8 S13 20 15 20 S16 12 18 12 H20"/></svg>
+			</button>
+			<button type="button" class="tool-btn" disabled title="Add Filled Zone — coming after board editing">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 5 H19 V19 H5 Z M7 17 L17 7 M7 12 L12 7 M12 17 L17 12"/></svg>
+			</button>
+			<button type="button" class="tool-btn" disabled title="Add Rule Area — coming after board editing">
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" stroke-dasharray="3 2"/></svg>
+			</button>
+		</aside>
+		<aside class="board-appearance hidden" id="board-appearance" aria-label="PCB appearance"></aside>
 	</main>
 	<footer class="status-bar">
+		<span id="status" class="status-message">Ready</span>
 		<span id="coord-status">X: —  Y: —</span>
 		<label class="grid-select-label">Grid:
 			<select id="grid-select" title="Grid spacing">
@@ -229,5 +394,6 @@
 		<span id="zoom-status">Zoom: —</span>
 		<span id="fps-status" title="Render rate — updates while actively interacting (pan/drag/zoom); the app only redraws on demand, so this goes quiet when idle"></span>
 	</footer>
+	</div>
 </body>
 </html>
