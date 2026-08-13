@@ -56,6 +56,7 @@ export interface SessionControllerState {
 	 *  .kicad_pro) this document's sheet came from — null in plain
 	 *  single-file mode. */
 	projectContext: ProjectContext | null;
+	filename: string;
 	readonly canvas: HTMLCanvasElement;
 	readonly canvasGl: HTMLCanvasElement;
 }
@@ -74,6 +75,10 @@ export interface SessionControllerCallbacks {
 	 *  everywhere refreshHint/refreshSidebar already are, since a project/
 	 *  sheet/kind change is exactly when the breadcrumb needs to catch up. */
 	refreshBreadcrumb(): void;
+
+	/** Applies the active document's independent grid to both its canvas and
+	 * footer selector after a schematic/PCB switch. */
+	syncActiveGrid(): void;
 
 	clearLastPointer(): void;
 
@@ -120,11 +125,20 @@ export class SessionController {
 		// sites. No-ops outside a loaded project (no projectContext/
 		// currentSheetNode to key a cache entry against).
 		this.appState.setTextCommitHandler(text => {
-			const sheetPath = this.state.currentSheetNode?.path;
-			if (!this.state.projectContext || !sheetPath) {
+			const projectContext = this.state.projectContext;
+			if (!projectContext) {
 				return;
 			}
-			void this.ensureProjectStore(this.state.projectContext.key).saveSheet(sheetPath, text);
+			const path = this.state.kind === 'board'
+				? projectContext.project.mainBoard?.path
+				: this.state.currentSheetNode?.path;
+			if (!path) return;
+			if (this.state.kind === 'board' && projectContext.project.mainBoard) {
+				// Navigation back to PCB reads this in-memory document before a
+				// full save/reparse, so keep its text current on every edit.
+				projectContext.project.mainBoard.data = text;
+			}
+			void this.ensureProjectStore(projectContext.key).saveSheet(path, text);
 		});
 		// Graceful disconnect on tab close — best-effort (a crash/force-close
 		// skips this, which is fine: see SharedWorkerTransport/
@@ -206,7 +220,7 @@ export class SessionController {
 			this.state.session.onError = error => this.statusBar.setStatus(
 				error instanceof Error ? error.message : String(error));
 			this.state.session.onRender = () => this.statusBar.recordRender();
-			this.state.session.setGridSpacing(this.settings.current.gridSpacingMm);
+			this.state.session.setGridSpacing(this.settings.gridSpacingFor(this.state.kind));
 			if (!this.state.session.hasWebGL) {
 				// WebGL context creation failed (disabled GPU, headless
 				// environment, etc.) — the session already fell back to
@@ -226,20 +240,18 @@ export class SessionController {
 		this.ensureSession().resize(width, height);
 	}
 
-	/** Board tabs are view-only — no board editing tools exist yet, so
-	 *  Circuit/Edit mode stay unreachable for a board-kind tab, both by
-	 *  disabling the buttons here and by setMode() itself refusing to leave
-	 *  'view' for one. Re-run on every tab activation (not just on an
-	 *  explicit setMode call) so switching straight into a board tab
-	 *  immediately reflects the constraint. */
+	/** Circuit mode (auto-rewire) is schematic-only — a board-kind tab can't
+	 *  reach it, both by disabling the button here and by setMode() itself
+	 *  refusing to leave it for one. Edit mode IS reachable for boards (board
+	 *  editing — move/rotate/flip footprints, route tracks). Re-run on every
+	 *  tab activation (not just on an explicit setMode call) so switching
+	 *  straight into a board tab immediately reflects the constraint. */
 	refreshModeAvailability(): void {
-		const disableNonView = this.state.kind === 'board';
-		(this.dom.modeCircuitBtn as HTMLButtonElement).disabled = disableNonView;
-		(this.dom.modeEditBtn as HTMLButtonElement).disabled = disableNonView;
+		(this.dom.modeCircuitBtn as HTMLButtonElement).disabled = this.state.kind === 'board';
 	}
 
 	setMode(next: AppMode): void {
-		if (this.state.kind === 'board') {
+		if (next === 'circuit' && this.state.kind === 'board') {
 			next = 'view';
 		}
 		this.refreshModeAvailability();
@@ -250,19 +262,28 @@ export class SessionController {
 		this.dom.modeEditBtn.classList.toggle('active', next === 'edit');
 		// view-actions (Open/Save/New/zip) is project management, not a
 		// mode-specific toolbar — stays visible regardless of schematic vs.
-		// board now that 'view' mode is board-exclusive. edit-actions
-		// (Index symbols/Export) genuinely IS schematic-only. circuit-
-		// actions stays permanently hidden — see index.html's comment.
+		// board. edit-actions (Index symbols/Export) and toolPanel (the
+		// hand-drawn wire/label/shape tools) are both schematic-only —
+		// boards get their own boardToolPanel instead. circuit-actions
+		// stays permanently hidden — see index.html's comment.
+		const board = this.state.kind === 'board';
 		this.dom.editActions.classList.toggle('hidden', next !== 'edit');
-		this.dom.toolPanel.classList.toggle('hidden', next !== 'edit');
-		this.dom.mainEl.classList.toggle('edit-mode', next === 'edit');
-		if (next !== 'edit') {
+		this.dom.indexSymbolsButton.classList.toggle('hidden', board);
+		this.dom.exportEditButton.title = board ? 'Export PCB' : 'Export Schematic';
+		this.dom.toolPanel.classList.toggle('hidden', next !== 'edit' || board);
+		this.dom.boardToolPanel.classList.toggle('hidden', !board);
+		this.dom.boardAppearanceEl.classList.toggle('hidden', !board);
+		this.dom.mainEl.classList.toggle('edit-mode', next === 'edit' && !board);
+		this.dom.mainEl.classList.toggle('board-mode', board);
+		if (next !== 'edit' || board) {
 			this.callbacks.closeSymbolChooser();
 			this.callbacks.resetEditToolState();
 		}
 
 		if (next === 'view') {
-			this.statusBar.setStatus('Open a .kicad_sch or .kicad_pcb file.');
+			this.statusBar.setStatus(board
+				? 'PCB Appearance is ready.'
+				: 'Open a .kicad_sch or .kicad_pcb file.');
 		}
 		else if (next === 'circuit' && this.state.session?.documentTypeLoaded === 'schematic') {
 			const liveText = this.appState.refreshSchematicText(this.state.session);
@@ -275,6 +296,11 @@ export class SessionController {
 					? `Edit mode on — ${ count } parts, netlist locked. Drag to auto-rewire.`
 					: `Edit mode on — ${ count } parts from schematic.`)
 				: 'Schematic loaded but no symbol instances found.');
+		}
+		else if (next === 'edit' && board) {
+			this.statusBar.setStatus(this.state.session?.documentTypeLoaded === 'board'
+				? 'Board edit mode — drag a footprint to move it.'
+				: 'Open a .kicad_pcb to start editing.');
 		}
 		else if (next === 'edit') {
 			this.statusBar.setStatus(this.state.session?.documentTypeLoaded === 'schematic'
@@ -299,26 +325,32 @@ export class SessionController {
 		options?: { showDrawingSheet?: boolean }
 	): Promise<boolean> {
 		const session = this.ensureSession();
-		this.resizeCanvas();
-		// No more user-facing View/Circuit/Edit switcher — the kind loaded
-		// IS the mode now: a board is always 'view' (no board-editing tools
-		// exist), a schematic is always 'edit' (KiCad's own eeschema has no
+		// No more user-facing View/Circuit/Edit switcher — both kinds load
+		// straight into 'edit' now (KiCad's own eeschema/pcbnew have no
 		// separate "view" state either — the select tool is just the
 		// default/neutral one). Re-run on every load, not just a kind
 		// change, so switching sheets never leaves a stale mode behind.
 		this.state.kind = kind;
-		this.setMode(kind === 'board' ? 'view' : 'edit');
+		this.state.filename = filename;
+		this.callbacks.syncActiveGrid();
+		this.setMode('edit');
+		// Must run AFTER setMode(), not before — setMode() is what toggles
+		// main's .edit-mode/.board-mode class, which changes the grid's
+		// column widths and therefore #stage's actual rendered width.
+		// Measuring stage.clientWidth before that class change bakes the
+		// PREVIOUS layout's (wrong) width into the WebGL canvas's backing
+		// store, which the browser then stretches/squeezes to fit the
+		// correct-but-different CSS box — the squished-PCB-view symptom.
+		this.resizeCanvas();
 		try {
 			session.resetUndoHistory();
 			this.callbacks.clearLastPointer();
 			const showDrawingSheet = options?.showDrawingSheet ?? true;
 			if (kind === 'board') {
+				this.appState.setBoardText(text);
 				await session.loadBoardText(text);
 				this.state.placements = [];
 				this.state.lockedNetlist = null;
-				if (this.state.mode === 'circuit') {
-					this.statusBar.setStatus('Boards are view-only — open a schematic to edit placements.');
-				}
 			}
 			else {
 				this.appState.setSchematicText(text);
@@ -343,7 +375,12 @@ export class SessionController {
 			// Resync the cache to whatever the session actually has loaded (the
 			// failed parse may have left it unchanged) rather than the broken
 			// text optimistically written above.
-			this.appState.refreshSchematicText(session);
+			if (kind === 'board') {
+				this.appState.refreshBoardText(session);
+			}
+			else {
+				this.appState.refreshSchematicText(session);
+			}
 			return false;
 		}
 		this.callbacks.refreshHint();
@@ -678,7 +715,14 @@ export class SessionController {
 			return;
 		}
 		try {
-			if (this.state.currentSheetNode && this.state.session) {
+			if (this.state.kind === 'board' && projectContext.project.mainBoard && this.state.session) {
+				const liveText = this.state.session.getBoardText();
+				if (liveText) {
+					projectContext.project.mainBoard.data = liveText;
+					projectContext.project.mainBoard.rootElement = new KicadParser().parse(liveText);
+				}
+			}
+			else if (this.state.currentSheetNode && this.state.session) {
 				const liveText = this.state.session.getSchematicText();
 				if (liveText) {
 					this.state.currentSheetNode.data = liveText;
@@ -1028,8 +1072,13 @@ export class SessionController {
 			this.statusBar.setStatus('Nothing to undo.');
 			return;
 		}
-		this.appState.refreshSchematicText(session);
-		this.callbacks.syncPlacementsFromSession();
+		if (session.documentTypeLoaded === 'board') {
+			this.appState.refreshBoardText(session);
+		}
+		else {
+			this.appState.refreshSchematicText(session);
+			this.callbacks.syncPlacementsFromSession();
+		}
 		if (this.state.mode === 'circuit') {
 			this.callbacks.relockNetlistFromLiveText();
 		}
@@ -1045,8 +1094,13 @@ export class SessionController {
 			this.statusBar.setStatus('Nothing to redo.');
 			return;
 		}
-		this.appState.refreshSchematicText(session);
-		this.callbacks.syncPlacementsFromSession();
+		if (session.documentTypeLoaded === 'board') {
+			this.appState.refreshBoardText(session);
+		}
+		else {
+			this.appState.refreshSchematicText(session);
+			this.callbacks.syncPlacementsFromSession();
+		}
 		if (this.state.mode === 'circuit') {
 			this.callbacks.relockNetlistFromLiveText();
 		}
@@ -1070,6 +1124,31 @@ export class SessionController {
 		link.click();
 		URL.revokeObjectURL(url);
 		this.statusBar.setStatus('Downloaded schematic.');
+	}
+
+	downloadCurrentDocument(): void {
+		const session = this.state.session;
+		if (!session) {
+			this.statusBar.setStatus('No document loaded to export.');
+			return;
+		}
+		const board = session.documentTypeLoaded === 'board';
+		const text = board ? session.getBoardText() : session.getSchematicText();
+		if (!text.trim()) {
+			this.statusBar.setStatus('Nothing to export.');
+			return;
+		}
+		const extension = board ? '.kicad_pcb' : '.kicad_sch';
+		const rawName = this.basenameFromPath(this.state.filename || (board ? 'board' : 'schematic'));
+		const filename = rawName.toLowerCase().endsWith(extension) ? rawName : `${ rawName.replace(/\.[^.]+$/, '') }${ extension }`;
+		const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = filename;
+		link.click();
+		URL.revokeObjectURL(url);
+		this.statusBar.setStatus(`Exported ${ filename }.`);
 	}
 
 	async rotateSelected(): Promise<void> {

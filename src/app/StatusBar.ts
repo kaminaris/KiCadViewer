@@ -20,6 +20,7 @@ export class StatusBar {
 	protected pendingScreenPos: Vec2 | undefined;
 	protected lastCoord = '';
 	protected lastZoom = '';
+	protected displayUnit: 'mm' | 'mil' = 'mm';
 
 	protected lastRenderTime: number | null = null;
 	protected fps = 0;
@@ -49,6 +50,11 @@ export class StatusBar {
 		this.statusEl.textContent = text;
 	}
 
+	setDisplayUnit(unit: 'mm' | 'mil'): void {
+		this.displayUnit = unit;
+		this.lastCoord = '';
+	}
+
 	/** rAF-throttled coord/zoom readout — coalesces rapid mousemove-driven
 	 *  calls into one DOM write per frame, and skips the write entirely when
 	 *  the displayed text hasn't actually changed. */
@@ -61,7 +67,10 @@ export class StatusBar {
 		requestAnimationFrame(() => {
 			this.coordZoomFramePending = false;
 			const world = session && this.pendingScreenPos ? session.screenToWorld(this.pendingScreenPos) : null;
-			const coord = world ? `X: ${ world.x.toFixed(2) }  Y: ${ world.y.toFixed(2) }` : this.lastCoord;
+			const unit = this.displayUnit;
+			const scale = unit === 'mil' ? 39.37007874 : 1;
+			const precision = unit === 'mil' ? 1 : 2;
+			const coord = world ? `X: ${ (world.x * scale).toFixed(precision) } ${ unit }  Y: ${ (world.y * scale).toFixed(precision) } ${ unit }` : this.lastCoord;
 			const zoom = `Zoom: ${ session && Number.isFinite(session.camera.zoom) ?
 				`${ session.camera.zoom.toFixed(2) }×` : '—' }`;
 			if (coord !== this.lastCoord) {

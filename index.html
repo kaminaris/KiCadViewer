@@ -24,7 +24,7 @@
 					<button type="button" class="menu-command" data-input-target="zip-input">Open Project Archive…</button>
 					<div class="menu-divider"></div>
 					<button type="button" class="menu-command" data-action-target="btn-save-project">Save Project<span>Ctrl+S</span></button>
-					<button type="button" class="menu-command" data-action-target="btn-export-edit">Export Schematic…</button>
+					<button type="button" class="menu-command" data-action-target="btn-export-edit">Export Current Document…</button>
 				</div></div>
 				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Edit</button><div class="menu-popover">
 					<button type="button" class="menu-command" data-action-target="btn-undo">Undo<span>Ctrl+Z</span></button>
@@ -42,17 +42,44 @@
 					<button type="button" class="menu-command" data-shortcut="zoom-fit">Zoom to Fit<span>Home</span></button>
 				</div></div>
 				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Place</button><div class="menu-popover">
+					<button type="button" class="menu-command" data-tool="select">Select<span>S</span></button>
+					<button type="button" class="menu-command" data-action-target="btn-highlight-net">Highlight Net</button>
+					<div class="menu-divider"></div>
 					<button type="button" class="menu-command" data-tool="place-symbol">Symbol<span>A</span></button>
 					<button type="button" class="menu-command" data-tool="power">Power Port</button>
 					<button type="button" class="menu-command" data-tool="wire">Wire<span>W</span></button>
-					<button type="button" class="menu-command" data-tool="label">Net Label</button>
+					<button type="button" class="menu-command" data-tool="bus">Bus</button>
+					<button type="button" class="menu-command" data-tool="bus-entry">Wire to Bus Entry</button>
+					<button type="button" class="menu-command" data-tool="no-connect">No Connect<span>X</span></button>
+					<button type="button" class="menu-command" data-tool="junction">Junction<span>J</span></button>
+					<button type="button" class="menu-command" data-tool="label">Local Label</button>
+					<button type="button" class="menu-command" data-tool="directive-label">Directive Label</button>
+					<button type="button" class="menu-command" data-tool="global-label">Global Label<span>G</span></button>
+					<button type="button" class="menu-command" data-tool="hier-label">Hierarchical Label<span>H</span></button>
+					<button type="button" class="menu-command" data-tool="rule-area">Rule Area</button>
+					<button type="button" class="menu-command" data-tool="hier-sheet" disabled>Hierarchical Sheet</button>
+					<button type="button" class="menu-command" data-tool="sheet-pin" disabled>Place Sheet Pin</button>
+					<button type="button" class="menu-command" data-tool="sync-sheet-pins" disabled>Sync Sheet Pins</button>
+					<div class="menu-divider"></div>
 					<button type="button" class="menu-command" data-tool="text">Text</button>
+					<button type="button" class="menu-command" data-tool="text-box">Text Box</button>
+					<button type="button" class="menu-command" data-tool="table">Table</button>
+					<button type="button" class="menu-command" data-tool="line">Line<span>L</span></button>
+					<button type="button" class="menu-command" data-tool="rect">Rectangle</button>
+					<button type="button" class="menu-command" data-tool="circle">Circle<span>C</span></button>
+					<button type="button" class="menu-command" data-tool="arc">Arc<span>A</span></button>
+					<button type="button" class="menu-command" data-tool="bezier">Bezier Curve<span>B</span></button>
+					<button type="button" class="menu-command" data-tool="image">Image</button>
+					<button type="button" class="menu-command" data-tool="delete">Interactive Delete</button>
 				</div></div>
 				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Inspect</button><div class="menu-popover">
 					<button type="button" class="menu-command" data-action-target="btn-highlight-net">Highlight Net</button>
 				</div></div>
 				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Tools</button><div class="menu-popover">
 					<button type="button" class="menu-command" data-action-target="btn-index-symbols">Manage Symbol Libraries…</button>
+				</div></div>
+				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Preferences</button><div class="menu-popover">
+					<button type="button" class="menu-command" data-action-target="btn-preferences">Preferences…<span>Ctrl+,</span></button>
 				</div></div>
 			</nav>
 			<nav class="breadcrumb hidden" id="editor-breadcrumb">
@@ -115,6 +142,7 @@
 		<button type="button" id="mode-edit" hidden></button>
 		<button type="button" id="btn-undo" hidden></button>
 		<button type="button" id="btn-redo" hidden></button>
+		<button type="button" id="btn-preferences" hidden></button>
 	</header>
 	<main>
 		<aside class="edit-left-pane" id="left-dock">
@@ -253,6 +281,32 @@
 				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 7 H19 M9 7 V5 H15 V7 M7 7 L8 20 H16 L17 7"/><path d="M10 10 V17 M14 10 V17"/></svg>
 			</button>
 		</aside>
+		<aside class="tool-panel board-tool-panel hidden" id="board-tool-panel" aria-label="PCB tools">
+			<button type="button" class="tool-btn active" data-tool="select" title="Select (Esc)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M6 3 L6 19 L10 15.5 L13 21 L15.5 19.7 L12.5 14.2 L18 14.2 Z"/></svg>
+			</button>
+			<div class="tool-sep"></div>
+			<button type="button" class="tool-btn" data-tool="route" title="Route Single Track (X)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 18 L10 12 L14 15 L20 7"/><circle cx="4" cy="18" r="1.5" fill="currentColor" stroke="none"/><circle cx="20" cy="7" r="1.5" fill="currentColor" stroke="none"/></svg>
+			</button>
+			<button type="button" class="tool-btn" disabled title="Route Differential Pair — coming with the interactive router">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 16 L10 10 L14 13 L20 5 M4 20 L10 14 L14 17 L20 9"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="via" title="Place Via (V)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/></svg>
+			</button>
+			<div class="tool-sep"></div>
+			<button type="button" class="tool-btn" disabled title="Tune Track Length — coming after basic routing">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 14 H8 C9 14 9 8 11 8 S13 20 15 20 S16 12 18 12 H20"/></svg>
+			</button>
+			<button type="button" class="tool-btn" disabled title="Add Filled Zone — coming after board editing">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 5 H19 V19 H5 Z M7 17 L17 7 M7 12 L12 7 M12 17 L17 12"/></svg>
+			</button>
+			<button type="button" class="tool-btn" disabled title="Add Rule Area — coming after board editing">
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" stroke-dasharray="3 2"/></svg>
+			</button>
+		</aside>
+		<aside class="board-appearance hidden" id="board-appearance" aria-label="PCB appearance"></aside>
 	</main>
 	<footer class="status-bar">
 		<span id="status" class="status-message">Ready</span>

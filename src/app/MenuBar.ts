@@ -27,6 +27,9 @@ export class MenuBar {
 		if (!command) {
 			return;
 		}
+		if (command.disabled) {
+			return;
+		}
 		this.run(command);
 		this.close();
 	}

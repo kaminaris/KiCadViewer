@@ -21,6 +21,8 @@ import { ProjectRegistry }                                                  from
 import { Router, type Route }                                               from './Router';
 import { HomeScreen }                                                       from '../ui/HomeScreen';
 import { ProjectOverviewScreen }                                            from '../ui/ProjectOverviewScreen';
+import { PreferencesDialog }                                                 from '../ui/PreferencesDialog';
+import { BoardAppearancePanel }                                              from '../ui/BoardAppearancePanel';
 import { SymbolChooser }                                                    from '../ui/SymbolChooser';
 import {
 	Toolbar,
@@ -43,10 +45,12 @@ import { createMainDomRefs }                                                from
 import { FileActions }                                                      from '../io/FileActions';
 import { EditorRuntimeState }                                               from '../editor/EditorRuntimeState';
 import { PropertiesController }                                             from '../editor/PropertiesController';
+import { BoardPropertiesController }                                        from '../editor/BoardPropertiesController';
 import { ToolStateController }                                              from '../editor/ToolStateController';
 import { SymbolLibraryIndexer }                                             from '../io/SymbolLibraryIndexer';
 import { wireMainAppInteractions }                                          from './wireMainAppInteractions';
 import { MenuBar, wireToolbarCommandForwarding }                             from './MenuBar';
+import { applySchematicTheme }                                                from './SchematicThemes';
 
 type EditTool = ToolbarEditTool;
 
@@ -66,6 +70,9 @@ window.addEventListener('unhandledrejection', event => {
 
 const settings = new Settings();
 settings.load();
+applySchematicTheme(settings.current.schematicTheme, settings.current.schematicColorOverrides);
+document.documentElement.dataset.theme = settings.current.theme;
+document.documentElement.dataset.toolbarIconSize = settings.current.toolbarIconSize;
 const dom = createMainDomRefs();
 new MenuBar(document.getElementById('main-menu-bar') as HTMLElement);
 wireToolbarCommandForwarding();
@@ -113,6 +120,13 @@ const symbolLibraryIndexer = new SymbolLibraryIndexer(symbolLibraryCache, {
 
 const appState = new AppState(doc);
 const runtime = new EditorRuntimeState();
+const boardProperties = new BoardPropertiesController({
+	getSession: () => doc.session,
+	panel: propertyPanel,
+	dialog: propertiesDialog,
+	refreshBoardText: activeSession => appState.refreshBoardText(activeSession),
+	refreshUndo: updateUndoStackPane
+});
 
 const pendingShapeTracker = new PendingShapeTracker();
 const editGestureTracker = new EditGestureTracker();
@@ -146,8 +160,12 @@ function setStatus(msg: string): void { statusBar.setStatus(msg); }
 
 let propertiesController: PropertiesController;
 let toolStateController: ToolStateController;
+let boardAppearance: BoardAppearancePanel | null = null;
 
-function updateEditSidebar(): void { propertiesController.updateEditSidebar(); }
+function updateEditSidebar(): void {
+	propertiesController.updateEditSidebar();
+	boardAppearance?.refresh();
+}
 
 function updateUndoStackPane(): void { propertiesController.updateUndoStackPane(); }
 
@@ -171,11 +189,36 @@ function makeElementMutator(id: string): (fn: (element: any) => void) => void {
 	};
 }
 
-function snap(n: number): number { return settings.snap(n); }
+const SCHEMATIC_GRID_OPTIONS: ReadonlyArray<readonly [number, string]> = [
+	[0.635, '0.635 mm (25 mil)'], [1.27, '1.27 mm (50 mil)'],
+	[2.54, '2.54 mm (100 mil)'], [5.08, '5.08 mm (200 mil)']
+];
+const BOARD_GRID_OPTIONS: ReadonlyArray<readonly [number, string]> = [
+	[0.05, '0.05 mm'], [0.1, '0.10 mm'], [0.2, '0.20 mm'],
+	[0.25, '0.25 mm'], [0.5, '0.50 mm'], [1, '1.00 mm']
+];
+
+function snap(n: number): number { return settings.snap(n, doc.kind); }
+
+function syncActiveGrid(): void {
+	const board = doc.kind === 'board';
+	const spacing = settings.gridSpacingFor(doc.kind);
+	const presets = board ? BOARD_GRID_OPTIONS : SCHEMATIC_GRID_OPTIONS;
+	dom.gridSelectEl.replaceChildren(...presets.map(([value, label]) => new Option(label, String(value), false, value === spacing)));
+	dom.gridSelectEl.title = board ? 'PCB grid spacing' : 'Schematic grid spacing';
+	dom.gridSelectEl.value = String(spacing);
+	doc.session?.setGridSpacing(spacing);
+}
 
 function setGridSpacing(mm: number): void {
-	settings.setGridSpacingMm(mm);
+	settings.setGridSpacingMm(doc.kind, mm);
 	doc.session?.setGridSpacing(mm);
+}
+
+function refreshCanvasCursor(): void {
+	const cursor = doc.highlightNetEnabled || settings.current.crosshairCursor ? 'crosshair' : '';
+	doc.canvas.style.cursor = cursor;
+	doc.canvasGl.style.cursor = cursor;
 }
 
 function setHighlightNetEnabled(enabled: boolean): void {
@@ -184,7 +227,7 @@ function setHighlightNetEnabled(enabled: boolean): void {
 	dom.highlightNetButton.setAttribute('aria-pressed', String(enabled));
 	dom.highlightNetButton.title = enabled ? 'Highlight Net (click a pin/label/wire to select the net)' :
 		'Highlight Net';
-	doc.canvas.style.cursor = enabled ? 'crosshair' : '';
+	refreshCanvasCursor();
 	if (!enabled) {
 		doc.session?.clearNetHighlight();
 	}
@@ -269,7 +312,8 @@ propertiesController = new PropertiesController({
 	propertyRenderers,
 	propertyDialogRenderers,
 	propertiesDialog,
-	multiEditNames: PROPERTY_MULTI_EDIT_NAMES
+	multiEditNames: PROPERTY_MULTI_EDIT_NAMES,
+	boardProperties
 });
 toolStateController = new ToolStateController({
 	getSession: () => doc.session,
@@ -318,8 +362,16 @@ sessionController = new SessionController(doc, appState, settings, statusBar, do
 	ensurePlacement: ref => sessionController.ensurePlacement(ref),
 	canAutoroute: () => sessionController.canAutoroute(),
 	commitReroute: () => sessionController.commitReroute('autoroute'),
-	refreshBreadcrumb: updateBreadcrumb
+	refreshBreadcrumb: updateBreadcrumb,
+	syncActiveGrid
 }, registry);
+
+boardAppearance = new BoardAppearancePanel(dom.boardAppearanceEl, {
+	getSession: () => doc.session,
+	setStatus,
+	getActiveLayer: () => doc.activeBoardLayer,
+	setActiveLayer: layer => { doc.activeBoardLayer = layer; }
+});
 
 /** Project / sheet name + Schematic|PCB tabs — replaced the old View/
  *  Circuit/Edit mode switcher (see the harmonic-munching-trinket plan).
@@ -344,6 +396,10 @@ function updateBreadcrumb(): void {
 }
 
 function updateCircuitHint(): void {
+	if (doc.kind === 'board') {
+		statusBar.setHint(`PCB · ${ doc.boardTool } · active layer: ${ doc.activeBoardLayer } · X route · V via/switch layer · PgUp/PgDn front/back`);
+		return;
+	}
 	const mode = doc.mode;
 	const editTool = doc.editTool;
 	if (mode === 'edit') {
@@ -437,6 +493,52 @@ const toolbar = new Toolbar(settings, {
 });
 const editToolButtons = toolbar.buttons;
 
+function applyPreferences(): void {
+	document.documentElement.dataset.theme = settings.current.theme;
+	document.documentElement.dataset.toolbarIconSize = settings.current.toolbarIconSize;
+	applySchematicTheme(settings.current.schematicTheme, settings.current.schematicColorOverrides);
+	doc.session?.refreshTheme();
+	statusBar.setDisplayUnit(settings.current.displayUnit);
+	document.querySelector<HTMLElement>('.status-bar')?.classList.toggle('hidden', !settings.current.showStatusBar);
+	refreshCanvasCursor();
+	syncActiveGrid();
+	currentPowerKind = settings.current.powerKind;
+	toolbar.setPowerKind(currentPowerKind);
+	syncShortcutLabels();
+	updateCircuitHint();
+}
+
+function syncShortcutLabels(): void {
+	const actionsByTarget: Readonly<Record<string, string>> = {
+		'btn-undo': 'undo', 'btn-redo': 'redo', 'btn-export-edit': '', 'btn-highlight-net': ''
+	};
+	for (const command of document.querySelectorAll<HTMLButtonElement>('.menu-command')) {
+		const action = command.dataset.tool ?? command.dataset.shortcut ??
+			(command.dataset.actionTarget ? actionsByTarget[command.dataset.actionTarget] : undefined);
+		const binding = action ? (settings.current.shortcuts as Record<string, string>)[action] : undefined;
+		const existing = command.querySelector('span');
+		if (!binding) {
+			existing?.remove();
+			continue;
+		}
+		const label = existing ?? document.createElement('span');
+		label.textContent = binding;
+		if (!existing) {
+			command.appendChild(label);
+		}
+	}
+}
+
+const preferencesDialog = new PreferencesDialog(settings, { applyPreferences });
+syncShortcutLabels();
+dom.preferencesButton.addEventListener('click', () => preferencesDialog.open());
+window.addEventListener('keydown', event => {
+	if ((event.ctrlKey || event.metaKey) && event.key === ',') {
+		event.preventDefault();
+		preferencesDialog.open();
+	}
+});
+
 dom.recipeInput.addEventListener('change', async (e) => {
 	const file = (e.target as HTMLInputElement).files?.[0];
 	if (!file) {
@@ -480,8 +582,11 @@ wireMainAppInteractions({
 	getEditTool: () => doc.editTool,
 	getHighlightNetEnabled: () => doc.highlightNetEnabled,
 	setHighlightNetEnabled,
+	getZoomStep: () => ({ slow: 1.08, normal: 1.15, fast: 1.25 })[settings.current.zoomSpeed],
+	getInvertZoom: () => settings.current.invertZoom,
+	getCenterAndWarpCursorOnZoom: () => settings.current.centerAndWarpCursorOnZoom,
 	getCurrentPowerKind: () => currentPowerKind,
-	getGridSpacingMm: () => settings.current.gridSpacingMm,
+	getGridSpacingMm: () => settings.gridSpacingFor(doc.kind),
 	ensurePlacement: ref => sessionController.ensurePlacement(ref),
 	getPlacements: () => doc.placements,
 	getRuleAreaPoints: () => doc.ruleAreaPoints,
@@ -505,6 +610,7 @@ wireMainAppInteractions({
 	updateStatusBar,
 	updateEditSidebar,
 	updateUndoStackPane,
+	refreshHint: updateCircuitHint,
 	setStatus,
 	dbg: (...args) => statusBar.dbg(...args),
 	snap,
@@ -514,7 +620,9 @@ wireMainAppInteractions({
 	commitReroute: connectivity => sessionController.commitReroute(connectivity),
 	downloadSchematic: () => sessionController.downloadSchematic(
 		doc.recipe?.ic.mpn || 'circuit', doc.placedFragment.trim() ? wrapFullSchematic(doc.placedFragment) : ''),
+	downloadCurrentDocument: () => sessionController.downloadCurrentDocument(),
 	refreshSchematicText: activeSession => { appState.refreshSchematicText(activeSession); },
+	refreshBoardText: activeSession => { appState.refreshBoardText(activeSession); },
 	chooseSymbolDirectory: () => symbolLibraryIndexer.chooseDirectory(),
 	indexFallbackDirectory: files => symbolLibraryIndexer.indexFallbackDirectory(files),
 	refreshSymbolLibraryButton: () => symbolLibraryIndexer.refreshButton(),

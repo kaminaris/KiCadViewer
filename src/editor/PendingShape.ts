@@ -13,7 +13,8 @@ export type PendingShape =
 	| { kind: 'anchor'; start: Vec2 }         // line/rect/circle/text-box first click
 	| { kind: 'arc'; points: Vec2[] }         // 0-2 points
 	| { kind: 'bezier'; points: Vec2[] }      // 0-4 points
-	| { kind: 'rule-area'; points: Vec2[] };  // 0-N points, closes on same-point click
+	| { kind: 'rule-area'; points: Vec2[] }   // 0-N points, closes on same-point click
+	| { kind: 'route'; netId: number | null; layer: string; corners: Vec2[] };
 
 export class PendingShapeTracker {
 	protected shape: PendingShape = { kind: 'none' };

@@ -4,6 +4,7 @@ import type { PropertyPanel } from '../ui/PropertyPanel';
 import type { PropertyRenderers } from '../ui/PropertyRenderers';
 import type { PropertyDialogRenderers } from '../ui/PropertyDialogRenderers';
 import type { PropertiesDialog } from '../ui/PropertiesDialog';
+import type { BoardPropertiesController } from './BoardPropertiesController';
 
 export interface PropertiesControllerDeps {
 	getSession(): KicadRenderSession | null;
@@ -15,6 +16,7 @@ export interface PropertiesControllerDeps {
 	propertyDialogRenderers: PropertyDialogRenderers;
 	propertiesDialog: PropertiesDialog;
 	multiEditNames: ReadonlySet<string>;
+	boardProperties: BoardPropertiesController;
 }
 
 /** Owns properties sidebar and properties modal rendering/refresh behavior. */
@@ -48,6 +50,9 @@ export class PropertiesController {
 		const element = (hit as any)?.element;
 		if (!hit || !element) {
 			this.deps.editPropertiesEl.textContent = 'No objects selected';
+			return;
+		}
+		if (session.documentTypeLoaded === 'board' && this.deps.boardProperties.renderSidebar(hit as any)) {
 			return;
 		}
 		const labelKind = (hit as any).labelKind as string | undefined;
@@ -108,6 +113,10 @@ export class PropertiesController {
 		const hit = session.activeScene?.hitTestItems.find(item => item.id === hitId);
 		const element = (hit as any)?.element;
 		if (!hit || !element) {
+			return;
+		}
+		if (session.documentTypeLoaded === 'board') {
+			this.deps.boardProperties.showModal(hit as any);
 			return;
 		}
 		const labelKind = (hit as any).labelKind as string | undefined;

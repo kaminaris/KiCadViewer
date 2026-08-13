@@ -19,7 +19,7 @@ export interface MainBootstrapOptions {
 
 /** Runs one-time app startup setup after listeners/controllers are wired. */
 export function runMainBootstrap(options: MainBootstrapOptions): void {
-	options.dom.gridSelectEl.value = String(options.settings.current.gridSpacingMm);
+	options.dom.gridSelectEl.value = String(options.settings.gridSpacingFor('schematic'));
 	options.setMode('view');
 	options.ensureSession();
 	options.resizeCanvas();

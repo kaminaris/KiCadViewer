@@ -48,6 +48,8 @@ export interface MainDomRefs {
 	editPropertiesEl: HTMLElement;
 	editUndoStackEl: HTMLElement;
 	toolPanel: HTMLElement;
+	boardToolPanel: HTMLElement;
+	boardAppearanceEl: HTMLElement;
 	highlightNetButton: HTMLButtonElement;
 	mainEl: HTMLElement;
 	editTextInput: HTMLInputElement;
@@ -77,6 +79,7 @@ export interface MainDomRefs {
 	exportEditButton: HTMLButtonElement;
 	undoButton: HTMLButtonElement;
 	redoButton: HTMLButtonElement;
+	preferencesButton: HTMLButtonElement;
 	propertiesModalCloseButton: HTMLElement | null;
 	paneSplitters: HTMLElement[];
 
@@ -109,6 +112,8 @@ export function createMainDomRefs(): MainDomRefs {
 		editPropertiesEl: requiredById<HTMLElement>('edit-properties'),
 		editUndoStackEl: requiredById<HTMLElement>('edit-undo-stack'),
 		toolPanel: requiredById<HTMLElement>('tool-panel'),
+		boardToolPanel: requiredById<HTMLElement>('board-tool-panel'),
+		boardAppearanceEl: requiredById<HTMLElement>('board-appearance'),
 		highlightNetButton: requiredById<HTMLButtonElement>('btn-highlight-net'),
 		mainEl: requiredSelector<HTMLElement>('main'),
 		editTextInput: requiredById<HTMLInputElement>('edit-text-input'),
@@ -138,6 +143,7 @@ export function createMainDomRefs(): MainDomRefs {
 		exportEditButton: requiredById<HTMLButtonElement>('btn-export-edit'),
 		undoButton: requiredById<HTMLButtonElement>('btn-undo'),
 		redoButton: requiredById<HTMLButtonElement>('btn-redo'),
+		preferencesButton: requiredById<HTMLButtonElement>('btn-preferences'),
 		propertiesModalCloseButton: optionalById<HTMLElement>('properties-modal-close'),
 		paneSplitters: Array.from(document.querySelectorAll<HTMLElement>('.pane-splitter')),
 		getToolGroupButton: id => optionalById<HTMLButtonElement>(id)

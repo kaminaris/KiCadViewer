@@ -3,8 +3,8 @@ import type { ActiveDocument }     from './ActiveDocument';
 
 export type AppMode = 'view' | 'circuit' | 'edit';
 
-/** Cross-cutting app state — today just the cached schematic text, kept as
- *  its own class (not inlined into ActiveDocument) because it's injected
+/** Cross-cutting app state — today just the cached schematic/board text, kept
+ *  as its own class (not inlined into ActiveDocument) because it's injected
  *  directly into several other classes' constructors (SessionController,
  *  ClipboardController, TextInputFlow) rather than reached via a closure.
  *  Also the one choke point every one of those mutation call sites already
@@ -48,5 +48,24 @@ export class AppState {
 	 *  rather than deriving it from the session. */
 	setSchematicText(text: string): void {
 		this.doc.schematicText = text;
+	}
+
+	/** Board-side counterpart to refreshSchematicText — same choke point,
+	 *  same textCommitHandler (SessionController's handler branches on
+	 *  doc.kind internally to route to the right save target). */
+	refreshBoardText(session: KicadRenderSession | null | undefined): string {
+		this.doc.boardText = session?.getBoardText() || this.doc.boardText;
+		this.textCommitHandler?.(this.doc.boardText);
+		return this.doc.boardText;
+	}
+
+	get boardText(): string {
+		return this.doc.boardText;
+	}
+
+	/** For call sites priming the cache with text they already computed
+	 *  fresh, mirroring setSchematicText. */
+	setBoardText(text: string): void {
+		this.doc.boardText = text;
 	}
 }

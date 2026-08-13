@@ -79,6 +79,24 @@ export interface PointerControllerDeps {
 
 /** Owns canvas/window pointer event flow and drag commit behavior. */
 export class PointerController {
+	/** mouseup is bound at window level so a drag that ends off-canvas still
+	 *  gets released, but that means EVERY mouseup on the page reaches
+	 *  onPointerUp — including clicks on unrelated UI (e.g. the Appearance
+	 *  panel's checkboxes/selects). Track whether the gesture actually
+	 *  started on the canvas so onPointerUp can ignore mouseups that don't
+	 *  belong to it, instead of unconditionally refreshing the sidebar and
+	 *  racing ahead of that UI's own click/change handlers. */
+	protected pointerDownOnCanvas = false;
+	/** Keyboard-initiated KiCad Move. Unlike a mouse drag, this survives until
+	 *  a confirming click/Enter or Escape, while retaining the cursor's offset
+	 *  from the selection so beginning a move never makes an item jump. */
+	protected interactiveMove: {
+		ids: string[];
+		lastSnapped: Vec2;
+		undoCaptured: boolean;
+		moved: boolean;
+	} | null = null;
+
 	constructor(protected readonly deps: PointerControllerDeps) {
 		for (const el of [deps.canvas, deps.canvasGl]) {
 			el.addEventListener('mousedown', event => this.onMouseDown(event));
@@ -93,7 +111,115 @@ export class PointerController {
 		this.deps.syncSingleSelectionBookkeeping(session);
 	}
 
+	hasInteractiveMove(): boolean {
+		return this.interactiveMove !== null;
+	}
+
+	beginInteractiveMove(): boolean {
+		const session = this.deps.getSession();
+		if (!session || session.documentTypeLoaded !== 'schematic' || this.deps.getMode() !== 'edit'
+			|| session.selectionIds.size === 0 || this.deps.editGestureTracker.isActive) {
+			return false;
+		}
+		const pointer = this.deps.runtime.lastPointerWorld ?? new Vec2(session.camera.center.x, session.camera.center.y);
+		this.interactiveMove = {
+			ids: [...session.selectionIds],
+			lastSnapped: new Vec2(this.deps.snap(pointer.x), this.deps.snap(pointer.y)),
+			undoCaptured: false,
+			moved: false,
+		};
+		this.deps.setStatus('Move active — click or Enter to place; Escape cancels.');
+		return true;
+	}
+
+	finishInteractiveMove(): boolean {
+		const move = this.interactiveMove;
+		if (!move) {
+			return false;
+		}
+		this.interactiveMove = null;
+		if (move.moved) {
+			this.deps.refreshSchematicText(this.deps.ensureSession());
+		}
+		this.deps.updateEditSidebar();
+		this.deps.setStatus(move.moved ? 'Move finished.' : 'Move finished without changes.');
+		return true;
+	}
+
+	async cancelInteractiveMove(): Promise<boolean> {
+		const move = this.interactiveMove;
+		if (!move) {
+			return false;
+		}
+		this.interactiveMove = null;
+		const session = this.deps.getSession();
+		if (session && move.undoCaptured) {
+			await session.cancelLatestUndoSnapshot();
+			session.selectMultiple(move.ids, 'replace');
+			this.deps.refreshSchematicText(session);
+			this.deps.syncSingleSelectionBookkeeping(session);
+		}
+		this.deps.updateEditSidebar();
+		this.deps.setStatus('Move cancelled.');
+		return true;
+	}
+
+	nudgeInteractiveMove(dx: number, dy: number): boolean {
+		const spacing = this.deps.getGridSpacingMm();
+		const deltaX = dx * spacing;
+		const deltaY = dy * spacing;
+		if (!this.translateInteractiveMove(deltaX, deltaY)) {
+			return false;
+		}
+		return true;
+	}
+
+	protected moveToScreen(session: KicadRenderSession, screenPos: Vec2): void {
+		const move = this.interactiveMove;
+		if (!move) {
+			return;
+		}
+		const world = session.screenToWorld(screenPos);
+		const snapped = new Vec2(this.deps.snap(world.x), this.deps.snap(world.y));
+		if (this.translateInteractiveMove(snapped.x - move.lastSnapped.x, snapped.y - move.lastSnapped.y)) {
+			move.lastSnapped = snapped;
+		}
+	}
+
+	protected translateInteractiveMove(dx: number, dy: number): boolean {
+		const move = this.interactiveMove;
+		const session = this.deps.getSession();
+		if (!move || !session || (dx === 0 && dy === 0)) {
+			return false;
+		}
+		if (!move.undoCaptured) {
+			session.pushUndoSnapshot('Move selection');
+			move.undoCaptured = true;
+		}
+		if (!session.translateSelection(move.ids, dx, dy)) {
+			return false;
+		}
+		move.moved = true;
+		return true;
+	}
+
 	protected onMouseDown(e: MouseEvent): void {
+		// A board-kind document has its own BoardPointerController now that
+		// board tabs can reach 'edit' mode (see harmonic-munching-trinket
+		// plan's Phase 0) — this controller is 100% schematic-shaped
+		// (handleEditModeMouseDown's hit-kind checks, draggingPan fallback,
+		// etc.) and must not also react to the same canvas click, or the two
+		// controllers fight over the same gesture (e.g. a missed/hit pad
+		// click falling through to this controller's pan-drag).
+		if (this.deps.getSession()?.documentTypeLoaded === 'board') {
+			return;
+		}
+		this.pointerDownOnCanvas = true;
+		if (this.interactiveMove && e.button === 0) {
+			this.finishInteractiveMove();
+			e.preventDefault();
+			return;
+		}
 		if (this.deps.getContextMenuOpen() || this.deps.getPropertiesModalOpen() || this.deps.getSymbolChooserOpen()) {
 			return;
 		}
@@ -549,6 +675,17 @@ export class PointerController {
 		const pos = this.screenPosFromEvent(e);
 		this.deps.runtime.lastPointerWorld = session.screenToWorld(pos);
 		this.deps.updateStatusBar(pos);
+		// Keep middle/right-button navigation available while Move is active,
+		// matching KiCad's always-available canvas navigation.
+		if (this.deps.runtime.draggingPan) {
+			session.pan(pos.x - this.deps.runtime.dragStart.x, pos.y - this.deps.runtime.dragStart.y);
+			this.deps.runtime.dragStart = pos;
+			return;
+		}
+		if (session.documentTypeLoaded === 'schematic' && this.interactiveMove) {
+			this.moveToScreen(session, pos);
+			return;
+		}
 		if (!this.deps.getHighlightNetEnabled()) {
 			session.clearNetHighlight();
 		}
@@ -692,14 +829,20 @@ export class PointerController {
 			session.moveSymbolByRef(placement.ref, placement.x, placement.y, placement.rotation);
 			return;
 		}
-		if (!this.deps.runtime.draggingPan) {
-			return;
-		}
-		session.pan(pos.x - this.deps.runtime.dragStart.x, pos.y - this.deps.runtime.dragStart.y);
-		this.deps.runtime.dragStart = pos;
+		return;
 	}
 
 	protected onPointerUp(e: MouseEvent): void {
+		// mouseup is bound at window level (see constructor) so this fires for
+		// every mouseup on the page, not just ones belonging to a canvas
+		// gesture — e.g. clicking a checkbox in the Appearance panel. Ignore
+		// those: nothing here should run for a mouseup whose matching
+		// mousedown never touched the canvas.
+		const wasCanvasGesture = this.pointerDownOnCanvas;
+		this.pointerDownOnCanvas = false;
+		if (!wasCanvasGesture) {
+			return;
+		}
 		const finishedGesture = this.deps.editGestureTracker.end();
 		const moved = this.deps.runtime.dragMoved;
 		const gestureKind = finishedGesture.kind;
@@ -750,6 +893,9 @@ export class PointerController {
 	}
 
 	protected onDoubleClick(event: MouseEvent): void {
+		if (this.deps.getSession()?.documentTypeLoaded === 'board') {
+			return;
+		}
 		if (this.deps.getMode() === 'view') {
 			void this.deps.descendIntoSheetAtScreen(this.screenPosFromEvent(event));
 			return;

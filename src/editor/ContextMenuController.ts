@@ -38,6 +38,7 @@ export interface ContextMenuControllerDeps {
 	rotateSelected(): Promise<void>;
 	autoplaceSelectedFields(): void;
 	showEditLabelInput(id: string): void;
+	refreshBoardUi(): void;
 }
 
 export class ContextMenuController {
@@ -52,14 +53,62 @@ export class ContextMenuController {
 			return;
 		}
 		e.preventDefault();
+		const session = this.deps.ensureSession();
+		const pointer = this.deps.screenPosFromEvent(e);
+		const hit = session.hitTestAtScreen(pointer);
+		if (session.documentTypeLoaded === 'board') {
+			if (hit) {
+				const targetId = session.footprintPaintIdForHit(hit.id);
+				if (!session.selectionIds.has(targetId)) {
+					session.select(targetId);
+				}
+			}
+			const selectedIds = [...session.selectionIds];
+			const items = this.deps.contextMenu.buildBoardItems({
+				session,
+				selectedIds,
+				actions: {
+					zoomToSelection: s => {
+						const selected = s.activeScene?.hitTestItems.filter(item => s.selectionIds.has(item.id)) ?? [];
+						s.fitToItems(selected);
+					},
+					rotate: (s, id) => {
+						if (s.rotateFootprintByPaintId(id, 90)) {
+							this.deps.appState.refreshBoardText(s);
+							this.deps.updateUndoStackPane();
+							this.deps.refreshBoardUi();
+							this.deps.setStatus('Footprint rotated.');
+						}
+					},
+					flip: (s, id) => {
+						if (s.flipFootprintByPaintId(id)) {
+							this.deps.appState.refreshBoardText(s);
+							this.deps.updateUndoStackPane();
+							this.deps.refreshBoardUi();
+							this.deps.setStatus('Footprint flipped.');
+						}
+					},
+					delete: (s, ids) => {
+						const removed = s.deleteElements(ids);
+						if (removed) {
+							this.deps.appState.refreshBoardText(s);
+							this.deps.updateUndoStackPane();
+							this.deps.refreshBoardUi();
+							this.deps.setStatus(`Deleted ${ removed } item(s).`);
+						}
+					}
+				}
+			});
+			if (items.length) {
+				this.deps.contextMenu.show(items, e.clientX, e.clientY);
+			}
+			return;
+		}
 		this.deps.syncPendingShapeTracker();
 		if (this.deps.getPendingShapeActive()) {
 			this.deps.resetEditToolState();
 			return;
 		}
-		const session = this.deps.ensureSession();
-		const pointer = this.deps.screenPosFromEvent(e);
-		const hit = session.hitTestAtScreen(pointer);
 		const selectedIds = [...session.selectionIds];
 		const items = this.deps.contextMenu.buildItems({
 			session,

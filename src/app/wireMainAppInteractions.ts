@@ -8,7 +8,7 @@ import type { EditGestureTracker }                                       from '.
 import type { Settings }                                                 from './Settings';
 import type { SymbolChooser }                                            from '../ui/SymbolChooser';
 import type { EditTool, PowerKind }                                      from '../editor/Toolbar';
-import { EDIT_TOOL_HOTKEYS, TOOL_GROUPS }                                from '../editor/Toolbar';
+import { TOOL_GROUPS }                                                    from '../editor/Toolbar';
 import type { TextInputFlow }                                            from '../editor/TextInputFlow';
 import { DIRECTIVE_LABEL_SHAPES, LABEL_SHAPES, TEXT_INPUT_PLACEHOLDERS } from '../editor/TextInputFlow';
 import type { ContextMenu }                                              from '../editor/ContextMenu';
@@ -19,6 +19,8 @@ import { KeyboardController }                                            from '.
 import type { PropertiesController }                                     from '../editor/PropertiesController';
 import type { ToolStateController }                                      from '../editor/ToolStateController';
 import { PointerController }                                             from '../editor/PointerController';
+import { BoardPointerController }                                       from '../editor/BoardPointerController';
+import { BoardToolbar }                                                 from '../editor/BoardToolbar';
 import { ContextMenuController }                                         from '../editor/ContextMenuController';
 import type { MainDomRefs }                                              from './domRefs';
 import { runMainBootstrap }                                              from './bootstrap';
@@ -54,6 +56,12 @@ export interface WireMainAppInteractionsOptions {
 	getHighlightNetEnabled(): boolean;
 
 	setHighlightNetEnabled(enabled: boolean): void;
+
+	getZoomStep(): number;
+
+	getInvertZoom(): boolean;
+
+	getCenterAndWarpCursorOnZoom(): boolean;
 
 	getCurrentPowerKind(): PowerKind;
 
@@ -104,6 +112,7 @@ export interface WireMainAppInteractionsOptions {
 	updateEditSidebar(): void;
 
 	updateUndoStackPane(): void;
+	refreshHint(): void;
 
 	setStatus(message: string): void;
 
@@ -120,8 +129,11 @@ export interface WireMainAppInteractionsOptions {
 	commitReroute(connectivity: 'autoroute' | 'clear-wires'): Promise<void>;
 
 	downloadSchematic(): void;
+	downloadCurrentDocument(): void;
 
 	refreshSchematicText(session: KicadRenderSession): void;
+
+	refreshBoardText(session: KicadRenderSession): void;
 
 	chooseSymbolDirectory(): Promise<void>;
 
@@ -249,18 +261,31 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		void options.commitReroute('clear-wires');
 	});
 	options.dom.exportButton.addEventListener('click', () => options.downloadSchematic());
-	options.dom.exportEditButton.addEventListener('click', () => options.downloadSchematic());
+	options.dom.exportEditButton.addEventListener('click', () => options.downloadCurrentDocument());
 	options.dom.undoButton.addEventListener('click', () => void options.sessionController.undo());
 	options.dom.redoButton.addEventListener('click', () => void options.sessionController.redo());
 	for (const el of [options.doc.canvas, options.doc.canvasGl]) {
 		el.addEventListener('wheel', e => {
 			e.preventDefault();
-			options.sessionController.ensureSession().zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15);
+			const zoomIn = options.getInvertZoom() ? e.deltaY > 0 : e.deltaY < 0;
+			const step = options.getZoomStep();
+			const session = options.sessionController.ensureSession();
+			const factor = zoomIn ? step : 1 / step;
+			if (options.getCenterAndWarpCursorOnZoom()) {
+				// KiCad centers the view on the mouse before zooming, then warps
+				// the pointer to the viewport center. Browser security forbids the
+				// physical warp, but this preserves the matching camera behavior.
+				session.centerOnScreenPoint(screenPosFromEvent(e));
+				session.zoomBy(factor);
+			}
+			else {
+				session.zoomByAt(factor, screenPosFromEvent(e));
+			}
 			options.updateStatusBar();
 		}, { passive: false });
 	}
 
-	new PointerController({
+	const schematicPointerController = new PointerController({
 		canvas: options.doc.canvas,
 		canvasGl: options.doc.canvasGl,
 		stage: options.dom.stage,
@@ -314,7 +339,34 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		descendIntoSheetAtScreen: screenPos => options.sessionController.descendIntoSheetAtScreen(screenPos)
 	});
 
-	new KeyboardController(EDIT_TOOL_HOTKEYS, {
+	let boardToolbar: BoardToolbar;
+	const boardPointerController = new BoardPointerController({
+		canvas: options.doc.canvas,
+		canvasGl: options.doc.canvasGl,
+		screenPosFromEvent,
+		getSession: options.getSession,
+		getMode: options.getMode,
+		getGridSpacingMm: options.getGridSpacingMm,
+		snap: options.snap,
+		updateStatusBar: options.updateStatusBar,
+		refreshBoardText: options.refreshBoardText,
+		getTool: () => options.doc.boardTool,
+		setTool: tool => {
+			options.doc.boardTool = tool;
+			boardToolbar?.refresh();
+			options.refreshHint();
+		},
+		getActiveLayer: () => options.doc.activeBoardLayer,
+		setStatus: options.setStatus,
+		refreshAppearance: options.updateEditSidebar
+		,showPropertiesModal: id => options.propertiesController.showPropertiesModal(id)
+	});
+	boardToolbar = new BoardToolbar({
+		getActiveTool: () => options.doc.boardTool,
+		onToolClick: tool => boardPointerController.setTool(tool)
+	});
+
+	new KeyboardController(() => options.settings.current.shortcuts, {
 		syncPendingShapeTracker: options.syncPendingShapeTracker,
 		getMode: options.getMode,
 		isCircuitDragMode: options.getCircuitDragMode,
@@ -345,7 +397,36 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		syncSingleSelectionBookkeeping: options.syncSingleSelectionBookkeeping,
 		rotateSelected: () => options.sessionController.rotateSelected(),
 		autoplaceSelectedFields: () => options.sessionController.tidySelectedFields(),
-		setEditTool: tool => options.toolStateController.setEditTool(tool)
+		setEditTool: tool => options.toolStateController.setEditTool(tool),
+		startImageInsertion: () => options.fileActions.startImageInsertion(),
+		refreshBoardText: options.refreshBoardText
+		,getBoardTool: () => options.doc.boardTool
+		,setBoardTool: tool => boardPointerController.setTool(tool)
+		,finishBoardRoute: () => boardPointerController.finishRoute()
+		,cancelBoardRoute: () => boardPointerController.cancelRoute()
+		,placeBoardViaAtPointer: () => boardPointerController.placeViaAtLastPointer()
+		,getActiveBoardLayer: () => options.doc.activeBoardLayer
+		,setActiveBoardLayer: layer => {
+			options.doc.activeBoardLayer = layer;
+			options.updateEditSidebar();
+			options.refreshHint();
+			options.setStatus(`Active PCB layer: ${ layer }.`);
+		}
+		,getBoardCopperLayers: () => {
+			const layers = options.getSession()?.activeScene?.layersPresent ?? [];
+			return layers.filter(layer => layer.endsWith('.Cu'));
+		}
+		,refreshBoardUi: options.updateEditSidebar
+		,beginSchematicMove: () => schematicPointerController.beginInteractiveMove()
+		,hasSchematicMove: () => schematicPointerController.hasInteractiveMove()
+		,finishSchematicMove: () => schematicPointerController.finishInteractiveMove()
+		,cancelSchematicMove: () => schematicPointerController.cancelInteractiveMove()
+		,nudgeSchematicMove: (dx, dy) => schematicPointerController.nudgeInteractiveMove(dx, dy)
+		,beginBoardMove: () => boardPointerController.beginInteractiveMove()
+		,hasBoardMove: () => boardPointerController.hasInteractiveMove()
+		,finishBoardMove: () => boardPointerController.finishInteractiveMove()
+		,cancelBoardMove: () => boardPointerController.cancelInteractiveMove()
+		,nudgeBoardMove: (dx, dy) => boardPointerController.nudgeInteractiveMove(dx, dy)
 	});
 
 	new ContextMenuController({
@@ -377,6 +458,7 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		rotateSelected: () => options.sessionController.rotateSelected(),
 		autoplaceSelectedFields: () => options.sessionController.tidySelectedFields(),
 		showEditLabelInput: id => options.textInputFlow.showEditLabel(id)
+		,refreshBoardUi: options.updateEditSidebar
 	});
 
 	options.dom.propertiesModalCloseButton?.addEventListener(

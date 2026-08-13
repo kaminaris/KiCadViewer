@@ -4,6 +4,7 @@ import type { CircuitDesignRecipe, CircuitPlacement, LockedNetlist }            
 import type { KicadSchematic }                                                     from '@kicad-io/Project/KicadSchematic';
 import type { AppMode }                                                            from './AppState';
 import type { EditTool }                                                           from '../editor/Toolbar';
+import type { BoardTool }                                                          from '../editor/BoardToolbar';
 import type { ProjectContext }                                                     from './ProjectContext';
 
 /** 'circuit-demo' was dropped — real KiCad has no such document type, and it
@@ -24,6 +25,8 @@ export class ActiveDocument {
 	mode: AppMode = 'view';
 	circuitDragMode = false;
 	highlightNetEnabled = false;
+	activeBoardLayer = 'F.Cu';
+	boardTool: BoardTool = 'select';
 
 	recipe: CircuitDesignRecipe | null = null;
 	icSymbolText = '';
@@ -48,6 +51,8 @@ export class ActiveDocument {
 	currentDirectiveLabelShape: KicadDirectiveLabelShape = 'round';
 
 	schematicText = '';
+	boardText = '';
+	filename = '';
 
 	constructor(public readonly canvas: HTMLCanvasElement, public readonly canvasGl: HTMLCanvasElement) {}
 }

@@ -45,6 +45,17 @@ export interface ContextMenuBuildOptions {
 	};
 }
 
+export interface BoardContextMenuBuildOptions {
+	session: KicadRenderSession;
+	selectedIds: string[];
+	actions: {
+		zoomToSelection: (session: KicadRenderSession) => void;
+		rotate: (session: KicadRenderSession, id: string) => void;
+		flip: (session: KicadRenderSession, id: string) => void;
+		delete: (session: KicadRenderSession, ids: string[]) => void;
+	};
+}
+
 /** Owns the context-menu surface, command construction, and positioning. */
 export class ContextMenu {
 	protected readonly element = document.getElementById('context-menu') as HTMLDivElement;
@@ -113,6 +124,32 @@ export class ContextMenu {
 			items.push(this.separator());
 		}
 		items.push(this.buildPlaceSubmenu(options));
+		return items;
+	}
+
+	/** KiCad-like compact menu for PCB selection. Board actions stay
+	 *  deliberately separate from buildItems(): the schematic menu exposes
+	 *  grouping, labels, symbols, and Place tools that have no board meaning. */
+	buildBoardItems(options: BoardContextMenuBuildOptions): HTMLElement[] {
+		const { session, selectedIds, actions } = options;
+		if (selectedIds.length === 0) {
+			return [];
+		}
+		const items: HTMLElement[] = [
+			this.item('Zoom to Selection', () => actions.zoomToSelection(session)),
+			this.separator()
+		];
+		const singleId = selectedIds.length === 1 ? selectedIds[0] : null;
+		const singleItem = singleId
+			? session.activeScene?.hitTestItems.find(item => item.id === singleId)
+			: null;
+		const isFootprint = singleItem?.kind === 'footprint';
+		items.push(this.item('Rotate', () => actions.rotate(session, singleId!), !isFootprint));
+		items.push(this.item('Flip', () => actions.flip(session, singleId!), !isFootprint));
+		items.push(this.separator());
+		items.push(this.item(
+			selectedIds.length > 1 ? `Delete ${ selectedIds.length } Items` : 'Delete',
+			() => actions.delete(session, selectedIds)));
 		return items;
 	}
 
