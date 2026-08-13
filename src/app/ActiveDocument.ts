@@ -26,6 +26,9 @@ export class ActiveDocument {
 	circuitDragMode = false;
 	highlightNetEnabled = false;
 	activeBoardLayer = 'F.Cu';
+	boardGridVisible = true;
+	boardPolarCoordinates = false;
+	boardAppearanceVisible = true;
 	boardTool: BoardTool = 'select';
 
 	recipe: CircuitDesignRecipe | null = null;

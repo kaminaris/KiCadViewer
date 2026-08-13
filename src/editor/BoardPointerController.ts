@@ -31,6 +31,7 @@ export interface BoardPointerControllerDeps {
 	setStatus(message: string): void;
 	refreshAppearance(): void;
 	showPropertiesModal(id: string): void;
+	getHighlightNetEnabled(): boolean;
 }
 
 /**
@@ -89,6 +90,15 @@ export class BoardPointerController {
 		}
 		window.addEventListener('mousemove', event => this.onMouseMove(event));
 		window.addEventListener('mouseup', event => this.onMouseUp(event));
+		window.addEventListener('kionline:board-command', event => {
+			const command = (event as CustomEvent<string>).detail;
+			if (command === 'route-track') this.setTool('route');
+			else if (command === 'place-via') this.setTool('via');
+			else if (command === 'set-grid-origin') this.setTool('grid-origin');
+			else if (command === 'set-drill-origin') this.setTool('drill-origin');
+			else if (command === 'reset-grid-origin') this.resetOrigin('grid');
+			else if (command === 'reset-drill-origin') this.resetOrigin('drill-place');
+		});
 	}
 
 	setTool(tool: BoardTool): void {
@@ -98,7 +108,9 @@ export class BoardPointerController {
 		this.deps.setTool(tool);
 		this.deps.setStatus(tool === 'route'
 			? `Route tracks on ${ this.deps.getActiveLayer() } — click to start and add corners; Enter/double-click finishes.`
-			: tool === 'via' ? 'Place vias — click copper to inherit its net.' : 'PCB select tool active.');
+			: tool === 'via' ? 'Place vias — click copper to inherit its net.'
+				: tool === 'grid-origin' ? 'Set Grid Origin — click a grid point.'
+					: tool === 'drill-origin' ? 'Set Drill/Place File Origin — click a grid point.' : 'PCB select tool active.');
 	}
 
 	finishRoute(): boolean {
@@ -231,6 +243,16 @@ export class BoardPointerController {
 			e.preventDefault();
 			return;
 		}
+		// Works regardless of view/edit mode, matching schematic's identical
+		// click-to-highlight-net behavior (PointerController.onMouseDown).
+		if (this.deps.getHighlightNetEnabled() && e.button === 0) {
+			const highlighted = session.highlightBoardNetAtScreen(screenPos);
+			if (highlighted) {
+				this.deps.setStatus(`Highlighting net "${ session.currentHighlightedBoardNetName ?? '' }".`);
+				e.preventDefault();
+				return;
+			}
+		}
 		if (this.deps.getMode() !== 'edit' || e.button !== 0) {
 			return;
 		}
@@ -241,6 +263,17 @@ export class BoardPointerController {
 		}
 		if (this.deps.getTool() === 'via') {
 			this.placeVia(session, screenPos);
+			e.preventDefault();
+			return;
+		}
+		if (this.deps.getTool() === 'grid-origin' || this.deps.getTool() === 'drill-origin') {
+			const point = this.snappedWorld(session, screenPos);
+			const originKind = this.deps.getTool() === 'grid-origin' ? 'grid' : 'drill-place';
+			if (session.setBoardOrigin(originKind, point.x, point.y)) {
+				this.deps.refreshBoardText(session);
+				this.deps.setStatus(`${ originKind === 'grid' ? 'Grid' : 'Drill/Place File' } Origin set to ${ point.x.toFixed(3) }, ${ point.y.toFixed(3) } mm.`);
+			}
+			this.setTool('select');
 			e.preventDefault();
 			return;
 		}
@@ -295,6 +328,12 @@ export class BoardPointerController {
 		}
 		const screenPos = this.deps.screenPosFromEvent(e);
 		this.lastPointerScreen = screenPos;
+		if (session.documentTypeLoaded === 'board') {
+			session.updateBoardPointerScreen(screenPos);
+			if (!this.deps.getHighlightNetEnabled()) {
+				session.clearBoardNetHighlight();
+			}
+		}
 		if (session.documentTypeLoaded === 'board' && this.interactiveMove && this.gesture.kind !== 'pan') {
 			this.moveToScreen(session, screenPos);
 			this.deps.updateStatusBar(screenPos);
@@ -457,6 +496,15 @@ export class BoardPointerController {
 	protected snappedWorld(session: KicadRenderSession, screenPos: Vec2): Vec2 {
 		const world = session.screenToWorld(screenPos);
 		return new Vec2(this.deps.snap(world.x), this.deps.snap(world.y));
+	}
+
+	protected resetOrigin(kind: 'grid' | 'drill-place'): void {
+		const session = this.deps.getSession();
+		if (!session || session.documentTypeLoaded !== 'board' || !session.resetBoardOrigin(kind)) {
+			return;
+		}
+		this.deps.refreshBoardText(session);
+		this.deps.setStatus(`${ kind === 'grid' ? 'Grid' : 'Drill/Place File' } Origin reset to 0, 0.`);
 	}
 
 	protected moveToScreen(session: KicadRenderSession, screenPos: Vec2): void {

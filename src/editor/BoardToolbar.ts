@@ -1,4 +1,4 @@
-export type BoardTool = 'select' | 'route' | 'via';
+export type BoardTool = 'select' | 'route' | 'via' | 'grid-origin' | 'drill-origin';
 
 export interface BoardToolbarCallbacks {
 	getActiveTool(): BoardTool;

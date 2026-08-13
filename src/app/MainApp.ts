@@ -208,6 +208,8 @@ function syncActiveGrid(): void {
 	dom.gridSelectEl.title = board ? 'PCB grid spacing' : 'Schematic grid spacing';
 	dom.gridSelectEl.value = String(spacing);
 	doc.session?.setGridSpacing(spacing);
+	doc.session?.setGridVisible(doc.kind !== 'board' || doc.boardGridVisible);
+	statusBar.setPolarCoordinates(doc.kind === 'board' && doc.boardPolarCoordinates);
 }
 
 function setGridSpacing(mm: number): void {
@@ -230,6 +232,7 @@ function setHighlightNetEnabled(enabled: boolean): void {
 	refreshCanvasCursor();
 	if (!enabled) {
 		doc.session?.clearNetHighlight();
+		doc.session?.clearBoardNetHighlight();
 	}
 }
 
@@ -242,6 +245,13 @@ dom.gridSelectEl.addEventListener('change', () => {
 
 function updateStatusBar(screenPos?: Vec2): void {
 	statusBar.updateCoordZoom(doc.session, screenPos);
+}
+
+function setBoardPolarCoordinates(enabled: boolean): void {
+	doc.boardPolarCoordinates = enabled;
+	statusBar.setPolarCoordinates(enabled);
+	updateStatusBar();
+	setStatus(`PCB coordinates: ${ enabled ? 'polar' : 'cartesian' }.`);
 }
 
 function updateSelectionStatus(): void {
@@ -587,6 +597,71 @@ wireMainAppInteractions({
 	getCenterAndWarpCursorOnZoom: () => settings.current.centerAndWarpCursorOnZoom,
 	getCurrentPowerKind: () => currentPowerKind,
 	getGridSpacingMm: () => settings.gridSpacingFor(doc.kind),
+	getBoardPolarCoordinates: () => doc.boardPolarCoordinates,
+	setBoardPolarCoordinates,
+	getBoardDisplayUnit: () => settings.current.displayUnit,
+	setBoardDisplayUnit: unit => {
+		settings.setDisplayUnit(unit);
+		statusBar.setDisplayUnit(unit);
+		updateStatusBar();
+		setStatus(`Display units: ${ unit === 'mm' ? 'millimeters' : 'mils' }.`);
+	},
+	getBoardCrosshairMode: () => doc.session?.currentCrosshairMode ?? 'small',
+	cycleBoardCrosshairMode: () => {
+		const order = ['small', 'full', 'diagonal'] as const;
+		const next = order[(order.indexOf(doc.session?.currentCrosshairMode ?? 'small') + 1) % order.length]!;
+		doc.session?.setCrosshairMode(next);
+		const label = next === 'small' ? 'small' : next === 'full' ? 'full-window' : '45-degree full-window';
+		setStatus(`Crosshair: ${ label }.`);
+	},
+	getBoardRatsnestVisible: () => doc.session?.isRatsnestVisible ?? true,
+	setBoardRatsnestVisible: visible => {
+		doc.session?.setRatsnestVisible(visible);
+		setStatus(`PCB ratsnest ${ visible ? 'shown' : 'hidden' }.`);
+	},
+	getBoardZoneDisplayMode: () => doc.session?.currentZoneDisplayMode ?? 'filled',
+	setBoardZoneDisplayMode: mode => {
+		doc.session?.setZoneDisplayMode(mode);
+		setStatus(`PCB zones: ${ mode === 'filled' ? 'filled areas' : 'outlines only' }.`);
+	},
+	isBoardHighContrast: () => boardAppearance?.isHighContrast ?? false,
+	cycleBoardHighContrastMode: () => {
+		boardAppearance?.cycleHighContrastMode();
+		setStatus(`Inactive layers: ${ boardAppearance?.isHighContrast ? 'high contrast' : 'normal' }.`);
+	},
+	getBoardPadDisplayMode: () => doc.session?.currentPadDisplayMode ?? 'filled',
+	cycleBoardPadDisplayMode: () => {
+		const next = doc.session?.currentPadDisplayMode === 'outline' ? 'filled' : 'outline';
+		doc.session?.setPadDisplayMode(next);
+		setStatus(`Pads: ${ next === 'outline' ? 'sketch (outline only)' : 'filled' }.`);
+	},
+	getBoardViaDisplayMode: () => doc.session?.currentViaDisplayMode ?? 'filled',
+	cycleBoardViaDisplayMode: () => {
+		const next = doc.session?.currentViaDisplayMode === 'outline' ? 'filled' : 'outline';
+		doc.session?.setViaDisplayMode(next);
+		setStatus(`Vias: ${ next === 'outline' ? 'sketch (outline only)' : 'filled' }.`);
+	},
+	getBoardTrackDisplayMode: () => doc.session?.currentTrackDisplayMode ?? 'filled',
+	cycleBoardTrackDisplayMode: () => {
+		const next = doc.session?.currentTrackDisplayMode === 'outline' ? 'filled' : 'outline';
+		doc.session?.setTrackDisplayMode(next);
+		setStatus(`Tracks: ${ next === 'outline' ? 'sketch (outline only)' : 'filled' }.`);
+	},
+	getBoardAppearanceVisible: () => doc.boardAppearanceVisible,
+	setBoardAppearanceVisible: visible => {
+		doc.boardAppearanceVisible = visible;
+		dom.boardAppearanceEl.classList.toggle('hidden', !visible);
+		dom.mainEl.classList.toggle('board-appearance-hidden', !visible);
+		// Toggling board-appearance-hidden changes #stage's column width in
+		// the grid layout — resizeCanvas() must run AFTER that class change
+		// takes effect, not before, or it bakes the PREVIOUS layout's width
+		// into the WebGL canvas's backing store, which the browser then
+		// stretches to fit the new (different) CSS box. Same root cause,
+		// same fix, as setMode()'s identical board-appearance-hidden
+		// toggle — see SessionController.loadText's comment on this.
+		sessionController.resizeCanvas();
+		setStatus(`PCB Appearance ${ visible ? 'shown' : 'hidden' }.`);
+	},
 	ensurePlacement: ref => sessionController.ensurePlacement(ref),
 	getPlacements: () => doc.placements,
 	getRuleAreaPoints: () => doc.ruleAreaPoints,

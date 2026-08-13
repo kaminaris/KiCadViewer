@@ -16,6 +16,23 @@ files. Today it's a single-document schematic editor with project-level
 open/save bolted on; the multi-pane, multi-document shell is the next major
 piece of work.
 
+## Product benchmark: parity with real KiCad
+
+**Real KiCad is the product specification.** Work in this app should aim for
+behavioral, visual, file-format, interaction, shortcut, and workflow parity
+with the corresponding desktop KiCad feature. Do not substitute a generic
+web-editor convention when KiCad has an established behavior; reproduce the
+KiCad behavior unless a browser constraint makes that impossible. When a
+constraint requires a deliberate difference, keep it narrow and document the
+reason.
+
+The single most valuable implementation reference is the local KiCad source
+checkout at `C:\Projects\Personal\Electronic\kicad`. Consult it first when
+implementing or correcting an editor feature, especially for interaction
+state machines, defaults, serialization, geometry, and UI semantics. Treat
+existing code in this app as an implementation-in-progress, not as authority
+over real KiCad.
+
 ## Repo topology — read this before touching paths or `git`
 
 - **This directory is its own git repository**, nested inside the BOMManager2

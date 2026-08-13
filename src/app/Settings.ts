@@ -139,6 +139,11 @@ export class Settings {
 		this.persist();
 	}
 
+	setDisplayUnit(unit: DisplayUnit): void {
+		this.values = { ...this.values, displayUnit: unit };
+		this.persist();
+	}
+
 	setPowerKind(kind: PowerKind): void {
 		this.values = { ...this.values, powerKind: kind };
 		this.persist();

@@ -30,6 +30,24 @@ export class BoardAppearancePanel {
 
 	constructor(protected readonly element: HTMLElement, protected readonly callbacks: BoardAppearancePanelCallbacks) {}
 
+	get isHighContrast(): boolean {
+		return this.displayMode !== 'normal';
+	}
+
+	/** Mirrors Pcbnew's high-contrast mode cycling for inactive layers. */
+	cycleHighContrastMode(): void {
+		const session = this.callbacks.getSession();
+		const scene = session?.activeScene as BoardScene | null;
+		if (!session || session.documentTypeLoaded !== 'board' || !scene) {
+			return;
+		}
+		this.captureLayerState(session, scene);
+		this.displayMode = this.displayMode === 'normal' ? 'dim'
+			: this.displayMode === 'dim' ? 'hide' : 'normal';
+		this.applyLayerState(session, scene.layersPresent);
+		this.render(session, scene);
+	}
+
 	refresh(): void {
 		const session = this.callbacks.getSession();
 		if (!session || session.documentTypeLoaded !== 'board') {
@@ -51,6 +69,7 @@ export class BoardAppearancePanel {
 		if (scene === this.scene && signature === this.layerSignature) {
 			if (layers.includes(requested)) {
 				this.activeLayer = requested;
+				session.setActiveBoardLayer(this.activeLayer);
 			}
 			return;
 		}
@@ -67,6 +86,7 @@ export class BoardAppearancePanel {
 			? requested
 			: (layers.includes('F.Cu') ? 'F.Cu' : layers[0] ?? '');
 		this.callbacks.setActiveLayer(this.activeLayer);
+		session.setActiveBoardLayer(this.activeLayer);
 	}
 
 	protected render(session: KicadRenderSession, scene: BoardScene): void {
@@ -101,6 +121,7 @@ export class BoardAppearancePanel {
 			row.addEventListener('click', () => {
 				this.activeLayer = layer;
 				this.callbacks.setActiveLayer(layer);
+				session.setActiveBoardLayer(layer);
 				this.applyLayerState(session, scene.layersPresent);
 				this.render(session, scene);
 			});

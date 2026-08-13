@@ -21,6 +21,7 @@ export class StatusBar {
 	protected lastCoord = '';
 	protected lastZoom = '';
 	protected displayUnit: 'mm' | 'mil' = 'mm';
+	protected polarCoordinates = false;
 
 	protected lastRenderTime: number | null = null;
 	protected fps = 0;
@@ -55,6 +56,11 @@ export class StatusBar {
 		this.lastCoord = '';
 	}
 
+	setPolarCoordinates(enabled: boolean): void {
+		this.polarCoordinates = enabled;
+		this.lastCoord = '';
+	}
+
 	/** rAF-throttled coord/zoom readout — coalesces rapid mousemove-driven
 	 *  calls into one DOM write per frame, and skips the write entirely when
 	 *  the displayed text hasn't actually changed. */
@@ -70,7 +76,10 @@ export class StatusBar {
 			const unit = this.displayUnit;
 			const scale = unit === 'mil' ? 39.37007874 : 1;
 			const precision = unit === 'mil' ? 1 : 2;
-			const coord = world ? `X: ${ (world.x * scale).toFixed(precision) } ${ unit }  Y: ${ (world.y * scale).toFixed(precision) } ${ unit }` : this.lastCoord;
+			const coord = world ? this.polarCoordinates
+				? `r: ${ (Math.hypot(world.x, world.y) * scale).toFixed(precision) } ${ unit }  θ: ${ (Math.atan2(-world.y, world.x) * 180 / Math.PI).toFixed(2) }°`
+				: `X: ${ (world.x * scale).toFixed(precision) } ${ unit }  Y: ${ (world.y * scale).toFixed(precision) } ${ unit }`
+				: this.lastCoord;
 			const zoom = `Zoom: ${ session && Number.isFinite(session.camera.zoom) ?
 				`${ session.camera.zoom.toFixed(2) }×` : '—' }`;
 			if (coord !== this.lastCoord) {

@@ -49,6 +49,16 @@ export class MenuBar {
 	}
 
 	protected run(command: HTMLElement): void {
+		const boardToggle = command.dataset.boardToggle;
+		if (boardToggle) {
+			document.querySelector<HTMLButtonElement>(`#board-toggle-panel [data-board-toggle="${ boardToggle }"]`)?.click();
+			return;
+		}
+		const boardCommand = command.dataset.boardCommand;
+		if (boardCommand) {
+			window.dispatchEvent(new CustomEvent<string>('kionline:board-command', { detail: boardCommand }));
+			return;
+		}
 		const targetId = command.dataset.actionTarget;
 		if (targetId) {
 			document.getElementById(targetId)?.click();

@@ -172,6 +172,9 @@ html, body {
 .menu-command:hover span { color: #e9f5ff; }
 .menu-command:disabled { color: #778392; cursor: not-allowed; }
 .menu-command:disabled:hover { background: transparent; color: #778392; }
+
+#screen-editor[data-document-kind="board"] .menu-schematic,
+#screen-editor[data-document-kind="schematic"] .menu-board { display: none; }
 .menu-divider { height: 1px; margin: 0.22rem 0.15rem; background: #4a5664; }
 
 .breadcrumb {
@@ -319,8 +322,18 @@ main.edit-mode {
 }
 
 main.board-mode {
-	grid-template-columns: minmax(240px, 320px) minmax(0, 1fr) 56px minmax(250px, 300px);
+	grid-template-columns: minmax(240px, 320px) 48px minmax(0, 1fr) 56px minmax(250px, 300px);
+	grid-template-areas: "left toggle stage tools appearance";
 }
+main.board-mode.board-appearance-hidden {
+	grid-template-columns: minmax(240px, 320px) 48px minmax(0, 1fr) 56px;
+	grid-template-areas: "left toggle stage tools";
+}
+main.board-mode .edit-left-pane { grid-area: left; }
+main.board-mode .board-toggle-panel { grid-area: toggle; }
+main.board-mode .stage { grid-area: stage; }
+main.board-mode .board-tool-panel { grid-area: tools; }
+main.board-mode .board-appearance { grid-area: appearance; }
 
 .edit-left-pane { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 .edit-pane { min-height: 60px; flex: 1 1 0; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); background: var(--panel); }
@@ -366,6 +379,7 @@ main.board-mode {
 }
 
 .tool-panel.hidden { display: none; }
+.board-toggle-panel { padding-inline: 0.25rem; border-left: 0; border-right: 1px solid var(--line); }
 .board-tool-panel { border-left: 1px solid var(--line); }
 
 .board-appearance { min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: #20252d; border-left: 1px solid var(--line); }
@@ -546,8 +560,8 @@ main.board-mode {
 		grid-template-rows: auto 1fr;
 	}
 	.side { border-right: none; border-bottom: 1px solid var(--line); }
-	main.board-mode { grid-template-columns: 1fr; grid-template-rows: auto minmax(260px, 1fr) auto auto; }
-	.board-tool-panel { flex-direction: row; justify-content: flex-start; overflow-x: auto; border-left: 0; border-top: 1px solid var(--line); }
+	main.board-mode, main.board-mode.board-appearance-hidden { grid-template-columns: 1fr; grid-template-areas: none; grid-template-rows: auto auto minmax(260px, 1fr) auto auto; }
+	.board-toggle-panel, .board-tool-panel { flex-direction: row; justify-content: flex-start; overflow-x: auto; border-left: 0; border-right: 0; border-top: 1px solid var(--line); }
 	.board-appearance { max-height: 300px; border-left: 0; border-top: 1px solid var(--line); }
 }
 .table-modal {

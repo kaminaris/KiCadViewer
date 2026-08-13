@@ -21,6 +21,7 @@ import type { ToolStateController }                                      from '.
 import { PointerController }                                             from '../editor/PointerController';
 import { BoardPointerController }                                       from '../editor/BoardPointerController';
 import { BoardToolbar }                                                 from '../editor/BoardToolbar';
+import { BoardToggleToolbar }                                           from '../editor/BoardToggleToolbar';
 import { ContextMenuController }                                         from '../editor/ContextMenuController';
 import type { MainDomRefs }                                              from './domRefs';
 import { runMainBootstrap }                                              from './bootstrap';
@@ -66,6 +67,46 @@ export interface WireMainAppInteractionsOptions {
 	getCurrentPowerKind(): PowerKind;
 
 	getGridSpacingMm(): number;
+
+	getBoardPolarCoordinates(): boolean;
+
+	setBoardPolarCoordinates(enabled: boolean): void;
+
+	getBoardDisplayUnit(): 'mm' | 'mil';
+
+	setBoardDisplayUnit(unit: 'mm' | 'mil'): void;
+
+	getBoardCrosshairMode(): 'small' | 'full' | 'diagonal';
+
+	cycleBoardCrosshairMode(): void;
+
+	getBoardRatsnestVisible(): boolean;
+
+	setBoardRatsnestVisible(visible: boolean): void;
+
+	getBoardZoneDisplayMode(): 'filled' | 'outline';
+
+	setBoardZoneDisplayMode(mode: 'filled' | 'outline'): void;
+
+	isBoardHighContrast(): boolean;
+
+	cycleBoardHighContrastMode(): void;
+
+	getBoardPadDisplayMode(): 'filled' | 'outline';
+
+	cycleBoardPadDisplayMode(): void;
+
+	getBoardViaDisplayMode(): 'filled' | 'outline';
+
+	cycleBoardViaDisplayMode(): void;
+
+	getBoardTrackDisplayMode(): 'filled' | 'outline';
+
+	cycleBoardTrackDisplayMode(): void;
+
+	getBoardAppearanceVisible(): boolean;
+
+	setBoardAppearanceVisible(visible: boolean): void;
 
 	ensurePlacement(ref: string): any | null;
 
@@ -360,10 +401,41 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		setStatus: options.setStatus,
 		refreshAppearance: options.updateEditSidebar
 		,showPropertiesModal: id => options.propertiesController.showPropertiesModal(id)
+		,getHighlightNetEnabled: options.getHighlightNetEnabled
 	});
 	boardToolbar = new BoardToolbar({
 		getActiveTool: () => options.doc.boardTool,
 		onToolClick: tool => boardPointerController.setTool(tool)
+	});
+	new BoardToggleToolbar({
+		getGridVisible: () => options.doc.boardGridVisible,
+		setGridVisible: visible => {
+			options.doc.boardGridVisible = visible;
+			options.getSession()?.setGridVisible(visible);
+			options.setStatus(`PCB grid ${ visible ? 'shown' : 'hidden' }.`);
+		},
+		getPolarCoordinates: options.getBoardPolarCoordinates,
+		setPolarCoordinates: options.setBoardPolarCoordinates,
+		getDisplayUnit: options.getBoardDisplayUnit,
+		setDisplayUnit: options.setBoardDisplayUnit,
+		getCrosshairMode: options.getBoardCrosshairMode,
+		cycleCrosshairMode: options.cycleBoardCrosshairMode,
+		getRatsnestVisible: options.getBoardRatsnestVisible,
+		setRatsnestVisible: options.setBoardRatsnestVisible,
+		getZoneDisplayMode: options.getBoardZoneDisplayMode,
+		setZoneDisplayMode: options.setBoardZoneDisplayMode,
+		isHighContrast: options.isBoardHighContrast,
+		cycleHighContrastMode: options.cycleBoardHighContrastMode,
+		getHighlightNetEnabled: options.getHighlightNetEnabled,
+		setHighlightNetEnabled: options.setHighlightNetEnabled,
+		getPadDisplayMode: options.getBoardPadDisplayMode,
+		cyclePadDisplayMode: options.cycleBoardPadDisplayMode,
+		getViaDisplayMode: options.getBoardViaDisplayMode,
+		cycleViaDisplayMode: options.cycleBoardViaDisplayMode,
+		getTrackDisplayMode: options.getBoardTrackDisplayMode,
+		cycleTrackDisplayMode: options.cycleBoardTrackDisplayMode,
+		getAppearanceVisible: options.getBoardAppearanceVisible,
+		setAppearanceVisible: options.setBoardAppearanceVisible
 	});
 
 	new KeyboardController(() => options.settings.current.shortcuts, {

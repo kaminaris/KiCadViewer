@@ -48,6 +48,7 @@ export interface MainDomRefs {
 	editPropertiesEl: HTMLElement;
 	editUndoStackEl: HTMLElement;
 	toolPanel: HTMLElement;
+	boardTogglePanel: HTMLElement;
 	boardToolPanel: HTMLElement;
 	boardAppearanceEl: HTMLElement;
 	highlightNetButton: HTMLButtonElement;
@@ -112,6 +113,7 @@ export function createMainDomRefs(): MainDomRefs {
 		editPropertiesEl: requiredById<HTMLElement>('edit-properties'),
 		editUndoStackEl: requiredById<HTMLElement>('edit-undo-stack'),
 		toolPanel: requiredById<HTMLElement>('tool-panel'),
+		boardTogglePanel: requiredById<HTMLElement>('board-toggle-panel'),
 		boardToolPanel: requiredById<HTMLElement>('board-tool-panel'),
 		boardAppearanceEl: requiredById<HTMLElement>('board-appearance'),
 		highlightNetButton: requiredById<HTMLButtonElement>('btn-highlight-net'),

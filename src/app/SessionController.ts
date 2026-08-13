@@ -40,6 +40,8 @@ export interface SessionControllerState {
 	lockedNetlist: LockedNetlist | null;
 	placements: CircuitPlacement[];
 	placedFragment: string;
+	boardGridVisible: boolean;
+	boardAppearanceVisible: boolean;
 	selectedRef: string | null;
 	editSelectedId: string | null;
 	rerouting: boolean;
@@ -221,6 +223,7 @@ export class SessionController {
 				error instanceof Error ? error.message : String(error));
 			this.state.session.onRender = () => this.statusBar.recordRender();
 			this.state.session.setGridSpacing(this.settings.gridSpacingFor(this.state.kind));
+			this.state.session.setGridVisible(this.state.kind !== 'board' || this.state.boardGridVisible);
 			if (!this.state.session.hasWebGL) {
 				// WebGL context creation failed (disabled GPU, headless
 				// environment, etc.) — the session already fell back to
@@ -267,14 +270,23 @@ export class SessionController {
 		// boards get their own boardToolPanel instead. circuit-actions
 		// stays permanently hidden — see index.html's comment.
 		const board = this.state.kind === 'board';
+		// Menu items are scoped by this attribute (see styles.css's
+		// .menu-schematic/.menu-board rule) — it has to live on screenEditorEl,
+		// not mainEl, because the top menu bar sits in <header>, a SIBLING of
+		// <main>, not a descendant of it. Setting it on mainEl (as this once
+		// did) meant the CSS descendant selector never matched anything in the
+		// header, so every menu item stayed visible regardless of doc kind.
+		this.dom.screenEditorEl.dataset.documentKind = board ? 'board' : 'schematic';
 		this.dom.editActions.classList.toggle('hidden', next !== 'edit');
 		this.dom.indexSymbolsButton.classList.toggle('hidden', board);
 		this.dom.exportEditButton.title = board ? 'Export PCB' : 'Export Schematic';
 		this.dom.toolPanel.classList.toggle('hidden', next !== 'edit' || board);
+		this.dom.boardTogglePanel.classList.toggle('hidden', !board);
 		this.dom.boardToolPanel.classList.toggle('hidden', !board);
-		this.dom.boardAppearanceEl.classList.toggle('hidden', !board);
+		this.dom.boardAppearanceEl.classList.toggle('hidden', !board || !this.state.boardAppearanceVisible);
 		this.dom.mainEl.classList.toggle('edit-mode', next === 'edit' && !board);
 		this.dom.mainEl.classList.toggle('board-mode', board);
+		this.dom.mainEl.classList.toggle('board-appearance-hidden', board && !this.state.boardAppearanceVisible);
 		if (next !== 'edit' || board) {
 			this.callbacks.closeSymbolChooser();
 			this.callbacks.resetEditToolState();
