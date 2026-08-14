@@ -43,6 +43,8 @@ export interface MainDomRefs {
 	viewTabsEl: HTMLElement;
 	viewTabSchematicBtn: HTMLButtonElement;
 	viewTabBoardBtn: HTMLButtonElement;
+	viewTabProjectSettingsBtn: HTMLButtonElement;
+	projectSetupWorkspaceEl: HTMLElement;
 	indexSymbolsButton: HTMLButtonElement;
 	symbolDirectoryInput: HTMLInputElement;
 	editPropertiesEl: HTMLElement;
@@ -108,6 +110,8 @@ export function createMainDomRefs(): MainDomRefs {
 		viewTabsEl: requiredById<HTMLElement>('view-tabs'),
 		viewTabSchematicBtn: requiredById<HTMLButtonElement>('view-tab-schematic'),
 		viewTabBoardBtn: requiredById<HTMLButtonElement>('view-tab-board'),
+		viewTabProjectSettingsBtn: requiredById<HTMLButtonElement>('view-tab-project-settings'),
+		projectSetupWorkspaceEl: requiredById<HTMLElement>('project-setup-workspace'),
 		indexSymbolsButton: requiredById<HTMLButtonElement>('btn-index-symbols'),
 		symbolDirectoryInput: requiredById<HTMLInputElement>('symbol-directory-input'),
 		editPropertiesEl: requiredById<HTMLElement>('edit-properties'),

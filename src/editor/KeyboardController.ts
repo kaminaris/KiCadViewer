@@ -40,6 +40,8 @@ export interface KeyboardControllerCallbacks {
 	setBoardTool(tool: BoardTool): void;
 	finishBoardRoute(): boolean;
 	cancelBoardRoute(): boolean;
+	finishBoardDrawing(): boolean;
+	cancelBoardDrawing(): boolean;
 	placeBoardViaAtPointer(): boolean;
 	getActiveBoardLayer(): string;
 	setActiveBoardLayer(layer: string): void;
@@ -270,6 +272,10 @@ export class KeyboardController {
 				e.preventDefault();
 				return;
 			}
+			if (this.cb.cancelBoardDrawing()) {
+				e.preventDefault();
+				return;
+			}
 			if (this.cb.getBoardTool() !== 'select') {
 				e.preventDefault();
 				this.cb.setBoardTool('select');
@@ -282,9 +288,25 @@ export class KeyboardController {
 			e.preventDefault();
 			return;
 		}
+		if (e.key === 'Enter' && this.cb.finishBoardDrawing()) {
+			e.preventDefault();
+			return;
+		}
+		// Pcbnew's default action hotkey for Place Text.
+		if (e.key.toLowerCase() === 't' && e.ctrlKey && e.shiftKey && !e.metaKey && !e.altKey) {
+			e.preventDefault();
+			this.cb.setBoardTool('text');
+			return;
+		}
 		if (e.key.toLowerCase() === 'x' && !e.ctrlKey && !e.metaKey && !e.altKey) {
 			e.preventDefault();
 			this.cb.setBoardTool('route');
+			return;
+		}
+		const graphicTool = ({ l: 'line', a: 'arc', c: 'circle', b: 'bezier' } as const)[e.key.toLowerCase()];
+		if (graphicTool && !e.ctrlKey && !e.metaKey && !e.altKey) {
+			e.preventDefault();
+			this.cb.setBoardTool(graphicTool);
 			return;
 		}
 		if (e.key.toLowerCase() === 'v' && !e.ctrlKey && !e.metaKey && !e.altKey) {

@@ -23,6 +23,7 @@ import { BoardPointerController }                                       from '..
 import { BoardToolbar }                                                 from '../editor/BoardToolbar';
 import { BoardToggleToolbar }                                           from '../editor/BoardToggleToolbar';
 import { ContextMenuController }                                         from '../editor/ContextMenuController';
+import { runZoneFillJobs }                                               from '../worker/zoneFillClient';
 import type { MainDomRefs }                                              from './domRefs';
 import { runMainBootstrap }                                              from './bootstrap';
 import type { SessionController }                                        from './SessionController';
@@ -107,6 +108,8 @@ export interface WireMainAppInteractionsOptions {
 	getBoardAppearanceVisible(): boolean;
 
 	setBoardAppearanceVisible(visible: boolean): void;
+
+	getBoardRoutingSizes(): { trackWidth: number; viaSize: number; viaDrill: number };
 
 	ensurePlacement(ref: string): any | null;
 
@@ -399,9 +402,12 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		},
 		getActiveLayer: () => options.doc.activeBoardLayer,
 		setStatus: options.setStatus,
-		refreshAppearance: options.updateEditSidebar
-		,showPropertiesModal: id => options.propertiesController.showPropertiesModal(id)
-		,getHighlightNetEnabled: options.getHighlightNetEnabled
+		refreshAppearance: options.updateEditSidebar,
+		showPropertiesModal: id => options.propertiesController.showPropertiesModal(id),
+		showTextInput: (anchor, event) => options.textInputFlow.showText(anchor, event, TEXT_INPUT_PLACEHOLDERS),
+		showTextBoxInput: (first, second, event) => options.textInputFlow.showTextBox(first, second, event),
+		getHighlightNetEnabled: options.getHighlightNetEnabled,
+		getRoutingSizes: options.getBoardRoutingSizes
 	});
 	boardToolbar = new BoardToolbar({
 		getActiveTool: () => options.doc.boardTool,
@@ -476,6 +482,8 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		,setBoardTool: tool => boardPointerController.setTool(tool)
 		,finishBoardRoute: () => boardPointerController.finishRoute()
 		,cancelBoardRoute: () => boardPointerController.cancelRoute()
+		,finishBoardDrawing: () => boardPointerController.finishDrawing()
+		,cancelBoardDrawing: () => boardPointerController.cancelDrawing()
 		,placeBoardViaAtPointer: () => boardPointerController.placeViaAtLastPointer()
 		,getActiveBoardLayer: () => options.doc.activeBoardLayer
 		,setActiveBoardLayer: layer => {
@@ -541,6 +549,72 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 	options.dom.stage.addEventListener('dragover', e => e.preventDefault());
 	window.addEventListener('paste', event => { options.fileActions.handleWindowPaste(event); });
 	options.dom.stage.addEventListener('drop', e => { options.fileActions.handleStageDrop(e); });
+
+	// Edit menu's Fill/Unfill All Zones — a one-shot board action, not a
+	// tool-activation, so it rides the same 'kionline:board-command' channel
+	// BoardPointerController listens on (for drawing tools) as a second,
+	// independent listener rather than overloading that if/else chain.
+	window.addEventListener('kionline:board-command', event => {
+		const command = (event as CustomEvent<string>).detail;
+		if (command !== 'fill-all-zones' && command !== 'unfill-all-zones') {
+			return;
+		}
+		const session = options.getSession();
+		if (!session) {
+			return;
+		}
+
+		if (command === 'unfill-all-zones') {
+			// Cheap (just clearing an AST field) — no worker needed.
+			const count = session.clearAllZoneFills();
+			if (count > 0) {
+				options.refreshBoardText(session);
+				options.updateUndoStackPane();
+				options.updateEditSidebar();
+				options.setStatus(`Cleared fill on ${ count } zone(s).`);
+			}
+			return;
+		}
+
+		// Fill All Zones runs real Clipper2 boolean ops off the main thread
+		// (see zoneFillClient.ts) — real KiCad shows a modeless progress
+		// dialog for the same reason (this can take a few seconds on a
+		// board with several zones), mirrored here with a small modal.
+		const progressModal = document.getElementById('zone-fill-progress-modal');
+		const progressFill = document.getElementById('zone-fill-progress-fill');
+		const progressLabel = document.getElementById('zone-fill-progress-label');
+		progressModal?.classList.remove('hidden');
+		if (progressFill) progressFill.style.width = '0%';
+		if (progressLabel) progressLabel.textContent = 'Starting…';
+
+		// Real design-rule values from the board's own .kicad_pro, not a
+		// guessed constant — see ZoneFillDesignSettings' doc comment. A
+		// board opened without a project (single-file mode) has no
+		// projectFile, so this falls through to fillAllZones' own
+		// real-KiCad-stock-default fallback.
+		const projectFile = options.doc.projectContext?.project.projectFile;
+		const designSettings = projectFile ? {
+			minClearanceMm: projectFile.getMinClearanceMm(),
+			copperEdgeClearanceMm: projectFile.getCopperEdgeClearanceMm(),
+			defaultNetClassClearanceMm: projectFile.getDefaultNetClassClearanceMm(),
+		} : undefined;
+
+		session.fillAllZones(runZoneFillJobs, (done, total) => {
+			if (progressFill) progressFill.style.width = `${ total > 0 ? (done / total) * 100 : 100 }%`;
+			if (progressLabel) progressLabel.textContent = `${ done } / ${ total }`;
+		}, designSettings).then(count => {
+			progressModal?.classList.add('hidden');
+			if (count > 0) {
+				options.refreshBoardText(session);
+				options.updateUndoStackPane();
+				options.updateEditSidebar();
+				options.setStatus(`Filled ${ count } zone(s).`);
+			}
+		}).catch((err: unknown) => {
+			progressModal?.classList.add('hidden');
+			options.setStatus(`Zone fill failed: ${ err instanceof Error ? err.message : String(err) }`);
+		});
+	});
 
 	runMainBootstrap({
 		dom: options.dom,

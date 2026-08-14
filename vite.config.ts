@@ -42,9 +42,10 @@ export default defineConfig(({ command }) => ({
 			'@kicad-io': path.join(shared, 'kicad-io/src'),
 			'@kicad-render': path.join(shared, 'kicad-render'),
 			'@kicad-layout': path.join(shared, 'kicad-layout'),
+			'@clipper2-ts': path.join(shared, 'clipper2-ts/src'),
 		},
 	},
 	optimizeDeps: {
-		exclude: ['@kicad-io', '@kicad-render', '@kicad-layout'],
+		exclude: ['@kicad-io', '@kicad-render', '@kicad-layout', '@clipper2-ts'],
 	},
 }));

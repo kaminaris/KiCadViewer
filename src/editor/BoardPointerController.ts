@@ -31,7 +31,10 @@ export interface BoardPointerControllerDeps {
 	setStatus(message: string): void;
 	refreshAppearance(): void;
 	showPropertiesModal(id: string): void;
+	showTextInput(anchor: Vec2, event: MouseEvent): void;
+	showTextBoxInput(first: Vec2, second: Vec2, event: MouseEvent): void;
 	getHighlightNetEnabled(): boolean;
+	getRoutingSizes(): { trackWidth: number; viaSize: number; viaDrill: number };
 }
 
 /**
@@ -78,9 +81,7 @@ export class BoardPointerController {
 		undoCaptured: boolean;
 		moved: boolean;
 	} | null = null;
-	protected static readonly trackWidth = 0.25;
-	protected static readonly viaSize = 0.6;
-	protected static readonly viaDrill = 0.3;
+	protected static readonly graphicStrokeWidth = 0.1;
 
 	constructor(protected readonly deps: BoardPointerControllerDeps) {
 		for (const el of [deps.canvas, deps.canvasGl]) {
@@ -94,6 +95,14 @@ export class BoardPointerController {
 			const command = (event as CustomEvent<string>).detail;
 			if (command === 'route-track') this.setTool('route');
 			else if (command === 'place-via') this.setTool('via');
+			else if (command === 'draw-line') this.setTool('line');
+			else if (command === 'draw-arc') this.setTool('arc');
+			else if (command === 'draw-rectangle') this.setTool('rect');
+			else if (command === 'draw-circle') this.setTool('circle');
+			else if (command === 'draw-polygon') this.setTool('polygon');
+			else if (command === 'draw-bezier') this.setTool('bezier');
+			else if (command === 'place-text') this.setTool('text');
+			else if (command === 'draw-text-box') this.setTool('text-box');
 			else if (command === 'set-grid-origin') this.setTool('grid-origin');
 			else if (command === 'set-drill-origin') this.setTool('drill-origin');
 			else if (command === 'reset-grid-origin') this.resetOrigin('grid');
@@ -102,13 +111,27 @@ export class BoardPointerController {
 	}
 
 	setTool(tool: BoardTool): void {
+		if (tool !== this.deps.getTool() && (this.isGraphicTool(this.deps.getTool()) || this.deps.getTool() === 'text-box')) {
+			this.cancelDrawing();
+		}
 		if (tool !== 'route') {
 			this.cancelRoute();
+		}
+		if (!this.isGraphicTool(tool) && tool !== 'text-box') {
+			this.cancelDrawing();
 		}
 		this.deps.setTool(tool);
 		this.deps.setStatus(tool === 'route'
 			? `Route tracks on ${ this.deps.getActiveLayer() } — click to start and add corners; Enter/double-click finishes.`
 			: tool === 'via' ? 'Place vias — click copper to inherit its net.'
+				: tool === 'line' ? `Draw Line on ${ this.deps.getActiveLayer() } — click start and end.`
+					: tool === 'arc' ? `Draw Arc on ${ this.deps.getActiveLayer() } — click start, end, then the arc mid-point.`
+						: tool === 'rect' ? `Draw Rectangle on ${ this.deps.getActiveLayer() } — click opposite corners.`
+							: tool === 'circle' ? `Draw Circle on ${ this.deps.getActiveLayer() } — click center then radius.`
+								: tool === 'polygon' ? `Draw Polygon on ${ this.deps.getActiveLayer() } — click vertices; click the first point or press Enter to finish.`
+									: tool === 'bezier' ? `Draw Bezier on ${ this.deps.getActiveLayer() } — click start, two control points, then end.`
+										: tool === 'text' ? `Place Text on ${ this.deps.getActiveLayer() } — click to enter text.`
+											: tool === 'text-box' ? `Draw Text Box on ${ this.deps.getActiveLayer() } — click opposite corners, then enter text.`
 				: tool === 'grid-origin' ? 'Set Grid Origin — click a grid point.'
 					: tool === 'drill-origin' ? 'Set Drill/Place File Origin — click a grid point.' : 'PCB select tool active.');
 	}
@@ -130,6 +153,31 @@ export class BoardPointerController {
 		this.pending.clear();
 		this.deps.getSession()?.setEditPreview(null);
 		this.deps.setStatus('Route cancelled.');
+		return true;
+	}
+
+	finishDrawing(): boolean {
+		const session = this.deps.getSession();
+		const pending = this.pending.current;
+		if (!session || pending.kind !== 'polygon' || pending.points.length < 3) {
+			return false;
+		}
+		this.commitGraphic(session, session.addBoardGraphicPolygon(
+			pending.points, this.deps.getActiveLayer(), BoardPointerController.graphicStrokeWidth));
+		this.pending.clear();
+		session.setEditPreview(null);
+		this.deps.setStatus('Polygon finished.');
+		return true;
+	}
+
+	cancelDrawing(): boolean {
+		const pending = this.pending.current;
+		if (!this.isGraphicPending(pending)) {
+			return false;
+		}
+		this.pending.clear();
+		this.deps.getSession()?.setEditPreview(null);
+		this.deps.setStatus('Drawing cancelled.');
 		return true;
 	}
 
@@ -231,6 +279,21 @@ export class BoardPointerController {
 		this.pointerDownOnCanvas = true;
 		const screenPos = this.deps.screenPosFromEvent(e);
 		this.lastPointerScreen = screenPos;
+		// Pcbnew completes a graphic polygon with a right click.  This needs to
+		// precede board navigation, which otherwise treats every right click as
+		// the start of a pan gesture.
+		if (this.deps.getMode() === 'edit' && this.deps.getTool() === 'polygon' && e.button === 2
+			&& this.pending.current.kind === 'polygon') {
+			if (this.finishDrawing()) {
+				this.suppressNextContextMenu = true;
+				e.preventDefault();
+				return;
+			}
+			this.deps.setStatus('A polygon needs at least three vertices before it can be finished.');
+			this.suppressNextContextMenu = true;
+			e.preventDefault();
+			return;
+		}
 		// Navigation deliberately comes before the active PCB tool. This keeps
 		// the camera available while routing or placing vias, just like KiCad.
 		if (e.button === 1 || e.button === 2) {
@@ -263,6 +326,21 @@ export class BoardPointerController {
 		}
 		if (this.deps.getTool() === 'via') {
 			this.placeVia(session, screenPos);
+			e.preventDefault();
+			return;
+		}
+		if (this.deps.getTool() === 'text') {
+			this.deps.showTextInput(this.snappedWorld(session, screenPos), e);
+			e.preventDefault();
+			return;
+		}
+		if (this.deps.getTool() === 'text-box') {
+			this.textBoxClick(session, screenPos, e);
+			e.preventDefault();
+			return;
+		}
+		if (this.isGraphicTool(this.deps.getTool())) {
+			this.graphicClick(session, screenPos, e.detail >= 2);
 			e.preventDefault();
 			return;
 		}
@@ -341,6 +419,12 @@ export class BoardPointerController {
 		}
 		if (session.documentTypeLoaded === 'board' && this.deps.getTool() === 'route') {
 			this.updateRoutePreview(session, screenPos);
+		}
+		if (session.documentTypeLoaded === 'board' && this.isGraphicTool(this.deps.getTool())) {
+			this.updateGraphicPreview(session, screenPos);
+		}
+		if (session.documentTypeLoaded === 'board' && this.deps.getTool() === 'text-box') {
+			this.updateTextBoxPreview(session, screenPos);
 		}
 		if (!this.pointerDownOnCanvas || this.gesture.kind === 'none') {
 			return;
@@ -556,6 +640,155 @@ export class BoardPointerController {
 		return 'replace';
 	}
 
+	protected isGraphicTool(tool: BoardTool): tool is 'line' | 'arc' | 'rect' | 'circle' | 'polygon' | 'bezier' {
+		return tool === 'line' || tool === 'arc' || tool === 'rect' || tool === 'circle' || tool === 'polygon' || tool === 'bezier';
+	}
+
+	protected isGraphicPending(pending: PendingShape): boolean {
+		return pending.kind === 'anchor' || pending.kind === 'arc' || pending.kind === 'polygon' || pending.kind === 'bezier';
+	}
+
+	protected graphicClick(session: KicadRenderSession, screenPos: Vec2, doubleClick: boolean): void {
+		const point = this.snappedWorld(session, screenPos);
+		const samePoint = (a: Vec2, b: Vec2) => a.x === b.x && a.y === b.y;
+		switch (this.deps.getTool()) {
+			case 'line':
+			case 'rect':
+			case 'circle': {
+				const pending = this.pending.current;
+				const anchor = pending.kind === 'anchor' ? pending.start : null;
+				if (!anchor) {
+					this.pending.set({ kind: 'anchor', start: point });
+					return;
+				}
+				if (samePoint(anchor, point)) {
+					this.pending.clear();
+					session.setEditPreview(null);
+					return;
+				}
+				const layer = this.deps.getActiveLayer();
+				const id = this.deps.getTool() === 'line'
+					? session.addBoardGraphicLine(anchor.x, anchor.y, point.x, point.y, layer, BoardPointerController.graphicStrokeWidth)
+					: this.deps.getTool() === 'rect'
+						? session.addBoardGraphicRect(anchor.x, anchor.y, point.x, point.y, layer, BoardPointerController.graphicStrokeWidth)
+						: session.addBoardGraphicCircle(anchor.x, anchor.y, Math.hypot(point.x - anchor.x, point.y - anchor.y), layer, BoardPointerController.graphicStrokeWidth);
+				this.commitGraphic(session, id);
+				this.pending.clear();
+				session.setEditPreview(null);
+				return;
+			}
+			case 'arc': {
+				const pending = this.pending.current;
+				const points = pending.kind === 'arc' ? pending.points : [];
+				if (points.length === 0) this.pending.set({ kind: 'arc', points: [point] });
+				else if (points.length === 1) {
+					if (samePoint(points[0]!, point)) {
+						this.pending.clear();
+						session.setEditPreview(null);
+					}
+					else this.pending.set({ kind: 'arc', points: [points[0]!, point] });
+				}
+				else {
+					this.commitGraphic(session, session.addBoardGraphicArc(
+						points[0]!.x, points[0]!.y, point.x, point.y, points[1]!.x, points[1]!.y,
+						this.deps.getActiveLayer(), BoardPointerController.graphicStrokeWidth));
+					this.pending.clear();
+					session.setEditPreview(null);
+				}
+				return;
+			}
+			case 'bezier': {
+				const pending = this.pending.current;
+				const points = pending.kind === 'bezier' ? pending.points : [];
+				if (points.length > 0 && samePoint(points[points.length - 1]!, point)) {
+					this.pending.clear();
+					session.setEditPreview(null);
+					return;
+				}
+				const next = [...points, point];
+				if (next.length === 4) {
+					this.commitGraphic(session, session.addBoardGraphicBezier(next, this.deps.getActiveLayer(), BoardPointerController.graphicStrokeWidth));
+					this.pending.clear();
+					session.setEditPreview(null);
+				}
+				else this.pending.set({ kind: 'bezier', points: next });
+				return;
+			}
+			case 'polygon': {
+				const pending = this.pending.current;
+				const points = pending.kind === 'polygon' ? pending.points : [];
+				if (points.length >= 3 && (samePoint(points[0]!, point) || doubleClick)) {
+					this.commitGraphic(session, session.addBoardGraphicPolygon(points, this.deps.getActiveLayer(), BoardPointerController.graphicStrokeWidth));
+					this.pending.clear();
+					session.setEditPreview(null);
+				}
+				else if (!points.length || !samePoint(points[points.length - 1]!, point)) {
+					this.pending.set({ kind: 'polygon', points: [...points, point] });
+				}
+				return;
+			}
+		}
+	}
+
+	protected updateGraphicPreview(session: KicadRenderSession, screenPos: Vec2): void {
+		const cursor = this.snappedWorld(session, screenPos);
+		const pending = this.pending.current;
+		const tool = this.deps.getTool();
+		switch (tool) {
+			case 'line': case 'rect': case 'circle':
+				session.setEditPreview({ kind: tool, anchor: pending.kind === 'anchor' ? pending.start : null, cursor });
+				break;
+			case 'arc': session.setEditPreview({ kind: 'arc', points: pending.kind === 'arc' ? pending.points : [], cursor }); break;
+			case 'bezier': session.setEditPreview({ kind: 'bezier', points: pending.kind === 'bezier' ? pending.points : [], cursor }); break;
+			case 'polygon': session.setEditPreview({ kind: 'rule-area', points: pending.kind === 'polygon' ? pending.points : [], cursor }); break;
+		}
+	}
+
+	/** Pcbnew uses the rectangle-placement gesture for text boxes, then opens
+	 *  the text properties dialog. The floating text editor is this app's
+	 *  equivalent while retaining the same corner-to-corner interaction. */
+	protected textBoxClick(session: KicadRenderSession, screenPos: Vec2, event: MouseEvent): void {
+		const point = this.snappedWorld(session, screenPos);
+		const pending = this.pending.current;
+		const anchor = pending.kind === 'anchor' ? pending.start : null;
+		if (!anchor) {
+			this.pending.set({ kind: 'anchor', start: point });
+			return;
+		}
+		if (anchor.x === point.x || anchor.y === point.y) {
+			this.pending.clear();
+			session.setEditPreview(null);
+			this.deps.setStatus('A text box needs two distinct corners.');
+			return;
+		}
+		this.pending.clear();
+		session.setEditPreview(null);
+		this.deps.showTextBoxInput(anchor, point, event);
+	}
+
+	protected updateTextBoxPreview(session: KicadRenderSession, screenPos: Vec2): void {
+		const pending = this.pending.current;
+		if (pending.kind !== 'anchor') {
+			return;
+		}
+		const cursor = this.snappedWorld(session, screenPos);
+		session.setEditPreview({
+			kind: 'text-box',
+			x: Math.min(pending.start.x, cursor.x),
+			y: Math.min(pending.start.y, cursor.y),
+			width: Math.abs(cursor.x - pending.start.x),
+			height: Math.abs(cursor.y - pending.start.y),
+			text: ''
+		});
+	}
+
+	protected commitGraphic(session: KicadRenderSession, id: string | null): void {
+		if (!id) return;
+		session.select(id);
+		this.deps.refreshBoardText(session);
+		this.deps.refreshAppearance();
+	}
+
 	protected routeClick(session: KicadRenderSession, screenPos: Vec2, finish: boolean): void {
 		const point = this.snappedWorld(session, screenPos);
 		const pending = this.pending.current;
@@ -596,7 +829,7 @@ export class BoardPointerController {
 			kind: 'route',
 			points: path.slice(0, -1),
 			cursor: path[path.length - 1]!,
-			width: BoardPointerController.trackWidth
+			width: this.deps.getRoutingSizes().trackWidth
 		});
 	}
 
@@ -620,8 +853,9 @@ export class BoardPointerController {
 		const routedToVia = pending.kind === 'route' && continueRoute
 			? this.commitRouteTo(session, pending, point)
 			: 0;
+		const sizes = this.deps.getRoutingSizes();
 		const id = session.addVia(
-			point.x, point.y, BoardPointerController.viaSize, BoardPointerController.viaDrill,
+			point.x, point.y, sizes.viaSize, sizes.viaDrill,
 			['F.Cu', 'B.Cu'], netId, routedToVia === 0);
 		if (!id) {
 			return false;
@@ -647,7 +881,7 @@ export class BoardPointerController {
 			if (session.addTrackSegment(
 				path[index - 1]!.x, path[index - 1]!.y,
 				path[index]!.x, path[index]!.y,
-				BoardPointerController.trackWidth, this.deps.getActiveLayer(), pending.netId,
+				this.deps.getRoutingSizes().trackWidth, this.deps.getActiveLayer(), pending.netId,
 				added === 0)) {
 				added++;
 			}

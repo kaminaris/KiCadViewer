@@ -4,11 +4,18 @@ import type {
 import { Vec2 }          from '@kicad-render/math/Vec2';
 import type { AppState } from '../app/AppState';
 import type { EditTool } from './Toolbar';
+import type { BoardTool } from './BoardToolbar';
+
+type TextEntryTool = EditTool | BoardTool;
 
 export interface TextInputFlowCallbacks {
 	getSession(): KicadRenderSession | null;
 
 	getTool(): EditTool;
+
+	getBoardTool?(): BoardTool;
+
+	getActiveBoardLayer?(): string;
 
 	getHitElement(id: string): any;
 
@@ -78,13 +85,13 @@ export class TextInputFlow {
 		this.editingLabelId = null;
 	}
 
-	showText(anchor: Vec2, event: MouseEvent, placeholders: Partial<Record<EditTool, string>>): void {
+	showText(anchor: Vec2, event: MouseEvent, placeholders: Partial<Record<TextEntryTool, string>>): void {
 		const rect = this.stage.getBoundingClientRect();
 		this.textAnchor = anchor;
 		this.input.style.left = `${ event.clientX - rect.left }px`;
 		this.input.style.top = `${ event.clientY - rect.top }px`;
 		this.input.value = '';
-		this.input.placeholder = placeholders[this.cb.getTool()] ?? '';
+		this.input.placeholder = placeholders[this.activeTool()] ?? '';
 		this.input.classList.remove('hidden');
 		this.input.focus();
 		this.cb.getSession()?.setEditPreview(this.preview(anchor, ''));
@@ -155,7 +162,7 @@ export class TextInputFlow {
 	}
 
 	protected preview(anchor: Vec2, text: string): EditPreviewState | null {
-		const tool = this.cb.getTool();
+		const tool = this.activeTool();
 		switch (tool) {
 			case 'text':
 				return { kind: 'text', anchor, text };
@@ -212,7 +219,16 @@ export class TextInputFlow {
 			this.hideText();
 			return;
 		}
-		const tool = this.cb.getTool();
+		const tool = this.activeTool();
+		if (session.documentTypeLoaded === 'board') {
+			if (tool === 'text') {
+				session.addBoardGraphicText(anchor.x, anchor.y, value, this.cb.getActiveBoardLayer?.() ?? 'F.SilkS');
+				this.appState.refreshBoardText(session);
+				this.cb.setStatus(`Added text "${ value }".`);
+			}
+			this.hideText();
+			return;
+		}
 		switch (tool) {
 			case 'text':
 				session.addGraphicText(anchor.x, anchor.y, value);
@@ -246,11 +262,23 @@ export class TextInputFlow {
 	protected commitBox(): void {
 		const session = this.cb.getSession(), b = this.boxBounds, value = this.boxInput.value.trim();
 		if (session && b && value) {
-			session.addGraphicTextBox(b.x, b.y, b.x + b.width, b.y + b.height, value);
-			this.appState.refreshSchematicText(session);
+			if (session.documentTypeLoaded === 'board') {
+				session.addBoardGraphicTextBox(b.x, b.y, b.x + b.width, b.y + b.height, value, this.cb.getActiveBoardLayer?.() ?? 'F.SilkS');
+				this.appState.refreshBoardText(session);
+			}
+			else {
+				session.addGraphicTextBox(b.x, b.y, b.x + b.width, b.y + b.height, value);
+				this.appState.refreshSchematicText(session);
+			}
 			this.cb.setStatus('Added text box.');
 		}
 		this.hideText();
+	}
+
+	protected activeTool(): TextEntryTool {
+		return this.cb.getSession()?.documentTypeLoaded === 'board'
+			? (this.cb.getBoardTool?.() ?? 'select')
+			: this.cb.getTool();
 	}
 
 	protected cancelTable(): void {

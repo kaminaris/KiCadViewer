@@ -26,7 +26,7 @@
 					<button type="button" class="menu-command" data-action-target="btn-save-project">Save Project<span>Ctrl+S</span></button>
 					<button type="button" class="menu-command" data-action-target="btn-export-edit">Export Current Document…</button>
 					<div class="menu-divider menu-board"></div>
-					<button type="button" class="menu-command menu-board" disabled>Board Setup…</button>
+					<button type="button" class="menu-command menu-board" data-action-target="view-tab-project-settings">Board Setup…</button>
 				</div></div>
 				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Edit</button><div class="menu-popover">
 					<button type="button" class="menu-command" data-action-target="btn-undo">Undo<span>Ctrl+Z</span></button>
@@ -36,13 +36,30 @@
 					<button type="button" class="menu-command" data-shortcut="copy">Copy<span>Ctrl+C</span></button>
 					<button type="button" class="menu-command" data-shortcut="paste">Paste<span>Ctrl+V</span></button>
 					<button type="button" class="menu-command" data-shortcut="duplicate">Duplicate<span>Ctrl+D</span></button>
+					<button type="button" class="menu-command menu-board" disabled>Paste Special…<span>Ctrl+Shift+V</span></button>
+					<button type="button" class="menu-command menu-board" disabled>Delete</button>
+					<div class="menu-divider menu-board"></div>
+					<button type="button" class="menu-command menu-board" disabled>Select</button>
+					<button type="button" class="menu-command menu-board" disabled>Find<span>Ctrl+F</span></button>
 					<div class="menu-divider menu-board"></div>
 					<button type="button" class="menu-command menu-board" disabled>Edit Track &amp; Via Properties…</button>
-					<button type="button" class="menu-command menu-board" disabled>Fill All Zones</button>
+					<button type="button" class="menu-command menu-board" disabled>Edit Text &amp; Graphics Properties…</button>
+					<button type="button" class="menu-command menu-board" disabled>Edit Teardrops…</button>
+					<button type="button" class="menu-command menu-board" disabled>Change Footprints…</button>
+					<button type="button" class="menu-command menu-board" disabled>Swap Layers…</button>
+					<button type="button" class="menu-command menu-board" disabled>Grid Origin…</button>
+					<div class="menu-divider menu-board"></div>
+					<button type="button" class="menu-command menu-board" data-board-command="fill-all-zones">Fill All Zones<span>B</span></button>
+					<button type="button" class="menu-command menu-board" data-board-command="unfill-all-zones">Unfill All Zones<span>Ctrl+B</span></button>
+					<button type="button" class="menu-command menu-board" disabled>Update All Tuning Patterns</button>
+					<div class="menu-divider menu-board"></div>
+					<button type="button" class="menu-command menu-board" disabled>Interactive Delete Tool</button>
+					<button type="button" class="menu-command menu-board" disabled>Global Deletions…</button>
 				</div></div>
 				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">View</button><div class="menu-popover">
 					<button type="button" class="menu-command" data-action-target="view-tab-schematic">Schematic Editor</button>
 					<button type="button" class="menu-command" data-action-target="view-tab-board">PCB Editor</button>
+					<button type="button" class="menu-command" data-action-target="view-tab-project-settings">Project Setup</button>
 					<div class="menu-divider"></div>
 					<button type="button" class="menu-command" data-shortcut="zoom-fit">Zoom to Fit<span>Home</span></button>
 					<div class="menu-divider menu-board"></div>
@@ -87,11 +104,14 @@
 					<button type="button" class="menu-command menu-board" disabled>Add Filled Zone</button>
 					<button type="button" class="menu-command menu-board" disabled>Add Rule Area</button>
 					<div class="menu-divider menu-board"></div>
-					<button type="button" class="menu-command menu-board" disabled>Draw Line</button>
-					<button type="button" class="menu-command menu-board" disabled>Draw Arc</button>
-					<button type="button" class="menu-command menu-board" disabled>Draw Rectangle</button>
-					<button type="button" class="menu-command menu-board" disabled>Draw Circle</button>
-					<button type="button" class="menu-command menu-board" disabled>Place Text</button>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-line">Draw Line<span>L</span></button>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-arc">Draw Arc<span>A</span></button>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-rectangle">Draw Rectangle</button>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-circle">Draw Circle<span>C</span></button>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-polygon">Draw Polygon</button>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-bezier">Draw Bezier<span>B</span></button>
+					<button type="button" class="menu-command menu-board" data-board-command="place-text">Place Text<span>Ctrl+Shift+T</span></button>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-text-box">Draw Text Box</button>
 					<div class="menu-divider menu-board"></div>
 					<div class="menu-divider menu-board"></div>
 					<button type="button" class="menu-command menu-board" data-board-command="set-drill-origin">Drill/Place File Origin</button>
@@ -136,6 +156,7 @@
 			<nav class="view-tabs hidden" id="view-tabs">
 				<button type="button" class="view-tab" id="view-tab-schematic" data-view="schematic">Schematic</button>
 				<button type="button" class="view-tab" id="view-tab-board" data-view="board">PCB</button>
+				<button type="button" class="view-tab" id="view-tab-project-settings" data-view="project-settings">Project Setup</button>
 			</nav>
 		</div>
 		<div class="command-toolbar" role="toolbar" aria-label="Main toolbar">
@@ -150,6 +171,7 @@
 			<nav class="toolbar-section toolbar-view-switcher" aria-label="Editor views">
 				<button type="button" class="toolbar-button" data-action-target="view-tab-schematic" title="Schematic Editor"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="7" width="12" height="10"/><path d="M3 10 H6 M3 14 H6 M18 10 H21 M18 14 H21 M10 7 V4 M14 7 V4 M10 17 V20 M14 17 V20"/></svg></button>
 				<button type="button" class="toolbar-button" data-action-target="view-tab-board" title="PCB Editor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5 H19 V19 H5 Z M8 8 H12 V12 H8 Z M14 12 H17 V16 H14 Z"/><path d="M12 10 H16 M10 12 V16"/></svg></button>
+				<button type="button" class="toolbar-button" data-action-target="view-tab-project-settings" title="Project Setup"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5 H19 V19 H5 Z M8 9 H16 M8 13 H16 M8 17 H13"/><circle cx="17" cy="17" r="2.5"/></svg></button>
 			</nav>
 			<div class="toolbar-divider" aria-hidden="true"></div>
 			<div class="toolbar-section hidden" id="edit-actions">
@@ -303,6 +325,11 @@
 					<div id="properties-modal-body"></div>
 					<div class="table-modal-actions"><button type="button" id="properties-modal-close">Close</button></div>
 				</div>
+				<div class="table-modal zone-fill-progress-modal hidden" id="zone-fill-progress-modal">
+					<h3>Filling Zones…</h3>
+					<div class="zone-fill-progress-track"><div class="zone-fill-progress-fill" id="zone-fill-progress-fill"></div></div>
+					<div class="zone-fill-progress-label" id="zone-fill-progress-label">Starting…</div>
+				</div>
 			<div class="symbol-chooser hidden" id="symbol-chooser-modal" role="dialog" aria-modal="true" aria-labelledby="symbol-chooser-title">
 				<div class="symbol-chooser-header">
 					<h3 id="symbol-chooser-title">Choose Symbol</h3>
@@ -422,8 +449,35 @@
 			<button type="button" class="tool-btn" disabled title="Add Rule Area — coming after board editing">
 				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" stroke-dasharray="3 2"/></svg>
 			</button>
+			<div class="tool-sep"></div>
+			<button type="button" class="tool-btn" data-tool="line" title="Draw Line (L)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 18 L19 6"/><circle cx="5" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="6" r="1.4" fill="currentColor" stroke="none"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="arc" title="Draw Arc (A)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 17 A9 9 0 0 1 19 17"/><circle cx="5" cy="17" r="1.2" fill="currentColor" stroke="none"/><circle cx="19" cy="17" r="1.2" fill="currentColor" stroke="none"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="rect" title="Draw Rectangle">
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="5" y="6" width="14" height="12"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="circle" title="Draw Circle (C)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="polygon" title="Draw Polygon">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 17 L8 6 L17 5 L20 14 L13 19 Z"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="bezier" title="Draw Bezier (B)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 17 C8 4 15 20 20 7"/><circle cx="4" cy="17" r="1.2" fill="currentColor" stroke="none"/><circle cx="20" cy="7" r="1.2" fill="currentColor" stroke="none"/></svg>
+			</button>
+			<div class="tool-sep"></div>
+			<button type="button" class="tool-btn" data-tool="text" title="Place Text (Ctrl+Shift+T)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 5 H19 M12 5 V19 M8 19 H16"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="text-box" title="Draw Text Box">
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="4.5" y="5" width="15" height="14"/><path d="M8 9 H16 M12 9 V15 M9.5 15 H14.5"/></svg>
+			</button>
 		</aside>
 		<aside class="board-appearance hidden" id="board-appearance" aria-label="PCB appearance"></aside>
+		<section class="project-setup-workspace hidden" id="project-setup-workspace" aria-label="Project Setup"></section>
 	</main>
 	<footer class="status-bar">
 		<span id="status" class="status-message">Ready</span>

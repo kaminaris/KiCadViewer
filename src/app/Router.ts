@@ -1,5 +1,7 @@
 import type { DocumentKind } from './ActiveDocument';
 
+export type EditorView = DocumentKind | 'project-settings';
+
 export interface RouteHome {
 	screen: 'home';
 }
@@ -16,7 +18,7 @@ export interface RouteEditor {
 	 *  entry point), reached from Home's "Open a single file" action so it
 	 *  stays usable without inventing a registry entry for it. */
 	projectId: string | null;
-	view: DocumentKind;
+	view: EditorView;
 	sheet: string | null;
 }
 
@@ -32,7 +34,7 @@ function parseRoute(search: string): Route {
 		}
 		return { screen: 'home' };
 	}
-	if (view !== 'schematic' && view !== 'board') {
+	if (view !== 'schematic' && view !== 'board' && view !== 'project-settings') {
 		return { screen: 'project', projectId };
 	}
 	return { screen: 'editor', projectId, view, sheet: params.get('sheet') };

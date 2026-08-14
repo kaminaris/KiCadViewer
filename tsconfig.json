@@ -26,6 +26,10 @@
 			"@kicad-layout/*": [
 				"../../shared/kicad-layout/*",
 				"shared/kicad-layout/*"
+			],
+			"@clipper2-ts/*": [
+				"../../shared/clipper2-ts/src/*",
+				"shared/clipper2-ts/src/*"
 			]
 		}
 	},
@@ -34,8 +38,10 @@
 		"../../shared/kicad-layout/**/*.ts",
 		"../../shared/kicad-render/**/*.ts",
 		"../../shared/kicad-io/src/**/*.ts",
+		"../../shared/clipper2-ts/src/**/*.ts",
 		"shared/kicad-layout/**/*.ts",
 		"shared/kicad-render/**/*.ts",
-		"shared/kicad-io/src/**/*.ts"
+		"shared/kicad-io/src/**/*.ts",
+		"shared/clipper2-ts/src/**/*.ts"
 	]
 }

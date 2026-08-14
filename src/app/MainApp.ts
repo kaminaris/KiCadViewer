@@ -18,7 +18,7 @@ import { AppState }                                                         from
 import { SessionController }                                                from './SessionController';
 import { ActiveDocument }                                                   from './ActiveDocument';
 import { ProjectRegistry }                                                  from './ProjectRegistry';
-import { Router, type Route }                                               from './Router';
+import { Router, type EditorView, type Route }                              from './Router';
 import { HomeScreen }                                                       from '../ui/HomeScreen';
 import { ProjectOverviewScreen }                                            from '../ui/ProjectOverviewScreen';
 import { PreferencesDialog }                                                 from '../ui/PreferencesDialog';
@@ -51,6 +51,7 @@ import { SymbolLibraryIndexer }                                             from
 import { wireMainAppInteractions }                                          from './wireMainAppInteractions';
 import { MenuBar, wireToolbarCommandForwarding }                             from './MenuBar';
 import { applySchematicTheme }                                                from './SchematicThemes';
+import { ProjectSetupController }                                           from '../project-setup/ProjectSetupController';
 
 type EditTool = ToolbarEditTool;
 
@@ -84,6 +85,7 @@ wireToolbarCommandForwarding();
  *  list). Constructed this early because, unlike the old `workspace`, it
  *  has no dependency on anything defined further down the file. */
 const doc = new ActiveDocument(dom.canvas, dom.canvasGl);
+let activeEditorView: EditorView = doc.kind;
 
 /** One shared instance — SessionController and the Home/Project screens all
  *  read/write the same IndexedDB-backed project list through it. */
@@ -283,6 +285,8 @@ const contextMenu = new ContextMenu(dom.stage);
 const textInputFlow = new TextInputFlow(appState, {
 	getSession: () => doc.session,
 	getTool: () => doc.editTool,
+	getBoardTool: () => doc.boardTool,
+	getActiveBoardLayer: () => doc.activeBoardLayer,
 	getHitElement: id => (doc.session as any)?.schScene?.hitTestItems?.find(
 		(item: any) => item.id === id)?.element,
 	getLabelShape: () => doc.currentLabelShape,
@@ -376,6 +380,27 @@ sessionController = new SessionController(doc, appState, settings, statusBar, do
 	syncActiveGrid
 }, registry);
 
+const projectSetup = new ProjectSetupController(dom.projectSetupWorkspaceEl, {
+	setStatus,
+	onApplied: boardChanged => {
+		// openFromRegistryRoute() treats navigating Project Setup → Board as a
+		// no-op whenever doc.kind is already 'board' (its alreadyAtRoute check
+		// short-circuits on `view === 'board'`), so a board-file-touching Apply
+		// while the board tab was the one open before Project Setup would
+		// otherwise leave the live scene showing the pre-Apply board until a
+		// manual reopen. Reload it here instead; { preserveView: true } keeps
+		// the existing camera/zoom instead of resetting it on every Apply.
+		const board = doc.projectContext?.project.mainBoard;
+		const reload = (boardChanged && doc.kind === 'board' && doc.session && board)
+			? doc.session.loadBoardText(board.data, { preserveView: true })
+			: Promise.resolve();
+		void reload.then(() => {
+			boardAppearance?.refresh();
+			updateBreadcrumb();
+		});
+	}
+});
+
 boardAppearance = new BoardAppearancePanel(dom.boardAppearanceEl, {
 	getSession: () => doc.session,
 	setStatus,
@@ -397,11 +422,14 @@ function updateBreadcrumb(): void {
 	dom.breadcrumbEl.classList.remove('hidden');
 	dom.viewTabsEl.classList.remove('hidden');
 	dom.breadcrumbProjectEl.textContent = projectContext.rootName;
-	dom.breadcrumbSheetEl.textContent = doc.kind === 'board'
+	dom.breadcrumbSheetEl.textContent = activeEditorView === 'project-settings'
+		? 'Project Setup'
+		: doc.kind === 'board'
 		? 'PCB'
 		: (doc.currentSheetNode?.name || projectContext.rootName);
-	dom.viewTabSchematicBtn.classList.toggle('active', doc.kind === 'schematic');
-	dom.viewTabBoardBtn.classList.toggle('active', doc.kind === 'board');
+	dom.viewTabSchematicBtn.classList.toggle('active', activeEditorView === 'schematic');
+	dom.viewTabBoardBtn.classList.toggle('active', activeEditorView === 'board');
+	dom.viewTabProjectSettingsBtn.classList.toggle('active', activeEditorView === 'project-settings');
 	dom.viewTabBoardBtn.disabled = !projectContext.project.mainBoard;
 }
 
@@ -662,6 +690,17 @@ wireMainAppInteractions({
 		sessionController.resizeCanvas();
 		setStatus(`PCB Appearance ${ visible ? 'shown' : 'hidden' }.`);
 	},
+	getBoardRoutingSizes: () => {
+		const classes = doc.projectContext?.project.projectFile?.raw?.net_settings?.classes;
+		const defaultClass = Array.isArray(classes)
+			? (classes.find((item: any) => item?.name === 'Default') ?? classes[0])
+			: null;
+		return {
+			trackWidth: Number(defaultClass?.track_width) || 0.25,
+			viaSize: Number(defaultClass?.via_diameter) || 0.6,
+			viaDrill: Number(defaultClass?.via_drill) || 0.3
+		};
+	},
 	ensurePlacement: ref => sessionController.ensurePlacement(ref),
 	getPlacements: () => doc.placements,
 	getRuleAreaPoints: () => doc.ruleAreaPoints,
@@ -720,6 +759,7 @@ const router = new Router();
 // e.g. a zip-opened project reached via a fresh tab, which can't silently
 // reopen itself the way a folder project can via requestPermission()).
 dom.brandHomeButton.addEventListener('click', () => {
+	if (activeEditorView === 'project-settings' && !projectSetup.requestLeave()) return;
 	router.navigate(doc.projectContext ? { screen: 'project', projectId: doc.projectContext.key } : { screen: 'home' });
 });
 
@@ -727,16 +767,22 @@ dom.brandHomeButton.addEventListener('click', () => {
 // already-open project (no reload, unlike Project overview's "open in new
 // tab"), replacing what used to require going back to Project overview.
 dom.viewTabSchematicBtn.addEventListener('click', () => {
-	if (!doc.projectContext || doc.kind === 'schematic') {
+	if (!doc.projectContext || activeEditorView === 'schematic') {
 		return;
 	}
+	if (activeEditorView === 'project-settings' && !projectSetup.requestLeave()) return;
 	router.navigate({ screen: 'editor', projectId: doc.projectContext.key, view: 'schematic', sheet: null });
 });
 dom.viewTabBoardBtn.addEventListener('click', () => {
-	if (!doc.projectContext || doc.kind === 'board') {
+	if (!doc.projectContext || activeEditorView === 'board') {
 		return;
 	}
+	if (activeEditorView === 'project-settings' && !projectSetup.requestLeave()) return;
 	router.navigate({ screen: 'editor', projectId: doc.projectContext.key, view: 'board', sheet: null });
+});
+dom.viewTabProjectSettingsBtn.addEventListener('click', () => {
+	if (!doc.projectContext || activeEditorView === 'project-settings') return;
+	router.navigate({ screen: 'editor', projectId: doc.projectContext.key, view: 'project-settings', sheet: null });
 });
 
 const homeScreen = new HomeScreen(dom.screenHomeEl, registry, {
@@ -796,13 +842,34 @@ async function applyRoute(route: Route): Promise<void> {
 	// what gives the canvas its real dimensions instead of the 1×1 fallback
 	// a hidden element's clientWidth/clientHeight would otherwise produce.
 	showScreen('editor');
-	sessionController.resizeCanvas();
+	activeEditorView = route.view;
+	const projectSetupActive = route.view === 'project-settings';
+	dom.mainEl.classList.toggle('project-setup-mode', projectSetupActive);
+	dom.screenEditorEl.dataset.documentKind = projectSetupActive ? 'project-settings' : route.view;
+	if (!projectSetupActive) {
+		projectSetup.deactivate();
+		sessionController.resizeCanvas();
+	}
 	// projectId === null is the "scratch" editor (no project) — nothing to
 	// load from the registry; the user picks a file via the editor's own
 	// "Open .kicad_sch / .kicad_pcb" input, same as before project support
 	// existed.
 	if (route.projectId !== null) {
-		await sessionController.openFromRegistryRoute(route.projectId, route.view, route.sheet);
+		if (projectSetupActive) {
+			await sessionController.openFromRegistryRoute(route.projectId, doc.kind, doc.currentSheetNode?.path ?? null);
+			if (doc.projectContext) {
+				projectSetup.activate(doc.projectContext);
+				updateBreadcrumb();
+				statusBar.setHint('Project Setup · changes remain in a draft until Apply');
+			}
+		}
+		else {
+			await sessionController.openFromRegistryRoute(
+				route.projectId,
+				route.view as Exclude<EditorView, 'project-settings'>,
+				route.sheet);
+			updateBreadcrumb();
+		}
 	}
 }
 
