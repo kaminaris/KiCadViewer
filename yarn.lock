@@ -371,6 +371,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/emscripten@npm:^1.39.10":
+  version: 1.41.5
+  resolution: "@types/emscripten@npm:1.41.5"
+  checksum: 10c0/ae816da716f896434e59df7a71b67c71ae7e85ca067a32aef1616572fc4757459515d42ade6f5b8fd8d69733a9dbd0cf23010fec5b2f41ce52c09501aa350e45
+  languageName: node
+  linkType: hard
+
 "@types/estree@npm:1.0.9":
   version: 1.0.9
   resolution: "@types/estree@npm:1.0.9"
@@ -389,6 +396,15 @@ __metadata:
   version: 3.0.0
   resolution: "chownr@npm:3.0.0"
   checksum: 10c0/43925b87700f7e3893296c8e9c56cc58f926411cce3a6e5898136daaf08f08b9a8eb76d37d3267e707d0dcc17aed2e2ebdf5848c0c3ce95cf910a919935c1b10
+  languageName: node
+  linkType: hard
+
+"clipper2-wasm@npm:^0.4.0":
+  version: 0.4.0
+  resolution: "clipper2-wasm@npm:0.4.0"
+  dependencies:
+    "@types/emscripten": "npm:^1.39.10"
+  checksum: 10c0/757c4bf780a778d9b6e65138f579a9b5ca9550cbe749cebf5910a6d7d32a4cbbdebd22057a81da75944ed9e9dedc252de11ab8765e5736230f6ea808fc96dc16
   languageName: node
   linkType: hard
 
@@ -544,6 +560,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "kionline@workspace:."
   dependencies:
+    clipper2-wasm: "npm:^0.4.0"
     typescript: "npm:^5.8.2"
     vite: "npm:^6.2.0"
   languageName: unknown

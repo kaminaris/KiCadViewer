@@ -12,6 +12,7 @@ import {
 import {
 	SymbolLibraryCache
 }                                                                           from '../io/SymbolLibraryCache';
+import { FootprintLibraryCache }                                             from '../io/FootprintLibraryCache';
 import { StatusBar }                                                        from './StatusBar';
 import { Settings }                                                        from './Settings';
 import { AppState }                                                         from './AppState';
@@ -48,6 +49,10 @@ import { PropertiesController }                                             from
 import { BoardPropertiesController }                                        from '../editor/BoardPropertiesController';
 import { ToolStateController }                                              from '../editor/ToolStateController';
 import { SymbolLibraryIndexer }                                             from '../io/SymbolLibraryIndexer';
+import { FootprintLibraryIndexer }                                           from '../io/FootprintLibraryIndexer';
+import { FootprintChooser }                                                  from '../ui/FootprintChooser';
+import { SymbolFieldsTable }                                                 from '../ui/SymbolFieldsTable';
+import { UpdatePcbFromSchematic }                                            from '../ui/UpdatePcbFromSchematic';
 import { wireMainAppInteractions }                                          from './wireMainAppInteractions';
 import { MenuBar, wireToolbarCommandForwarding }                             from './MenuBar';
 import { applySchematicTheme }                                                from './SchematicThemes';
@@ -91,11 +96,21 @@ let activeEditorView: EditorView = doc.kind;
  *  read/write the same IndexedDB-backed project list through it. */
 const registry = new ProjectRegistry();
 
+const footprintLibraryCache = new FootprintLibraryCache();
+const footprintChooser = new FootprintChooser(footprintLibraryCache, { setStatus });
+const footprintLibraryIndexer = new FootprintLibraryIndexer(footprintLibraryCache, {
+	setStatus,
+	indexFootprintsButton: dom.indexFootprintsButton,
+	footprintDirectoryInput: dom.footprintDirectoryInput
+});
+
 const propertyPanel = new PropertyPanel(dom.editPropertiesEl, dom.editUndoStackEl);
 const propertyRenderers = new PropertyRenderers(propertyPanel, {
 	getSession: () => doc.session,
 	refreshSchematicText: activeSession => appState.refreshSchematicText(activeSession),
-	refreshUndoStack: updateUndoStackPane
+	refreshUndoStack: updateUndoStackPane,
+	refreshSidebar: updateEditSidebar,
+	openFootprintChooser: context => footprintChooser.open(context)
 });
 const propertiesDialog = new PropertiesDialog();
 const propertyDialogRenderers = new PropertyDialogRenderers(propertiesDialog, {
@@ -111,7 +126,8 @@ const propertyDialogRenderers = new PropertyDialogRenderers(propertiesDialog, {
 	},
 	refresh: activeSession => appState.refreshSchematicText(activeSession),
 	refreshUndo: updateUndoStackPane,
-	show: hitId => propertiesController.showPropertiesModal(hitId)
+	show: hitId => propertiesController.showPropertiesModal(hitId),
+	openFootprintChooser: context => footprintChooser.open(context)
 });
 const symbolLibraryCache = new SymbolLibraryCache();
 void symbolLibraryCache.ensureDefaultLibrary();
@@ -599,6 +615,27 @@ window.addEventListener('keydown', event => {
 	}
 });
 
+const symbolFieldsTable = new SymbolFieldsTable({
+	setStatus,
+	getSession: () => doc.session,
+	getProjectContext: () => doc.projectContext,
+	getCurrentSheetNode: () => doc.currentSheetNode,
+	saveProject: () => sessionController.saveProject(),
+	refreshSidebar: updateEditSidebar,
+	openFootprintChooser: context => footprintChooser.open(context)
+});
+dom.symbolFieldsTableButton.addEventListener('click', () => symbolFieldsTable.open());
+
+const updatePcbFromSchematic = new UpdatePcbFromSchematic(footprintLibraryCache, {
+	setStatus,
+	getSession: () => doc.session,
+	getProjectContext: () => doc.projectContext,
+	getCurrentSheetNode: () => doc.currentSheetNode,
+	saveProject: () => sessionController.saveProject(),
+	refreshSidebar: updateEditSidebar
+});
+dom.updatePcbFromSchematicButton.addEventListener('click', () => updatePcbFromSchematic.open());
+
 dom.recipeInput.addEventListener('change', async (e) => {
 	const file = (e.target as HTMLInputElement).files?.[0];
 	if (!file) {
@@ -761,7 +798,10 @@ wireMainAppInteractions({
 	refreshBoardText: activeSession => { appState.refreshBoardText(activeSession); },
 	chooseSymbolDirectory: () => symbolLibraryIndexer.chooseDirectory(),
 	indexFallbackDirectory: files => symbolLibraryIndexer.indexFallbackDirectory(files),
+	chooseFootprintDirectory: () => footprintLibraryIndexer.chooseDirectory(),
+	indexFootprintFallbackDirectory: files => footprintLibraryIndexer.indexFallbackDirectory(files),
 	refreshSymbolLibraryButton: () => symbolLibraryIndexer.refreshButton(),
+	refreshFootprintLibraryButton: () => footprintLibraryIndexer.refreshButton(),
 	onProjectOpened: projectId => { void navigateWithGuards(
 		{ screen: 'editor', projectId, view: 'schematic', sheet: null }, { replace: true }); }
 });
@@ -837,7 +877,9 @@ dom.viewTabProjectSettingsBtn.addEventListener('click', () => {
 	void navigateWithGuards({ screen: 'editor', projectId: doc.projectContext.key, view: 'project-settings', sheet: null });
 });
 
-const homeScreen = new HomeScreen(dom.screenHomeEl, registry, {
+let homeScreen: HomeScreen;
+
+homeScreen = new HomeScreen(dom.screenHomeEl, registry, {
 	openFolder: () => {
 		void sessionController.openProjectFolder().then(key => {
 			if (key) {
@@ -860,7 +902,71 @@ const homeScreen = new HomeScreen(dom.screenHomeEl, registry, {
 		});
 	},
 	openProject: projectId => { void navigateWithGuards({ screen: 'project', projectId }); },
-	openScratchEditor: () => { void navigateWithGuards({ screen: 'editor', projectId: null, view: 'schematic', sheet: null }); }
+	openScratchEditor: () => { void navigateWithGuards({ screen: 'editor', projectId: null, view: 'schematic', sheet: null }); },
+	reindexSymbols: async () => {
+		const picker = (window as Window & { showDirectoryPicker?: (options?: { mode?: 'read' | 'readwrite' }) => Promise<any> }).showDirectoryPicker;
+		try {
+			if (!picker) {
+				homeScreen.hideImportProgress();
+				dom.symbolDirectoryInput.value = '';
+				dom.symbolDirectoryInput.click();
+				return;
+			}
+			homeScreen.showImportProgress('Symbols', 0, 0, 'Choosing directory…');
+			const directory = await picker({ mode: 'read' });
+			const summary = await symbolLibraryCache.indexDirectory(directory, progress => {
+				homeScreen.showImportProgress('Symbols', progress.processedFiles, progress.totalFiles ?? 0, progress.fileName);
+			});
+			homeScreen.hideImportProgress();
+			setStatus(`Indexed ${ summary.symbolCount } symbols from ${ summary.fileCount } files.`);
+		}
+		catch (error) {
+			homeScreen.hideImportProgress();
+			if (!(error instanceof DOMException && error.name === 'AbortError')) {
+				setStatus(error instanceof Error ? error.message : String(error));
+			}
+		}
+	},
+	reindexFootprints: async () => {
+		const picker = (window as Window & { showDirectoryPicker?: (options?: { mode?: 'read' | 'readwrite' }) => Promise<any> }).showDirectoryPicker;
+		try {
+			if (!picker) {
+				homeScreen.hideImportProgress();
+				dom.footprintDirectoryInput.value = '';
+				dom.footprintDirectoryInput.click();
+				return;
+			}
+			homeScreen.showImportProgress('Footprints', 0, 0, 'Choosing directory…');
+			const directory = await picker({ mode: 'read' });
+			const summary = await footprintLibraryCache.indexDirectory(directory, progress => {
+				homeScreen.showImportProgress('Footprints', progress.processedFiles, progress.totalFiles ?? 0, progress.fileName);
+			});
+			homeScreen.hideImportProgress();
+			setStatus(`Indexed ${ summary.footprintCount } footprints from ${ summary.fileCount } files.`);
+		}
+		catch (error) {
+			homeScreen.hideImportProgress();
+			if (!(error instanceof DOMException && error.name === 'AbortError')) {
+				setStatus(error instanceof Error ? error.message : String(error));
+			}
+		}
+	},
+	clearSymbolLibrary: async () => {
+		if (!window.confirm('Clear the cached symbol library from this browser?')) {
+			return;
+		}
+		await symbolLibraryCache.clearAll();
+		void homeScreen.refresh();
+	},
+	clearFootprintLibrary: async () => {
+		if (!window.confirm('Clear the cached footprint library from this browser?')) {
+			return;
+		}
+		await footprintLibraryCache.clearAll();
+		void homeScreen.refresh();
+	},
+	getSymbolLibrarySummary: () => symbolLibraryCache.getSummary(),
+	getFootprintLibrarySummary: () => footprintLibraryCache.getSummary(),
 });
 
 const projectOverviewScreen = new ProjectOverviewScreen(dom.screenProjectEl, registry, {

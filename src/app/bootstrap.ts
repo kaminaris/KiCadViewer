@@ -14,6 +14,8 @@ export interface MainBootstrapOptions {
 
 	refreshSymbolLibraryButton(): Promise<void>;
 
+	refreshFootprintLibraryButton(): Promise<void>;
+
 	updateStatusBar(): void;
 }
 
@@ -24,5 +26,6 @@ export function runMainBootstrap(options: MainBootstrapOptions): void {
 	options.ensureSession();
 	options.resizeCanvas();
 	void options.refreshSymbolLibraryButton();
+	void options.refreshFootprintLibraryButton();
 	options.updateStatusBar();
 }

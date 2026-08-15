@@ -15,7 +15,10 @@ export class PropertyPanel {
 		return section;
 	}
 
-	row(section: HTMLElement, label: string, value: string, editable = false, save?: (value: string) => void): void {
+	row(
+		section: HTMLElement, label: string, value: string, editable = false, save?: (value: string) => void,
+		onBrowse?: () => void
+	): void {
 		const row = document.createElement('div');
 		row.className = 'property-row';
 		const name = document.createElement('div');
@@ -41,6 +44,16 @@ export class PropertyPanel {
 				}
 			});
 			cell.appendChild(input);
+			if (onBrowse) {
+				cell.classList.add('property-value-browsable');
+				const browse = document.createElement('button');
+				browse.type = 'button';
+				browse.className = 'property-browse-btn';
+				browse.textContent = '…';
+				browse.title = 'Browse…';
+				browse.addEventListener('click', () => onBrowse());
+				cell.appendChild(browse);
+			}
 		}
 		else {
 			cell.textContent = value;

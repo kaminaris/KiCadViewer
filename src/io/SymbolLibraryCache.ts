@@ -123,6 +123,17 @@ export class SymbolLibraryCache {
 		});
 	}
 
+	/** Public reset for the browser-local symbol library cache. This is used
+	 * by the home-page library status panel to remove imported libraries from
+	 * the current browser storage when the user explicitly clears them. */
+	async clearAll(): Promise<void> {
+		const db = await this.openDb();
+		const transaction = db.transaction([FILE_STORE, META_STORE], 'readwrite');
+		transaction.objectStore(FILE_STORE).clear();
+		transaction.objectStore(META_STORE).delete('summary');
+		await this.transactionDone(transaction);
+	}
+
 	/** Drops every indexed file EXCEPT builtIn ones — indexDirectory()/
 	 * indexFiles()'s "start fresh" step, scoped to leave the app's own
 	 * bundled libraries (see ensureDefaultLibrary) untouched. A stale

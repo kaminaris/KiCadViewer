@@ -9,6 +9,11 @@ export interface PropertyDialogRendererHost {
 	refresh: (session: any) => void;
 	refreshUndo: () => void;
 	show: (id: string) => void;
+	/** Opens the Footprint Chooser dialog (apps/kicad-viewer/src/ui/
+	 *  FootprintChooser.ts); resolves the chosen "Library:Name" id or null
+	 *  on cancel. Same host-interface decoupling as PropertyRenderers'
+	 *  identical method. */
+	openFootprintChooser: (context: { fpFilters: string[]; pinCount: number }) => Promise<string | null>;
 }
 
 const LINE_STYLE_OPTIONS = [
@@ -423,7 +428,19 @@ export class PropertyDialogRenderers {
 				label: 'Name',
 				type: 'text',
 				readOnly: row => mandatory.has(String(row.Name))
-			}, { key: 'Value', label: 'Value', type: 'text' }, { key: 'Show', label: 'Show', type: 'checkbox' },
+			}, {
+				key: 'Value', label: 'Value', type: 'text',
+				button: row => row.Name === 'Footprint' ? () => {
+					void this.host.openFootprintChooser({
+						fpFilters: libDef?.getFPFilters?.() ?? [], pinCount: libDef?.getPinCount?.() ?? 0
+					}).then(fpId => {
+						if (fpId) {
+							mutate(current => current.setProperty('Footprint', fpId));
+							this.host.show(id);
+						}
+					});
+				} : null
+			}, { key: 'Show', label: 'Show', type: 'checkbox' },
 			{ key: 'ShowName', label: 'Show Name', type: 'checkbox' },
 			{ key: 'HAlign', label: 'H Align', type: 'select', options: H_ALIGN_OPTIONS },
 			{ key: 'VAlign', label: 'V Align', type: 'select', options: V_ALIGN_OPTIONS },

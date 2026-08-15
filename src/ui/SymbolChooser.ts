@@ -6,6 +6,7 @@ import {
 	type CachedSymbolFile,
 	type CachedSymbolSummary
 }                             from '../io/SymbolLibraryCache';
+import { makeDraggableResizable } from './DraggableResizable';
 
 type PendingSymbol = { file: CachedSymbolFile; summary: CachedSymbolSummary; libId: string };
 type PendingUnitState = { libId: string; reference: string; nextUnit: number; totalUnits: number };
@@ -93,6 +94,7 @@ export class SymbolChooser {
 		this.cancelEl.addEventListener('click', () => this.cancelPlacement());
 		this.closeEl.addEventListener('click', () => this.cancelPlacement());
 		this.okEl.addEventListener('click', () => this.confirm());
+		makeDraggableResizable(this.el, this.el.querySelector('.symbol-chooser-header')!, { minWidth: 480, minHeight: 360 });
 	}
 
 	get isOpen(): boolean { return !this.el.classList.contains('hidden'); }

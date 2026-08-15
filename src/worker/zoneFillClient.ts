@@ -1,4 +1,4 @@
-import type { MmPath, ZoneFillJob } from '@kicad-render/paint/BoardZoneFill';
+import type { MmPath, ZoneFillJob }                           from '@kicad-render/paint/BoardZoneFill';
 import type { ZoneFillWorkerRequest, ZoneFillWorkerResponse } from './zone-fill.worker';
 
 /**
@@ -9,9 +9,11 @@ import type { ZoneFillWorkerRequest, ZoneFillWorkerResponse } from './zone-fill.
  */
 export function runZoneFillJobs(
 	jobs: ZoneFillJob[],
-	onProgress?: (done: number, total: number) => void,
+	onProgress?: (done: number, total: number) => void
 ): Promise<{ zoneUuid: string; layer: string; points: MmPath }[]> {
-	if (jobs.length === 0) return Promise.resolve([]);
+	if (jobs.length === 0) {
+		return Promise.resolve([]);
+	}
 
 	return new Promise((resolve, reject) => {
 		const worker = new Worker(new URL('./zone-fill.worker.ts', import.meta.url), { type: 'module' });

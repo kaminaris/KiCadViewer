@@ -136,9 +136,12 @@
 				</div></div>
 				<div class="menu-group menu-schematic"><button type="button" class="menu-trigger" aria-expanded="false">Tools</button><div class="menu-popover">
 					<button type="button" class="menu-command" data-action-target="btn-index-symbols">Manage Symbol Libraries…</button>
+					<button type="button" class="menu-command" data-action-target="btn-symbol-fields-table">Bulk Edit Symbol Fields…</button>
 				</div></div>
 				<div class="menu-group menu-board"><button type="button" class="menu-trigger" aria-expanded="false">Tools</button><div class="menu-popover">
-					<button type="button" class="menu-command" disabled>Update PCB from Schematic…</button>
+					<button type="button" class="menu-command" data-action-target="btn-index-footprints">Manage Footprint Libraries…</button>
+					<div class="menu-divider"></div>
+					<button type="button" class="menu-command" data-action-target="btn-update-pcb-from-schematic">Update PCB from Schematic…</button>
 					<button type="button" class="menu-command" disabled>Update Footprints from Library…</button>
 					<div class="menu-divider"></div>
 					<button type="button" class="menu-command" disabled>Zones Manager…</button>
@@ -176,11 +179,13 @@
 			<div class="toolbar-divider" aria-hidden="true"></div>
 			<div class="toolbar-section hidden" id="edit-actions">
 				<button type="button" class="toolbar-button" id="btn-index-symbols" title="Manage Symbol Libraries"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5 H15 L20 10 V19 H4 Z M15 5 V10 H20"/><path d="M8 14 H16 M12 11 V17"/></svg></button>
+				<button type="button" class="toolbar-button" id="btn-index-footprints" title="Manage Footprint Libraries"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5 H19 V19 H5 Z M8 8 H16 V16 H8 Z"/><path d="M3 10 H5 M3 14 H5 M19 10 H21 M19 14 H21 M10 3 V5 M14 3 V5 M10 19 V21 M14 19 V21"/></svg></button>
 				<button type="button" class="toolbar-button" id="btn-export-edit" title="Export Schematic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4 H17 L20 7 V20 H5 Z M17 4 V8 H20"/><path d="M12 10 V17 M9 14 L12 17 L15 14"/></svg></button>
 			</div>
 			<input type="file" id="file-input" accept=".kicad_sch,.kicad_pcb,.kicad_pro" hidden />
 			<input type="file" id="zip-input" accept=".zip" hidden />
 			<input type="file" id="symbol-directory-input" webkitdirectory directory multiple hidden />
+			<input type="file" id="footprint-directory-input" accept=".kicad_mod" webkitdirectory directory multiple hidden />
 		</div>
 		<!-- Circuit Layout (auto-place/auto-wire demo) is parked, not deleted —
 			no button reaches setMode('circuit') anymore, so this stays
@@ -211,6 +216,8 @@
 		<button type="button" id="btn-undo" hidden></button>
 		<button type="button" id="btn-redo" hidden></button>
 		<button type="button" id="btn-preferences" hidden></button>
+		<button type="button" id="btn-symbol-fields-table" hidden></button>
+		<button type="button" id="btn-update-pcb-from-schematic" hidden></button>
 	</header>
 	<main>
 		<aside class="edit-left-pane" id="left-dock">
@@ -335,6 +342,11 @@
 					<div class="zone-fill-progress-track"><div class="zone-fill-progress-fill" id="symbol-index-progress-fill"></div></div>
 					<div class="zone-fill-progress-label" id="symbol-index-progress-label">Starting…</div>
 				</div>
+				<div class="table-modal zone-fill-progress-modal hidden" id="footprint-index-progress-modal">
+					<h3>Indexing Footprints…</h3>
+					<div class="zone-fill-progress-track"><div class="zone-fill-progress-fill" id="footprint-index-progress-fill"></div></div>
+					<div class="zone-fill-progress-label" id="footprint-index-progress-label">Starting…</div>
+				</div>
 			<div class="symbol-chooser hidden" id="symbol-chooser-modal" role="dialog" aria-modal="true" aria-labelledby="symbol-chooser-title">
 				<div class="symbol-chooser-header">
 					<h3 id="symbol-chooser-title">Choose Symbol</h3>
@@ -359,6 +371,113 @@
 					<button type="button" id="symbol-chooser-ok" class="primary">OK</button>
 				</div>
 			</div>
+				<div class="symbol-chooser hidden" id="footprint-chooser-modal" role="dialog" aria-modal="true" aria-labelledby="footprint-chooser-title">
+					<div class="symbol-chooser-header">
+						<h3 id="footprint-chooser-title">Choose Footprint</h3>
+						<button type="button" class="symbol-chooser-close" id="footprint-chooser-close" aria-label="Close">×</button>
+					</div>
+					<div class="symbol-chooser-search"><span aria-hidden="true">⌕</span><input id="footprint-chooser-filter" type="search" placeholder="Filter footprints…" autocomplete="off" /></div>
+					<div class="symbol-chooser-body">
+						<div class="symbol-chooser-list" id="footprint-chooser-list"></div>
+						<div class="symbol-chooser-preview">
+							<div class="symbol-preview-art" id="footprint-preview-art">
+								<canvas id="footprint-preview-canvas" class="hidden"></canvas>
+								<span id="footprint-preview-placeholder">Select a footprint to preview</span>
+							</div>
+							<div class="symbol-preview-details" id="footprint-preview-details"></div>
+						</div>
+					</div>
+					<div class="symbol-chooser-footer">
+						<label id="footprint-apply-filters-label"><input id="footprint-apply-filters" type="checkbox" /> Apply footprint filters <span id="footprint-apply-filters-count"></span></label>
+						<label id="footprint-filter-pin-count-label"><input id="footprint-filter-pin-count" type="checkbox" /> Filter by pin count <span id="footprint-filter-pin-count-count"></span></label>
+						<span class="symbol-chooser-spacer"></span>
+						<button type="button" id="footprint-chooser-cancel">Cancel</button>
+						<button type="button" id="footprint-chooser-ok" class="primary">OK</button>
+					</div>
+				</div>
+				<div class="sft-modal hidden" id="symbol-fields-table-modal" role="dialog" aria-modal="true" aria-labelledby="sft-title">
+					<div class="sft-header">
+						<h3 id="sft-title">Bulk Edit Symbol Fields</h3>
+						<button type="button" class="symbol-chooser-close" id="sft-close" aria-label="Close">×</button>
+					</div>
+					<div class="sft-body">
+						<div class="sft-left-panel">
+							<div class="sft-field-list-header">
+								<span>Field</span><span>Incl.</span><span>Group…</span><span></span>
+							</div>
+							<div class="sft-field-list" id="sft-field-list"></div>
+							<button type="button" class="kd-btn" id="sft-add-field">+ Add Field</button>
+						</div>
+						<div class="sft-right-panel">
+							<div class="sft-tabs">
+								<button type="button" class="sft-tab active" id="sft-tab-edit">Edit</button>
+								<button type="button" class="sft-tab" id="sft-tab-export">Export</button>
+							</div>
+							<div class="sft-toolbar">
+								<input id="sft-filter" type="search" placeholder="Filter…" autocomplete="off" />
+								<select id="sft-scope">
+									<option value="project">Entire Project</option>
+									<option value="sheet">Current Sheet</option>
+								</select>
+								<label><input id="sft-group-symbols" type="checkbox" checked /> Group symbols</label>
+							</div>
+							<div class="sft-panel" id="sft-panel-edit">
+								<div class="sft-grid-wrap" id="sft-grid-wrap"></div>
+							</div>
+							<div class="sft-panel hidden" id="sft-panel-export">
+								<div class="sft-export-summary" id="sft-export-summary"></div>
+							</div>
+						</div>
+					</div>
+					<div class="sft-footer">
+						<button type="button" id="sft-export" disabled>Export</button>
+						<span class="symbol-chooser-spacer"></span>
+						<button type="button" id="sft-apply">Apply, Save Schematic &amp; Continue</button>
+						<button type="button" id="sft-ok" class="primary">OK</button>
+						<button type="button" id="sft-cancel">Cancel</button>
+					</div>
+				</div>
+				<div class="sft-modal hidden" id="update-pcb-modal" role="dialog" aria-modal="true" aria-labelledby="upd-title">
+					<div class="sft-header">
+						<h3 id="upd-title">Update PCB from Schematic</h3>
+						<button type="button" class="symbol-chooser-close" id="upd-close" aria-label="Close">×</button>
+					</div>
+					<div class="upd-body">
+						<div class="upd-section">
+							<div class="upd-section-title">Options</div>
+							<label class="upd-check-row"><input id="upd-opt-relink" type="checkbox" checked disabled /> Re-link footprints to schematic symbols based on their reference designators</label>
+							<label class="upd-check-row"><input id="upd-opt-group" type="checkbox" disabled /> Group footprints based on symbol group</label>
+							<label class="upd-check-row upd-check-row-muted"><input id="upd-opt-design-blocks" type="checkbox" disabled /> Apply design block layouts to new groups</label>
+						</div>
+						<div class="upd-section">
+							<div class="upd-section-title">Update Footprints</div>
+							<label class="upd-check-row"><input id="upd-opt-replace" type="checkbox" checked /> Replace footprints with those specified by symbols</label>
+							<label class="upd-check-row"><input id="upd-opt-delete" type="checkbox" checked /> Delete footprints with no symbols</label>
+							<label class="upd-check-row"><input id="upd-opt-override-locks" type="checkbox" checked /> Override locks</label>
+						</div>
+						<div class="upd-section">
+							<div class="upd-section-title">Update Fields</div>
+							<label class="upd-check-row"><input id="upd-opt-update-fields" type="checkbox" checked /> Update footprint fields from symbols</label>
+							<label class="upd-check-row"><input id="upd-opt-remove-fields" type="checkbox" /> Remove footprint fields not found in symbols</label>
+						</div>
+						<div class="upd-section upd-section-report">
+							<div class="upd-section-title">Changes to Be Applied</div>
+							<div class="upd-report" id="upd-report"></div>
+						</div>
+					</div>
+					<div class="upd-filters">
+						<label><input id="upd-filter-errors" type="checkbox" checked /> Errors <span class="upd-count upd-count-error" id="upd-count-errors">0</span></label>
+						<label><input id="upd-filter-warnings" type="checkbox" checked /> Warnings <span class="upd-count upd-count-warning" id="upd-count-warnings">0</span></label>
+						<label><input id="upd-filter-actions" type="checkbox" checked /> Actions <span class="upd-count upd-count-action" id="upd-count-actions">0</span></label>
+						<label><input id="upd-filter-infos" type="checkbox" checked /> Infos <span class="upd-count upd-count-info" id="upd-count-infos">0</span></label>
+					</div>
+					<div class="sft-footer">
+						<button type="button" id="upd-save">Save…</button>
+						<span class="symbol-chooser-spacer"></span>
+						<button type="button" id="upd-apply" class="primary" disabled>Update PCB</button>
+						<button type="button" id="upd-close-btn">Close</button>
+					</div>
+				</div>
 				<div class="context-menu hidden" id="context-menu"></div>
 		</div>
 		<aside class="tool-panel hidden" id="tool-panel">

@@ -46,7 +46,9 @@ export interface MainDomRefs {
 	viewTabProjectSettingsBtn: HTMLButtonElement;
 	projectSetupWorkspaceEl: HTMLElement;
 	indexSymbolsButton: HTMLButtonElement;
+	indexFootprintsButton: HTMLButtonElement;
 	symbolDirectoryInput: HTMLInputElement;
+	footprintDirectoryInput: HTMLInputElement;
 	editPropertiesEl: HTMLElement;
 	editUndoStackEl: HTMLElement;
 	toolPanel: HTMLElement;
@@ -83,6 +85,8 @@ export interface MainDomRefs {
 	undoButton: HTMLButtonElement;
 	redoButton: HTMLButtonElement;
 	preferencesButton: HTMLButtonElement;
+	symbolFieldsTableButton: HTMLButtonElement;
+	updatePcbFromSchematicButton: HTMLButtonElement;
 	propertiesModalCloseButton: HTMLElement | null;
 	paneSplitters: HTMLElement[];
 
@@ -113,7 +117,9 @@ export function createMainDomRefs(): MainDomRefs {
 		viewTabProjectSettingsBtn: requiredById<HTMLButtonElement>('view-tab-project-settings'),
 		projectSetupWorkspaceEl: requiredById<HTMLElement>('project-setup-workspace'),
 		indexSymbolsButton: requiredById<HTMLButtonElement>('btn-index-symbols'),
+		indexFootprintsButton: requiredById<HTMLButtonElement>('btn-index-footprints'),
 		symbolDirectoryInput: requiredById<HTMLInputElement>('symbol-directory-input'),
+		footprintDirectoryInput: requiredById<HTMLInputElement>('footprint-directory-input'),
 		editPropertiesEl: requiredById<HTMLElement>('edit-properties'),
 		editUndoStackEl: requiredById<HTMLElement>('edit-undo-stack'),
 		toolPanel: requiredById<HTMLElement>('tool-panel'),
@@ -150,6 +156,8 @@ export function createMainDomRefs(): MainDomRefs {
 		undoButton: requiredById<HTMLButtonElement>('btn-undo'),
 		redoButton: requiredById<HTMLButtonElement>('btn-redo'),
 		preferencesButton: requiredById<HTMLButtonElement>('btn-preferences'),
+		symbolFieldsTableButton: requiredById<HTMLButtonElement>('btn-symbol-fields-table'),
+		updatePcbFromSchematicButton: requiredById<HTMLButtonElement>('btn-update-pcb-from-schematic'),
 		propertiesModalCloseButton: optionalById<HTMLElement>('properties-modal-close'),
 		paneSplitters: Array.from(document.querySelectorAll<HTMLElement>('.pane-splitter')),
 		getToolGroupButton: id => optionalById<HTMLButtonElement>(id)

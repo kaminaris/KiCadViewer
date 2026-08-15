@@ -1,5 +1,7 @@
 import type { MmPath, ZoneFillJob } from '@kicad-render/paint/BoardZoneFill';
-import { runZoneFillJob } from '@kicad-render/paint/BoardZoneFill';
+import { runZoneFillJob }           from '@kicad-render/paint/BoardZoneFill';
+import { setClipperEngine }         from '@kicad-render/paint/ClipperEngine';
+import { loadWasmClipperEngine }    from './wasmClipperEngine';
 
 /**
  * Dedicated (non-shared) worker: runs the Clipper2 zone-fill pipeline off
@@ -32,17 +34,31 @@ declare const self: {
 	addEventListener(type: 'message', listener: (event: MessageEvent<ZoneFillWorkerRequest>) => void): void;
 };
 
+// Fresh worker per zone-fill call (see zoneFillClient.ts's own header
+// comment) — so this best-effort WASM upgrade re-runs every time too. That's
+// fine: the whole init is ~10ms (see the zone-fill engine benchmark), and it
+// runs concurrently with nothing else since no job can start before the
+// first message arrives anyway.
+const clipperEnginePromise = loadWasmClipperEngine().then(engine => {
+	if (engine) {
+		setClipperEngine(engine);
+	}
+});
+
 self.addEventListener('message', event => {
 	const { jobs } = event.data;
-	try {
-		const results: { zoneUuid: string; layer: string; points: MmPath }[] = [];
-		for (let i = 0; i < jobs.length; i++) {
-			results.push(...runZoneFillJob(jobs[i]!));
-			self.postMessage({ type: 'progress', done: i + 1, total: jobs.length });
+	void (async () => {
+		try {
+			await clipperEnginePromise;
+			const results: { zoneUuid: string; layer: string; points: MmPath }[] = [];
+			for (let i = 0; i < jobs.length; i++) {
+				results.push(...runZoneFillJob(jobs[i]!));
+				self.postMessage({ type: 'progress', done: i + 1, total: jobs.length });
+			}
+			self.postMessage({ type: 'done', results });
 		}
-		self.postMessage({ type: 'done', results });
-	}
-	catch (err) {
-		self.postMessage({ type: 'error', message: err instanceof Error ? err.message : String(err) });
-	}
+		catch (err) {
+			self.postMessage({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+		}
+	})();
 });

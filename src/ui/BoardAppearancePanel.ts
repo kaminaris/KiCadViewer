@@ -114,7 +114,11 @@ export class BoardAppearancePanel {
 		const content = document.createElement('div');
 		const list = document.createElement('ul');
 		list.className = 'appearance-layer-list';
-		for (const layer of scene.layersPresent) {
+		// PadNumbers is a synthetic overlay bucket, not a real KiCad layer —
+		// its own Pad Numbers/Net Names checkboxes (Objects tab) control it;
+		// listing it here would let per-layer dim/hide controls fight with
+		// BoardPainter.paint()'s deliberate always-on-top exemption for it.
+		for (const layer of scene.layersPresent.filter(l => l !== 'PadNumbers')) {
 			const row = document.createElement('li');
 			row.className = `appearance-layer-row${ layer === this.activeLayer ? ' active' : '' }`;
 			row.title = `Set ${ layer } as active layer`;
@@ -196,6 +200,22 @@ export class BoardAppearancePanel {
 		ratsnestVisible.addEventListener('change', () => session.setRatsnestVisible(ratsnestVisible.checked));
 		ratsnest.append(ratsnestVisible, ' Ratsnest');
 		content.appendChild(ratsnest);
+		const padNumbers = document.createElement('label');
+		padNumbers.className = 'appearance-object-toggle';
+		const padNumbersVisible = document.createElement('input');
+		padNumbersVisible.type = 'checkbox';
+		padNumbersVisible.checked = session.showPadNumbers;
+		padNumbersVisible.addEventListener('change', () => { session.showPadNumbers = padNumbersVisible.checked; });
+		padNumbers.append(padNumbersVisible, ' Pad Numbers');
+		content.appendChild(padNumbers);
+		const netNames = document.createElement('label');
+		netNames.className = 'appearance-object-toggle';
+		const netNamesVisible = document.createElement('input');
+		netNamesVisible.type = 'checkbox';
+		netNamesVisible.checked = session.showNetNames;
+		netNamesVisible.addEventListener('change', () => { session.showNetNames = netNamesVisible.checked; });
+		netNames.append(netNamesVisible, ' Net Names');
+		content.appendChild(netNames);
 		const countByKind = new Map<string, number>();
 		for (const item of scene.hitTestItems) {
 			countByKind.set(item.kind, (countByKind.get(item.kind) ?? 0) + 1);

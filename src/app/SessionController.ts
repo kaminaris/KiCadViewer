@@ -659,8 +659,21 @@ export class SessionController {
 		// navigates the router here right after the picker flow already
 		// loaded the root schematic. Reloading it a second time would just
 		// reset undo history and re-parse for nothing.
+		//
+		// `this.state.filename` (only ever set by loadText(), starts as '')
+		// is the real "has anything actually been loaded into the render
+		// session yet" signal — `this.state.kind` is NOT: it defaults to
+		// 'schematic' on a fresh ActiveDocument, the same value this method
+		// itself sets `currentSheetNode` to just above, before any real
+		// document has ever loaded. On a cold direct-URL load into
+		// ?view=schematic, that made `alreadyAtRoute` a false positive —
+		// kind === 'schematic' matched the default, and currentSheetNode's
+		// path matched the route path (having just been assigned from it) —
+		// so this returned early and the schematic was never actually
+		// loaded/painted. Only a real prior loadText() call flips filename
+		// away from '', so this now can't misfire before the first one.
 		const mainSchematicPath = this.state.projectContext!.project.mainSchematic?.path;
-		const alreadyAtRoute = this.state.kind === view
+		const alreadyAtRoute = this.state.filename !== '' && this.state.kind === view
 			&& (view === 'board' || this.state.currentSheetNode?.path === (sheetPath ?? mainSchematicPath));
 		if (alreadyAtRoute) {
 			return;

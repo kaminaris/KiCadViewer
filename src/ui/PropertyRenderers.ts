@@ -5,6 +5,17 @@ export interface PropertyRendererHost {
 	getSession: () => any;
 	refreshSchematicText: (session: any) => void;
 	refreshUndoStack: () => void;
+	/** Re-renders the currently-selected element's sidebar panel — needed
+	 *  after a value is set programmatically (not by the user typing into a
+	 *  row's own input, which already shows what they typed) so the
+	 *  Footprint row's displayed text actually reflects the chosen id. */
+	refreshSidebar: () => void;
+	/** Opens the Footprint Chooser dialog (see apps/kicad-viewer/src/ui/
+	 *  FootprintChooser.ts); resolves the chosen "Library:Name" id or null
+	 *  on cancel. Kept behind the host interface, same as getSession/
+	 *  refreshSchematicText, so this file stays decoupled from the concrete
+	 *  chooser class. */
+	openFootprintChooser: (context: { fpFilters: string[]; pinCount: number }) => Promise<string | null>;
 }
 
 const LINE_STYLE_OPTIONS = [
@@ -42,8 +53,8 @@ export class PropertyRenderers {
 
 	protected row(
 		section: HTMLElement, label: string, value: string, edit = false,
-		save?: (value: string) => void
-	): void { this.panel.row(section, label, value, edit, save); }
+		save?: (value: string) => void, onBrowse?: () => void
+	): void { this.panel.row(section, label, value, edit, save, onBrowse); }
 
 	protected select(
 		section: HTMLElement, label: string, value: string, options: { value: string; label: string }[],
@@ -156,11 +167,24 @@ export class PropertyRenderers {
 		const fields = this.section('Fields');
 		for (const property of symbol.getProperties?.() ?? []) {
 			const name = String(property.propertyName ?? '');
-			if (name) {
-				this.row(
-					fields, name, String(property.propertyValue ?? ''), true,
-					value => mutate(current => current.setProperty(name, value))
-				);
+			if (!name) {
+				continue;
+			}
+			const save = (value: string) => mutate(current => current.setProperty(name, value));
+			if (name === 'Footprint') {
+				this.row(fields, name, String(property.propertyValue ?? ''), true, save, () => {
+					void this.host.openFootprintChooser({
+						fpFilters: libDef?.getFPFilters?.() ?? [], pinCount: libDef?.getPinCount?.() ?? 0
+					}).then(fpId => {
+						if (fpId) {
+							save(fpId);
+							this.host.refreshSidebar();
+						}
+					});
+				});
+			}
+			else {
+				this.row(fields, name, String(property.propertyValue ?? ''), true, save);
 			}
 		}
 		const attrs = this.section('Attributes');

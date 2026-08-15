@@ -1,3 +1,5 @@
+import { makeDraggableResizable } from './DraggableResizable';
+
 /** Owns the double-click properties modal surface. Dialog renderers can use
  *  `body` and `setTitle()` while the editor delegates open/close lifecycle. */
 export interface KdGridColumn {
@@ -6,6 +8,11 @@ export interface KdGridColumn {
 	type: 'text' | 'checkbox' | 'select';
 	options?: { value: string; label: string }[];
 	readOnly?: (row: Record<string, unknown>) => boolean;
+	/** For a 'text' column: an optional per-ROW trailing browse button (the
+	 *  Fields grid's Footprint row gets one, every other row in the same
+	 *  Value column doesn't) — return a click handler to show the button
+	 *  for this row, or null/undefined to render a plain input like usual. */
+	button?: (row: Record<string, unknown>, rowIndex: number) => (() => void) | null | undefined;
 }
 
 export interface KdGridHandlers {
@@ -19,6 +26,10 @@ export class PropertiesDialog {
 	protected readonly modal = document.getElementById('properties-modal') as HTMLDivElement;
 	readonly body = document.getElementById('properties-modal-body') as HTMLDivElement;
 	protected readonly title = document.getElementById('properties-modal-title') as HTMLHeadingElement;
+
+	constructor() {
+		makeDraggableResizable(this.modal, this.title, { minWidth: 420, minHeight: 240 });
+	}
 
 	get isOpen(): boolean { return !this.modal.classList.contains('hidden'); }
 
@@ -275,6 +286,17 @@ export class PropertiesDialog {
 						}
 					});
 					cell.appendChild(input);
+					const onButtonClick = column.button?.(row, rowIndex);
+					if (onButtonClick) {
+						cell.classList.add('kd-grid-text-button');
+						const browse = document.createElement('button');
+						browse.type = 'button';
+						browse.className = 'kd-grid-browse-btn';
+						browse.textContent = '…';
+						browse.title = 'Browse…';
+						browse.addEventListener('click', onButtonClick);
+						cell.appendChild(browse);
+					}
 				}
 				tableRow.appendChild(cell);
 			}

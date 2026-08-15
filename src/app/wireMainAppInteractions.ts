@@ -183,7 +183,13 @@ export interface WireMainAppInteractionsOptions {
 
 	indexFallbackDirectory(files: FileList): Promise<void>;
 
+	chooseFootprintDirectory(): Promise<void>;
+
+	indexFootprintFallbackDirectory(files: FileList): Promise<void>;
+
 	refreshSymbolLibraryButton(): Promise<void>;
+
+	refreshFootprintLibraryButton(): Promise<void>;
 
 	/** Called after the in-editor "Open Project Folder" / "New Project" /
 	 *  "Open .zip" toolbar buttons successfully open a project — keeps the
@@ -288,10 +294,17 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 	});
 	options.dom.imageInput.addEventListener('change', () => { void options.fileActions.handleImageInputChange(); });
 	options.dom.indexSymbolsButton.addEventListener('click', () => { void options.chooseSymbolDirectory(); });
+	options.dom.indexFootprintsButton.addEventListener('click', () => { void options.chooseFootprintDirectory(); });
 	options.dom.symbolDirectoryInput.addEventListener('change', () => {
 		const files = options.dom.symbolDirectoryInput.files;
 		if (files?.length) {
 			void options.indexFallbackDirectory(files);
+		}
+	});
+	options.dom.footprintDirectoryInput.addEventListener('change', () => {
+		const files = options.dom.footprintDirectoryInput.files;
+		if (files?.length) {
+			void options.indexFootprintFallbackDirectory(files);
 		}
 	});
 
@@ -547,6 +560,21 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 	window.addEventListener(
 		'click', e => options.propertiesController.maybeClosePropertiesModalFromWindowClick(e.target));
 	window.addEventListener('resize', () => options.sessionController.resizeCanvas());
+	// Belt-and-suspenders alongside the hand-placed resizeCanvas() calls
+	// (loadText, applyRoute, the board-appearance toggle, etc.): those all
+	// assume #stage already has its final CSS size at the moment they run,
+	// which isn't always true — e.g. right after the New Project dialog's
+	// backdrop closes, #stage can still measure 0-wide for a tick before the
+	// grid layout settles, so the resize() baked into the canvas's backing
+	// store that moment is bogus and (with no browser window resize to
+	// trigger the listener above) nothing ever corrects it — the exact
+	// "schematic invisible on first load" bug. A ResizeObserver catches every
+	// real size change to #stage regardless of what caused it, so this is the
+	// authoritative fallback rather than another one-off call site to keep
+	// ordering-correct by hand.
+	if (typeof ResizeObserver !== 'undefined') {
+		new ResizeObserver(() => options.sessionController.resizeCanvas()).observe(options.dom.stage);
+	}
 	options.dom.stage.addEventListener('dragover', e => e.preventDefault());
 	window.addEventListener('paste', event => { options.fileActions.handleWindowPaste(event); });
 	options.dom.stage.addEventListener('drop', e => { options.fileActions.handleStageDrop(e); });
@@ -624,6 +652,7 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		ensureSession: () => { options.sessionController.ensureSession(); },
 		resizeCanvas: () => options.sessionController.resizeCanvas(),
 		refreshSymbolLibraryButton: options.refreshSymbolLibraryButton,
+		refreshFootprintLibraryButton: options.refreshFootprintLibraryButton,
 		updateStatusBar: () => options.updateStatusBar()
 	});
 }

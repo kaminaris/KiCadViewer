@@ -1,6 +1,6 @@
-import type { DocumentKind }        from '../app/ActiveDocument';
-import type { PresenceInfo }        from '../app/ProjectStore';
-import type { ProjectSyncPayload }  from '../app/transport/ProjectSyncTransport';
+import type { DocumentKind } from '../app/ActiveDocument';
+import type { PresenceInfo } from '../app/ProjectStore';
+import type { ProjectSyncPayload } from '../app/transport/ProjectSyncTransport';
 
 /**
  * SharedWorker: presence + relay only for whichever browser tabs currently
@@ -46,7 +46,11 @@ function broadcastPresence(projectId: string): void {
 	if (!peers) {
 		return;
 	}
-	const outbound: OutboundMessage = { type: 'relay', peerId: 'server', payload: { kind: 'presence', peers: presenceFor(peers) } };
+	const outbound: OutboundMessage = {
+		type: 'relay',
+		peerId: 'server',
+		payload: { kind: 'presence', peers: presenceFor(peers) }
+	};
 	for (const entry of peers.values()) {
 		entry.port.postMessage(outbound);
 	}
@@ -110,7 +114,8 @@ function handleConnection(port: MessagePort): void {
 		}
 	});
 
-	port.addEventListener('messageerror', () => { /* structured-clone failure on one message — ignore, keep the port alive */ });
+	port.addEventListener(
+		'messageerror', () => { /* structured-clone failure on one message — ignore, keep the port alive */ });
 
 	port.start();
 }
