@@ -5,7 +5,7 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 	<title>KiOnline</title>
 	<link rel="stylesheet" href="/KiCadViewer/styles.css" />
-  <script type="module" crossorigin src="/KiCadViewer/assets/index-CvjYc5Rl.js"></script>
+  <script type="module" crossorigin src="/KiCadViewer/assets/index-D0vMiE31.js"></script>
 </head>
 <body>
 	<div class="screen" id="screen-home"></div>
@@ -26,6 +26,8 @@
 					<div class="menu-divider"></div>
 					<button type="button" class="menu-command" data-action-target="btn-save-project">Save Project<span>Ctrl+S</span></button>
 					<button type="button" class="menu-command" data-action-target="btn-export-edit">Export Current Document…</button>
+					<div class="menu-divider menu-board"></div>
+					<button type="button" class="menu-command menu-board" data-action-target="view-tab-project-settings">Board Setup…</button>
 				</div></div>
 				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Edit</button><div class="menu-popover">
 					<button type="button" class="menu-command" data-action-target="btn-undo">Undo<span>Ctrl+Z</span></button>
@@ -35,49 +37,113 @@
 					<button type="button" class="menu-command" data-shortcut="copy">Copy<span>Ctrl+C</span></button>
 					<button type="button" class="menu-command" data-shortcut="paste">Paste<span>Ctrl+V</span></button>
 					<button type="button" class="menu-command" data-shortcut="duplicate">Duplicate<span>Ctrl+D</span></button>
+					<button type="button" class="menu-command menu-board" disabled>Paste Special…<span>Ctrl+Shift+V</span></button>
+					<button type="button" class="menu-command menu-board" disabled>Delete</button>
+					<div class="menu-divider menu-board"></div>
+					<button type="button" class="menu-command menu-board" disabled>Select</button>
+					<button type="button" class="menu-command menu-board" disabled>Find<span>Ctrl+F</span></button>
+					<div class="menu-divider menu-board"></div>
+					<button type="button" class="menu-command menu-board" disabled>Edit Track &amp; Via Properties…</button>
+					<button type="button" class="menu-command menu-board" disabled>Edit Text &amp; Graphics Properties…</button>
+					<button type="button" class="menu-command menu-board" disabled>Edit Teardrops…</button>
+					<button type="button" class="menu-command menu-board" disabled>Change Footprints…</button>
+					<button type="button" class="menu-command menu-board" disabled>Swap Layers…</button>
+					<button type="button" class="menu-command menu-board" disabled>Grid Origin…</button>
+					<div class="menu-divider menu-board"></div>
+					<button type="button" class="menu-command menu-board" data-board-command="fill-all-zones">Fill All Zones<span>B</span></button>
+					<button type="button" class="menu-command menu-board" data-board-command="unfill-all-zones">Unfill All Zones<span>Ctrl+B</span></button>
+					<button type="button" class="menu-command menu-board" disabled>Update All Tuning Patterns</button>
+					<div class="menu-divider menu-board"></div>
+					<button type="button" class="menu-command menu-board" disabled>Interactive Delete Tool</button>
+					<button type="button" class="menu-command menu-board" disabled>Global Deletions…</button>
 				</div></div>
 				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">View</button><div class="menu-popover">
 					<button type="button" class="menu-command" data-action-target="view-tab-schematic">Schematic Editor</button>
 					<button type="button" class="menu-command" data-action-target="view-tab-board">PCB Editor</button>
+					<button type="button" class="menu-command" data-action-target="view-tab-project-settings">Project Setup</button>
 					<div class="menu-divider"></div>
 					<button type="button" class="menu-command" data-shortcut="zoom-fit">Zoom to Fit<span>Home</span></button>
+					<div class="menu-divider menu-board"></div>
+					<button type="button" class="menu-command menu-board" data-board-toggle="grid">Show Grid</button>
+					<button type="button" class="menu-command menu-board" data-board-toggle="appearance">Panels › Appearance</button>
+					<button type="button" class="menu-command menu-board" disabled>3D Viewer</button>
+					<div class="menu-divider menu-board"></div>
+					<button type="button" class="menu-command menu-board" data-board-toggle="zone-filled">Drawing Mode › Draw Zone Fills</button>
+					<button type="button" class="menu-command menu-board" data-board-toggle="zone-outline">Drawing Mode › Draw Zone Outlines</button>
 				</div></div>
 				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Place</button><div class="menu-popover">
-					<button type="button" class="menu-command" data-tool="select">Select<span>S</span></button>
-					<button type="button" class="menu-command" data-action-target="btn-highlight-net">Highlight Net</button>
+					<button type="button" class="menu-command menu-schematic" data-tool="select">Select<span>S</span></button>
+					<button type="button" class="menu-command menu-schematic" data-action-target="btn-highlight-net">Highlight Net</button>
+					<div class="menu-divider menu-schematic"></div>
+					<button type="button" class="menu-command menu-schematic" data-tool="place-symbol">Symbol<span>A</span></button>
+					<button type="button" class="menu-command menu-schematic" data-tool="power">Power Port</button>
+					<button type="button" class="menu-command menu-schematic" data-tool="wire">Wire<span>W</span></button>
+					<button type="button" class="menu-command menu-schematic" data-tool="bus">Bus</button>
+					<button type="button" class="menu-command menu-schematic" data-tool="bus-entry">Wire to Bus Entry</button>
+					<button type="button" class="menu-command menu-schematic" data-tool="no-connect">No Connect<span>X</span></button>
+					<button type="button" class="menu-command menu-schematic" data-tool="junction">Junction<span>J</span></button>
+					<button type="button" class="menu-command menu-schematic" data-tool="label">Local Label</button>
+					<button type="button" class="menu-command menu-schematic" data-tool="directive-label">Directive Label</button>
+					<button type="button" class="menu-command menu-schematic" data-tool="global-label">Global Label<span>G</span></button>
+					<button type="button" class="menu-command menu-schematic" data-tool="hier-label">Hierarchical Label<span>H</span></button>
+					<button type="button" class="menu-command menu-schematic" data-tool="rule-area">Rule Area</button>
+					<button type="button" class="menu-command menu-schematic" data-tool="hier-sheet" disabled>Hierarchical Sheet</button>
+					<button type="button" class="menu-command menu-schematic" data-tool="sheet-pin" disabled>Place Sheet Pin</button>
+					<button type="button" class="menu-command menu-schematic" data-tool="sync-sheet-pins" disabled>Sync Sheet Pins</button>
+					<div class="menu-divider menu-schematic"></div>
+					<button type="button" class="menu-command menu-schematic" data-tool="text">Text</button>
+					<button type="button" class="menu-command menu-schematic" data-tool="text-box">Text Box</button>
+					<button type="button" class="menu-command menu-schematic" data-tool="table">Table</button>
+					<button type="button" class="menu-command menu-schematic" data-tool="line">Line<span>L</span></button>
+					<button type="button" class="menu-command menu-schematic" data-tool="rect">Rectangle</button>
+					<button type="button" class="menu-command menu-schematic" data-tool="circle">Circle<span>C</span></button>
+					<button type="button" class="menu-command menu-schematic" data-tool="arc">Arc<span>A</span></button>
+					<button type="button" class="menu-command menu-schematic" data-tool="bezier">Bezier Curve<span>B</span></button>
+					<button type="button" class="menu-command menu-schematic" data-tool="image">Image</button>
+					<button type="button" class="menu-command menu-schematic" data-tool="delete">Interactive Delete</button>
+					<button type="button" class="menu-command menu-board" data-board-command="place-via">Add Via</button>
+					<button type="button" class="menu-command menu-board" disabled>Add Filled Zone</button>
+					<button type="button" class="menu-command menu-board" disabled>Add Rule Area</button>
+					<div class="menu-divider menu-board"></div>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-line">Draw Line<span>L</span></button>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-arc">Draw Arc<span>A</span></button>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-rectangle">Draw Rectangle</button>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-circle">Draw Circle<span>C</span></button>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-polygon">Draw Polygon</button>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-bezier">Draw Bezier<span>B</span></button>
+					<button type="button" class="menu-command menu-board" data-board-command="place-text">Place Text<span>Ctrl+Shift+T</span></button>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-text-box">Draw Text Box</button>
+					<div class="menu-divider menu-board"></div>
+					<div class="menu-divider menu-board"></div>
+					<button type="button" class="menu-command menu-board" data-board-command="set-drill-origin">Drill/Place File Origin</button>
+					<button type="button" class="menu-command menu-board" data-board-command="reset-drill-origin">Reset Drill Origin</button>
+					<button type="button" class="menu-command menu-board" data-board-command="set-grid-origin">Grid Origin</button>
+					<button type="button" class="menu-command menu-board" data-board-command="reset-grid-origin">Reset Grid Origin</button>
+				</div></div>
+				<div class="menu-group menu-board"><button type="button" class="menu-trigger" aria-expanded="false">Route</button><div class="menu-popover">
+					<button type="button" class="menu-command" data-board-command="route-track">Route Single Track</button>
+					<button type="button" class="menu-command" disabled>Route Differential Pair</button>
 					<div class="menu-divider"></div>
-					<button type="button" class="menu-command" data-tool="place-symbol">Symbol<span>A</span></button>
-					<button type="button" class="menu-command" data-tool="power">Power Port</button>
-					<button type="button" class="menu-command" data-tool="wire">Wire<span>W</span></button>
-					<button type="button" class="menu-command" data-tool="bus">Bus</button>
-					<button type="button" class="menu-command" data-tool="bus-entry">Wire to Bus Entry</button>
-					<button type="button" class="menu-command" data-tool="no-connect">No Connect<span>X</span></button>
-					<button type="button" class="menu-command" data-tool="junction">Junction<span>J</span></button>
-					<button type="button" class="menu-command" data-tool="label">Local Label</button>
-					<button type="button" class="menu-command" data-tool="directive-label">Directive Label</button>
-					<button type="button" class="menu-command" data-tool="global-label">Global Label<span>G</span></button>
-					<button type="button" class="menu-command" data-tool="hier-label">Hierarchical Label<span>H</span></button>
-					<button type="button" class="menu-command" data-tool="rule-area">Rule Area</button>
-					<button type="button" class="menu-command" data-tool="hier-sheet" disabled>Hierarchical Sheet</button>
-					<button type="button" class="menu-command" data-tool="sheet-pin" disabled>Place Sheet Pin</button>
-					<button type="button" class="menu-command" data-tool="sync-sheet-pins" disabled>Sync Sheet Pins</button>
-					<div class="menu-divider"></div>
-					<button type="button" class="menu-command" data-tool="text">Text</button>
-					<button type="button" class="menu-command" data-tool="text-box">Text Box</button>
-					<button type="button" class="menu-command" data-tool="table">Table</button>
-					<button type="button" class="menu-command" data-tool="line">Line<span>L</span></button>
-					<button type="button" class="menu-command" data-tool="rect">Rectangle</button>
-					<button type="button" class="menu-command" data-tool="circle">Circle<span>C</span></button>
-					<button type="button" class="menu-command" data-tool="arc">Arc<span>A</span></button>
-					<button type="button" class="menu-command" data-tool="bezier">Bezier Curve<span>B</span></button>
-					<button type="button" class="menu-command" data-tool="image">Image</button>
-					<button type="button" class="menu-command" data-tool="delete">Interactive Delete</button>
+					<button type="button" class="menu-command" disabled>Length Tune</button>
+					<button type="button" class="menu-command" disabled>Router Settings…</button>
 				</div></div>
 				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Inspect</button><div class="menu-popover">
-					<button type="button" class="menu-command" data-action-target="btn-highlight-net">Highlight Net</button>
+					<button type="button" class="menu-command menu-schematic" data-action-target="btn-highlight-net">Highlight Net</button>
+					<button type="button" class="menu-command menu-board" disabled>Board Statistics</button>
+					<button type="button" class="menu-command menu-board" disabled>Measure</button>
+					<div class="menu-divider menu-board"></div>
+					<button type="button" class="menu-command menu-board" disabled>Design Rules Checker</button>
+					<button type="button" class="menu-command menu-board" data-action-target="btn-highlight-net">Highlight Net</button>
 				</div></div>
-				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Tools</button><div class="menu-popover">
+				<div class="menu-group menu-schematic"><button type="button" class="menu-trigger" aria-expanded="false">Tools</button><div class="menu-popover">
 					<button type="button" class="menu-command" data-action-target="btn-index-symbols">Manage Symbol Libraries…</button>
+				</div></div>
+				<div class="menu-group menu-board"><button type="button" class="menu-trigger" aria-expanded="false">Tools</button><div class="menu-popover">
+					<button type="button" class="menu-command" disabled>Update PCB from Schematic…</button>
+					<button type="button" class="menu-command" disabled>Update Footprints from Library…</button>
+					<div class="menu-divider"></div>
+					<button type="button" class="menu-command" disabled>Zones Manager…</button>
+					<button type="button" class="menu-command" disabled>Cleanup Tracks and Vias…</button>
 				</div></div>
 				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Preferences</button><div class="menu-popover">
 					<button type="button" class="menu-command" data-action-target="btn-preferences">Preferences…<span>Ctrl+,</span></button>
@@ -91,6 +157,7 @@
 			<nav class="view-tabs hidden" id="view-tabs">
 				<button type="button" class="view-tab" id="view-tab-schematic" data-view="schematic">Schematic</button>
 				<button type="button" class="view-tab" id="view-tab-board" data-view="board">PCB</button>
+				<button type="button" class="view-tab" id="view-tab-project-settings" data-view="project-settings">Project Setup</button>
 			</nav>
 		</div>
 		<div class="command-toolbar" role="toolbar" aria-label="Main toolbar">
@@ -105,6 +172,7 @@
 			<nav class="toolbar-section toolbar-view-switcher" aria-label="Editor views">
 				<button type="button" class="toolbar-button" data-action-target="view-tab-schematic" title="Schematic Editor"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="7" width="12" height="10"/><path d="M3 10 H6 M3 14 H6 M18 10 H21 M18 14 H21 M10 7 V4 M14 7 V4 M10 17 V20 M14 17 V20"/></svg></button>
 				<button type="button" class="toolbar-button" data-action-target="view-tab-board" title="PCB Editor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5 H19 V19 H5 Z M8 8 H12 V12 H8 Z M14 12 H17 V16 H14 Z"/><path d="M12 10 H16 M10 12 V16"/></svg></button>
+				<button type="button" class="toolbar-button" data-action-target="view-tab-project-settings" title="Project Setup"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5 H19 V19 H5 Z M8 9 H16 M8 13 H16 M8 17 H13"/><circle cx="17" cy="17" r="2.5"/></svg></button>
 			</nav>
 			<div class="toolbar-divider" aria-hidden="true"></div>
 			<div class="toolbar-section hidden" id="edit-actions">
@@ -181,7 +249,7 @@
 			<button type="button" class="tool-btn" data-board-toggle="units" title="Switch Units" aria-label="Units: Millimeters">
 				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 7 V17 M5 12 H19 M10 9 V15 M14 9 V15 M18 9 V15"/></svg>
 			</button>
-			<button type="button" class="tool-btn" disabled title="Crosshair Modes — not yet implemented" aria-label="Crosshair Modes">
+			<button type="button" class="tool-btn" data-board-toggle="crosshair" title="Crosshair Mode: Small Crosshairs" aria-label="Crosshair Mode: Small Crosshairs" aria-pressed="false">
 				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M12 4 V20 M4 12 H20 M9 9 L15 15 M15 9 L9 15"/></svg>
 			</button>
 
@@ -205,7 +273,7 @@
 			<button type="button" class="tool-btn" data-board-toggle="high-contrast" title="High Contrast Mode" aria-label="High Contrast Mode" aria-pressed="false">
 				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 6 H19 M5 10 H14 M5 14 H19 M5 18 H11"/></svg>
 			</button>
-			<button type="button" class="tool-btn" disabled title="Highlight Net — not yet implemented" aria-label="Highlight Net">
+			<button type="button" class="tool-btn" data-board-toggle="highlight-net" title="Highlight Net" aria-label="Highlight Net" aria-pressed="false">
 				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 17 H10 L14 8 H19 M10 17 L14 20"/><circle cx="5" cy="17" r="1.3" fill="currentColor" stroke="none"/><circle cx="19" cy="8" r="1.3" fill="currentColor" stroke="none"/></svg>
 			</button>
 
@@ -220,13 +288,13 @@
 
 			<div class="tool-sep"></div>
 
-			<button type="button" class="tool-btn" disabled title="Pad Display Mode — not yet implemented" aria-label="Pad Display Mode">
+			<button type="button" class="tool-btn" data-board-toggle="pad-display" title="Sketch Pads" aria-label="Sketch Pads" aria-pressed="false">
 				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><circle cx="12" cy="12" r="2"/></svg>
 			</button>
-			<button type="button" class="tool-btn" disabled title="Via Display Mode — not yet implemented" aria-label="Via Display Mode">
+			<button type="button" class="tool-btn" data-board-toggle="via-display" title="Sketch Vias" aria-label="Sketch Vias" aria-pressed="false">
 				<svg class="tool-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/></svg>
 			</button>
-			<button type="button" class="tool-btn" disabled title="Track Display Mode — not yet implemented" aria-label="Track Display Mode">
+			<button type="button" class="tool-btn" data-board-toggle="track-display" title="Sketch Tracks" aria-label="Sketch Tracks" aria-pressed="false">
 				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 17 L10 12 L14 15 L19 7"/><path d="M5 20 L10 15 L14 18 L19 10"/></svg>
 			</button>
 
@@ -257,6 +325,16 @@
 					<h3 id="properties-modal-title">Properties</h3>
 					<div id="properties-modal-body"></div>
 					<div class="table-modal-actions"><button type="button" id="properties-modal-close">Close</button></div>
+				</div>
+				<div class="table-modal zone-fill-progress-modal hidden" id="zone-fill-progress-modal">
+					<h3>Filling Zones…</h3>
+					<div class="zone-fill-progress-track"><div class="zone-fill-progress-fill" id="zone-fill-progress-fill"></div></div>
+					<div class="zone-fill-progress-label" id="zone-fill-progress-label">Starting…</div>
+				</div>
+				<div class="table-modal zone-fill-progress-modal hidden" id="symbol-index-progress-modal">
+					<h3>Indexing Symbols…</h3>
+					<div class="zone-fill-progress-track"><div class="zone-fill-progress-fill" id="symbol-index-progress-fill"></div></div>
+					<div class="zone-fill-progress-label" id="symbol-index-progress-label">Starting…</div>
 				</div>
 			<div class="symbol-chooser hidden" id="symbol-chooser-modal" role="dialog" aria-modal="true" aria-labelledby="symbol-chooser-title">
 				<div class="symbol-chooser-header">
@@ -377,8 +455,35 @@
 			<button type="button" class="tool-btn" disabled title="Add Rule Area — coming after board editing">
 				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" stroke-dasharray="3 2"/></svg>
 			</button>
+			<div class="tool-sep"></div>
+			<button type="button" class="tool-btn" data-tool="line" title="Draw Line (L)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 18 L19 6"/><circle cx="5" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="6" r="1.4" fill="currentColor" stroke="none"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="arc" title="Draw Arc (A)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 17 A9 9 0 0 1 19 17"/><circle cx="5" cy="17" r="1.2" fill="currentColor" stroke="none"/><circle cx="19" cy="17" r="1.2" fill="currentColor" stroke="none"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="rect" title="Draw Rectangle">
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="5" y="6" width="14" height="12"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="circle" title="Draw Circle (C)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="polygon" title="Draw Polygon">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 17 L8 6 L17 5 L20 14 L13 19 Z"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="bezier" title="Draw Bezier (B)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 17 C8 4 15 20 20 7"/><circle cx="4" cy="17" r="1.2" fill="currentColor" stroke="none"/><circle cx="20" cy="7" r="1.2" fill="currentColor" stroke="none"/></svg>
+			</button>
+			<div class="tool-sep"></div>
+			<button type="button" class="tool-btn" data-tool="text" title="Place Text (Ctrl+Shift+T)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 5 H19 M12 5 V19 M8 19 H16"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="text-box" title="Draw Text Box">
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="4.5" y="5" width="15" height="14"/><path d="M8 9 H16 M12 9 V15 M9.5 15 H14.5"/></svg>
+			</button>
 		</aside>
 		<aside class="board-appearance hidden" id="board-appearance" aria-label="PCB appearance"></aside>
+		<section class="project-setup-workspace hidden" id="project-setup-workspace" aria-label="Project Setup"></section>
 	</main>
 	<footer class="status-bar">
 		<span id="status" class="status-message">Ready</span>
