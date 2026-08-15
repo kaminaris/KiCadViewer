@@ -210,6 +210,8 @@ html, body {
 	font-weight: 600;
 }
 
+.breadcrumb-sheet.modified { color: #f0b84b; }
+
 .view-tabs {
 	display: flex;
 	align-items: stretch;
@@ -280,6 +282,11 @@ html, body {
 .toolbar-button:hover:not(:disabled) { background: #3a4653; border-color: #596a7d; color: #fff; }
 .toolbar-button:active:not(:disabled) { background: #2d78ad; }
 .toolbar-button:disabled { color: #687584; cursor: not-allowed; }
+.toolbar-button.dirty:not(:disabled) {
+	color: #f0b84b;
+	border-color: #8f6b25;
+	background: #3d3218;
+}
 .toolbar-button svg { width: var(--toolbar-icon-size); height: var(--toolbar-icon-size); fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
 .toolbar-divider { width: 1px; align-self: stretch; margin: 0.15rem 0.35rem; background: #4a5563; }
 .toolbar-view-switcher { margin-right: auto; }
@@ -500,9 +507,90 @@ main.project-setup-mode > :not(.project-setup-workspace) { display: none !import
 .project-settings-inline-actions { display: flex; gap: 3px; }
 .project-settings-inline-actions button { min-width: 28px; padding-inline: 6px; }
 .project-settings-mono { color: var(--muted); font-family: Consolas, "Courier New", monospace; font-size: 11px; }
+.project-setup-hint { max-width: 900px; margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+.project-setup-rules-editor { display: block; width: 100%; max-width: 900px; min-height: 360px; box-sizing: border-box; padding: 10px; background: #171a20; color: inherit; border: 1px solid var(--line); font-family: Consolas, "Courier New", monospace; font-size: 12px; line-height: 1.5; resize: vertical; }
+.project-setup-file-btn {
+	display: inline-block;
+	appearance: none;
+	border: 1px solid #596273;
+	border-radius: 3px;
+	background: #2b3139;
+	color: var(--text);
+	padding: 5px 10px;
+	font: 12px var(--font);
+	cursor: pointer;
+}
+.project-setup-file-btn:hover { border-color: var(--accent); background: #35404b; }
 .stackup-table th:last-child,
 .stackup-table td:last-child { width: auto; min-width: 200px; text-align: left; }
 .stackup-row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.project-settings-color { display: inline-flex; align-items: center; gap: 6px; }
+.project-settings-color input[type=color] { width: 34px; height: 24px; padding: 0; border: 1px solid #596273; border-radius: 3px; background: transparent; cursor: pointer; }
+
+/* KiCad's wxBitmapComboBox stackup color picker: trigger + popup list of colored swatches. */
+.stackup-color-combo { position: relative; display: inline-block; min-width: 150px; }
+.stackup-color-trigger {
+	display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box;
+	padding: 3px 6px; border: 1px solid #596273; border-radius: 3px; background: #2b3139; color: var(--text);
+	font: 12px var(--font); cursor: pointer;
+}
+.stackup-color-trigger:hover { border-color: var(--accent); }
+.stackup-color-swatch { width: 14px; height: 14px; flex: 0 0 auto; border: 1px solid rgba(255,255,255,.32); border-radius: 1px; }
+.stackup-color-label { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stackup-color-caret { flex: 0 0 auto; color: var(--muted); font-size: 10px; }
+.stackup-color-menu {
+	position: absolute; z-index: 30; top: calc(100% + 2px); left: 0; min-width: 100%; max-height: 240px; overflow-y: auto;
+	border: 1px solid #596273; border-radius: 3px; background: #20242c; box-shadow: 0 6px 20px rgba(0,0,0,.4);
+}
+.stackup-color-menu.hidden { display: none; }
+.stackup-color-option {
+	display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box;
+	padding: 5px 7px; border: 0; background: transparent; color: var(--text); font: 12px var(--font);
+	text-align: left; cursor: pointer; white-space: nowrap;
+}
+.stackup-color-option:hover { background: #333a45; }
+.stackup-color-native { position: absolute; width: 0; height: 0; padding: 0; border: 0; opacity: 0; pointer-events: none; }
+
+/* Material "…" button opening DIALOG_DIELECTRIC_MATERIAL. */
+.material-input-group { display: flex; align-items: center; gap: 4px; }
+.material-input-group input[type=text] { min-width: 90px; }
+.material-dialog-trigger {
+	flex: 0 0 auto; padding: 2px 8px; border: 1px solid #596273; border-radius: 3px; background: #2b3139;
+	color: var(--text); font: 12px var(--font); cursor: pointer;
+}
+.material-dialog-trigger:hover { border-color: var(--accent); background: #35404b; }
+.material-dialog-backdrop {
+	position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
+	background: rgba(0,0,0,.5);
+}
+.material-dialog {
+	width: min(480px, calc(100% - 32px)); max-height: 82vh; overflow-y: auto; padding: 16px;
+	background: #252a33; border: 1px solid #697386; border-radius: 6px; box-shadow: 0 8px 30px rgba(0,0,0,.45); color: #e6e9ef;
+}
+.material-dialog h3 { margin: 0 0 12px; }
+.material-dialog-fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+.material-dialog-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); }
+.material-dialog-fields input { box-sizing: border-box; width: 100%; background: #171a20; color: inherit; border: 1px solid #596273; padding: 5px 7px; font: 12px var(--font); }
+.material-dialog-list-heading { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
+.material-dialog-list { max-height: 240px; overflow-y: auto; border: 1px solid var(--line); }
+.material-dialog-list table { margin: 0; }
+.material-dialog-row { cursor: pointer; }
+.material-dialog-row:hover { background: rgba(255,255,255,.07); }
+
+/* "New Project" name-only modal (SessionController.newProject / NewProjectDialog.ts). */
+.new-project-dialog-backdrop {
+	position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
+	background: rgba(0,0,0,.5);
+}
+.new-project-dialog {
+	width: min(360px, calc(100% - 32px)); padding: 16px;
+	background: #252a33; border: 1px solid #697386; border-radius: 6px; box-shadow: 0 8px 30px rgba(0,0,0,.45); color: #e6e9ef;
+}
+.new-project-dialog h3 { margin: 0 0 12px; }
+.new-project-dialog label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); }
+.new-project-dialog input { box-sizing: border-box; width: 100%; background: #171a20; color: inherit; border: 1px solid #596273; padding: 6px 8px; font: 13px var(--font); }
+.new-project-dialog-error { margin: 8px 0 0; font-size: 11px; color: #f2a2a2; }
+.new-project-dialog-error.hidden { display: none; }
 .board-defaults-table { min-width: 920px; }
 .board-defaults-table th:last-child,
 .board-defaults-table td:last-child { width: auto; text-align: center; }

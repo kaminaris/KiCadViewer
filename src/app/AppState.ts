@@ -13,6 +13,7 @@ export type AppMode = 'view' | 'circuit' | 'edit';
  *  touching every individual call site. */
 export class AppState {
 	protected textCommitHandler: ((text: string) => void) | null = null;
+	protected textChangedHandler: (() => void) | null = null;
 
 	constructor(protected readonly doc: ActiveDocument) {}
 
@@ -26,6 +27,10 @@ export class AppState {
 		this.textCommitHandler = handler;
 	}
 
+	setTextChangedHandler(handler: (() => void) | null): void {
+		this.textChangedHandler = handler;
+	}
+
 	/** Refresh from the live session (preferring it), falling back to the
 	 *  last-known-good cached copy when the session transiently can't
 	 *  produce one (no schematic loaded / mid-load — see
@@ -36,6 +41,7 @@ export class AppState {
 	refreshSchematicText(session: KicadRenderSession | null | undefined): string {
 		this.doc.schematicText = session?.getSchematicText() || this.doc.schematicText;
 		this.textCommitHandler?.(this.doc.schematicText);
+		this.textChangedHandler?.();
 		return this.doc.schematicText;
 	}
 
@@ -48,6 +54,7 @@ export class AppState {
 	 *  rather than deriving it from the session. */
 	setSchematicText(text: string): void {
 		this.doc.schematicText = text;
+		this.textChangedHandler?.();
 	}
 
 	/** Board-side counterpart to refreshSchematicText — same choke point,
@@ -56,6 +63,7 @@ export class AppState {
 	refreshBoardText(session: KicadRenderSession | null | undefined): string {
 		this.doc.boardText = session?.getBoardText() || this.doc.boardText;
 		this.textCommitHandler?.(this.doc.boardText);
+		this.textChangedHandler?.();
 		return this.doc.boardText;
 	}
 
@@ -67,5 +75,24 @@ export class AppState {
 	 *  fresh, mirroring setSchematicText. */
 	setBoardText(text: string): void {
 		this.doc.boardText = text;
+		this.textChangedHandler?.();
+	}
+
+	get hasUnsavedSchematicChanges(): boolean {
+		return this.doc.hasUnsavedSchematicChanges;
+	}
+
+	get hasUnsavedBoardChanges(): boolean {
+		return this.doc.hasUnsavedBoardChanges;
+	}
+
+	markSchematicSaved(): void {
+		this.doc.savedSchematicText = this.doc.schematicText;
+		this.textChangedHandler?.();
+	}
+
+	markBoardSaved(): void {
+		this.doc.savedBoardText = this.doc.boardText;
+		this.textChangedHandler?.();
 	}
 }

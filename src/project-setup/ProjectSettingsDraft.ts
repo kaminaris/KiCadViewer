@@ -1,11 +1,16 @@
 import type { KicadProjectFile } from '@kicad-io/Project/KicadProjectFile';
 import type { KicadBoard } from '@kicad-io/Project/KicadBoard';
+import type { KicadSchematic } from '@kicad-io/Project/KicadSchematic';
+import type { KicadDesignRulesFile } from '@kicad-io/Project/KicadDesignRulesFile';
 import { KicadParser } from '@kicad-io/KicadParser';
 import { KicadElement } from '@kicad-io/KicadElement';
 import { KicadElementLayer } from '@kicad-io/KicadElementLayer';
 import { KicadElementLayers, type KicadLayerDefinition, type KicadLayerType } from '@kicad-io/KicadElementLayers';
 import { KicadElementSetup, KicadElementStackup } from '@kicad-io/KicadElementSetup';
 import { KicadElementThickness } from '@kicad-io/KicadElementNumeric';
+import { KicadElementEmbeddedFile, KicadElementEmbeddedFiles } from '@kicad-io/KicadElementEmbeddedFiles';
+import { mmh3Hash128Hex } from '@kicad-io/Project/EmbeddedFileHash';
+import { encodeRawFrame } from '@zstd-ts/encodeRaw';
 
 export interface ValidationIssue {
 	path: string;
@@ -195,8 +200,15 @@ export class ProjectSettingsDraft {
 	protected draft: Record<string, unknown>;
 	protected originalBoardText: string | null = null;
 	protected draftBoardRoot: KicadElement | null = null;
+	protected originalSchematicText: string | null = null;
+	protected draftSchematicRoot: KicadElement | null = null;
+	protected originalRulesText: string | null = null;
+	protected draftRulesText: string | null = null;
 
-	constructor(source: Record<string, unknown>, board?: KicadBoard) {
+	constructor(
+		source: Record<string, unknown>, board?: KicadBoard, designRules?: KicadDesignRulesFile,
+		schematic?: KicadSchematic
+	) {
 		this.original = clone(source);
 		this.originalJson = stableJson(source);
 		this.draft = clone(source);
@@ -204,10 +216,17 @@ export class ProjectSettingsDraft {
 			this.originalBoardText = board.rootElement.write();
 			this.draftBoardRoot = this.parseBoard(this.originalBoardText);
 		}
+		if (schematic?.rootElement) {
+			this.originalSchematicText = schematic.rootElement.write();
+			this.draftSchematicRoot = this.parseBoard(this.originalSchematicText);
+		}
+		this.originalRulesText = designRules?.loaded ? designRules.data : null;
+		this.draftRulesText = this.originalRulesText;
 	}
 
 	get isDirty(): boolean {
-		return stableJson(this.draft) !== stableJson(this.original) || this.isBoardDirty;
+		return stableJson(this.draft) !== stableJson(this.original)
+			|| this.isBoardDirty || this.isSchematicDirty || this.isRulesDirty;
 	}
 
 	get isBoardDirty(): boolean {
@@ -216,6 +235,38 @@ export class ProjectSettingsDraft {
 
 	get hasBoard(): boolean {
 		return !!this.draftBoardRoot;
+	}
+
+	get isSchematicDirty(): boolean {
+		return !!this.draftSchematicRoot && this.draftSchematicRoot.write() !== this.originalSchematicText;
+	}
+
+	get hasSchematic(): boolean {
+		return !!this.draftSchematicRoot;
+	}
+
+	/** `.kicad_dru` custom rules — free text, no parsing/validation yet (see
+	 *  ProjectSetupPlan.md's Data Ownership table: "lossless text document
+	 *  first; syntax-aware validation and editor diagnostics second"). */
+	get rulesText(): string {
+		return this.draftRulesText ?? '';
+	}
+
+	/** Whether an existing `.kicad_dru` was read from disk — false for a
+	 *  project that's never had one, even after the user starts typing
+	 *  (isRulesDirty covers that case; this only reflects the ORIGINAL
+	 *  on-disk state, matching hasBoard's own "still describes what was
+	 *  loaded" semantics). */
+	get hasRulesFile(): boolean {
+		return this.originalRulesText !== null;
+	}
+
+	get isRulesDirty(): boolean {
+		return (this.draftRulesText ?? '') !== (this.originalRulesText ?? '');
+	}
+
+	setRulesText(text: string): void {
+		this.draftRulesText = text;
 	}
 
 	get textVariables(): Record<string, string> {
@@ -726,9 +777,43 @@ export class ProjectSettingsDraft {
 		if (back) node.setAttribute({ value: 'back', format: 'literal' });
 	}
 
+	get boardEmbeddedFiles(): KicadElementEmbeddedFile[] {
+		return this.draftBoardRoot?.findFirstChildByClass(KicadElementEmbeddedFiles)?.files ?? [];
+	}
+
+	/** Compresses `bytes` (Raw_Block — no LZ/entropy coding, see encodeRaw.ts's
+	 *  header comment) and computes its KiCad MMH3 checksum over the
+	 *  UNCOMPRESSED content, matching what pcbnew's own EMBEDDED_FILES writer
+	 *  stores — callers only ever need to hand over the plain file bytes. */
+	addBoardEmbeddedFile(name: string, type: string, bytes: Uint8Array): KicadElementEmbeddedFile {
+		if (!this.draftBoardRoot) throw new Error('This project has no board file.');
+		const container = this.draftBoardRoot.findOrCreateChildByClass(KicadElementEmbeddedFiles);
+		return container.addFile(name, type, encodeRawFrame(bytes), mmh3Hash128Hex(bytes));
+	}
+
+	removeBoardEmbeddedFile(name: string): boolean {
+		return this.draftBoardRoot?.findFirstChildByClass(KicadElementEmbeddedFiles)?.removeFile(name) ?? false;
+	}
+
+	get schematicEmbeddedFiles(): KicadElementEmbeddedFile[] {
+		return this.draftSchematicRoot?.findFirstChildByClass(KicadElementEmbeddedFiles)?.files ?? [];
+	}
+
+	addSchematicEmbeddedFile(name: string, type: string, bytes: Uint8Array): KicadElementEmbeddedFile {
+		if (!this.draftSchematicRoot) throw new Error('This project has no schematic file.');
+		const container = this.draftSchematicRoot.findOrCreateChildByClass(KicadElementEmbeddedFiles);
+		return container.addFile(name, type, encodeRawFrame(bytes), mmh3Hash128Hex(bytes));
+	}
+
+	removeSchematicEmbeddedFile(name: string): boolean {
+		return this.draftSchematicRoot?.findFirstChildByClass(KicadElementEmbeddedFiles)?.removeFile(name) ?? false;
+	}
+
 	reset(): void {
 		this.draft = clone(this.original);
 		this.draftBoardRoot = this.originalBoardText ? this.parseBoard(this.originalBoardText) : null;
+		this.draftSchematicRoot = this.originalSchematicText ? this.parseBoard(this.originalSchematicText) : null;
+		this.draftRulesText = this.originalRulesText;
 	}
 
 	validate(): ValidationIssue[] {
@@ -742,7 +827,10 @@ export class ProjectSettingsDraft {
 		];
 	}
 
-	async apply(projectFile: KicadProjectFile, board?: KicadBoard): Promise<void> {
+	async apply(
+		projectFile: KicadProjectFile, board?: KicadBoard, designRules?: KicadDesignRulesFile,
+		schematic?: KicadSchematic
+	): Promise<void> {
 		this.prepareSchemaVersions();
 		const issues = this.validate();
 		if (issues.length) {
@@ -754,16 +842,33 @@ export class ProjectSettingsDraft {
 		if (this.originalBoardText && board?.rootElement?.write() !== this.originalBoardText) {
 			throw new Error('Board settings changed outside this tab. Revert and review the newer board data before applying.');
 		}
+		if (this.originalSchematicText && schematic?.rootElement?.write() !== this.originalSchematicText) {
+			throw new Error('Schematic settings changed outside this tab. Revert and review the newer schematic data before applying.');
+		}
+		if (this.originalRulesText !== null && designRules?.data !== this.originalRulesText) {
+			throw new Error('Custom rules changed outside this tab. Revert and review the newer rules text before applying.');
+		}
 		const previous = projectFile.raw;
 		const next = clone(this.draft) as Record<string, any>;
 		const projectChanged = stableJson(next) !== this.originalJson;
 		const boardChanged = this.isBoardDirty;
+		const schematicChanged = this.isSchematicDirty;
+		const rulesChanged = this.isRulesDirty;
 		const nextBoardText = this.draftBoardRoot?.write() ?? null;
+		const nextSchematicText = this.draftSchematicRoot?.write() ?? null;
 		if (boardChanged && (!board || !board.saveFile || !nextBoardText)) {
 			throw new Error('The board file cannot be saved by this project adapter.');
 		}
+		if (schematicChanged && (!schematic || !schematic.saveFile || !nextSchematicText)) {
+			throw new Error('The schematic file cannot be saved by this project adapter.');
+		}
+		if (rulesChanged && (!designRules || !designRules.saveFile)) {
+			throw new Error('The custom rules file cannot be saved by this project adapter.');
+		}
 		try {
+			if (rulesChanged) await designRules!.saveFile!(designRules!.path, this.draftRulesText ?? '');
 			if (boardChanged) await board!.saveFile!(board!.path, nextBoardText! + '\n');
+			if (schematicChanged) await schematic!.saveFile!(schematic!.path, nextSchematicText! + '\n');
 			if (projectChanged) {
 				projectFile.raw = next;
 				await projectFile.save();
@@ -775,6 +880,14 @@ export class ProjectSettingsDraft {
 				try { await board.saveFile(board.path, this.originalBoardText + '\n'); }
 				catch { /* Best-effort rollback; retain the original in-memory board. */ }
 			}
+			if (schematicChanged && schematic?.saveFile && this.originalSchematicText) {
+				try { await schematic.saveFile(schematic.path, this.originalSchematicText + '\n'); }
+				catch { /* Best-effort rollback; retain the original in-memory schematic. */ }
+			}
+			if (rulesChanged && designRules?.saveFile && this.originalRulesText !== null) {
+				try { await designRules.saveFile(designRules.path, this.originalRulesText); }
+				catch { /* Best-effort rollback; retain the original in-memory rules text. */ }
+			}
 			throw error;
 		}
 		if (boardChanged && board && nextBoardText) {
@@ -782,6 +895,17 @@ export class ProjectSettingsDraft {
 			board.data = nextBoardText + '\n';
 			this.originalBoardText = nextBoardText;
 			this.draftBoardRoot = this.parseBoard(nextBoardText);
+		}
+		if (schematicChanged && schematic && nextSchematicText) {
+			schematic.rootElement = this.parseBoard(nextSchematicText);
+			schematic.data = nextSchematicText + '\n';
+			this.originalSchematicText = nextSchematicText;
+			this.draftSchematicRoot = this.parseBoard(nextSchematicText);
+		}
+		if (rulesChanged && designRules) {
+			designRules.data = this.draftRulesText ?? '';
+			designRules.loaded = true;
+			this.originalRulesText = this.draftRulesText;
 		}
 		this.original = clone(next);
 		this.originalJson = stableJson(next);

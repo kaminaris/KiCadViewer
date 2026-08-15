@@ -25,6 +25,7 @@ import type { AppState }                                                from './
 import type { Settings }                                                from './Settings';
 import type { StatusBar }                                               from './StatusBar';
 import type { MainDomRefs }                                             from './domRefs';
+import { openNewProjectDialog }                                         from '../ui/NewProjectDialog';
 
 /** The subset of ActiveDocument's fields SessionController actually reads/
  * writes — a narrow interface (rather than depending on ActiveDocument
@@ -146,7 +147,13 @@ export class SessionController {
 		// skips this, which is fine: see SharedWorkerTransport/
 		// BroadcastChannelTransport's own doc comments on why a stale peer
 		// entry left behind that way isn't a correctness problem).
-		window.addEventListener('beforeunload', () => this.projectStore?.dispose());
+		window.addEventListener('beforeunload', event => {
+			if (this.state.kind === 'schematic' && this.appState.hasUnsavedSchematicChanges) {
+				event.preventDefault();
+				event.returnValue = '';
+			}
+			this.projectStore?.dispose();
+		});
 	}
 
 	/** Lazily constructs (or swaps, disposing the old one) the ProjectStore
@@ -361,6 +368,7 @@ export class SessionController {
 			if (kind === 'board') {
 				this.appState.setBoardText(text);
 				await session.loadBoardText(text);
+				this.appState.markBoardSaved();
 				this.state.placements = [];
 				this.state.lockedNetlist = null;
 			}
@@ -369,6 +377,7 @@ export class SessionController {
 				this.state.placedFragment = text;
 				this.callbacks.lockNetlistFromText(text, true);
 				await session.loadSchematicText(text, this.buildSchematicDocInfo(filename, { showDrawingSheet }));
+				this.appState.markSchematicSaved();
 				if (this.state.mode === 'circuit' || this.state.circuitDragMode) {
 					const count = this.callbacks.syncPlacementsFromSession();
 					const nets = this.state.lockedNetlist?.summary.netCount ?? 0;
@@ -586,11 +595,11 @@ export class SessionController {
 	 * from this one.
 	 *
 	 * Two reopen paths: a 'folder' project needs requestPermission() on its
-	 * live dirHandle (a real per-browser-session gesture-gated prompt); an
-	 * 'imported' one needs nothing at all — IndexedDbFsAdapter reads
-	 * straight from IndexedDB, which every tab of this origin already has
-	 * access to, so multi-tab support for an imported project is actually
-	 * MORE robust than for a folder one.
+	 * live dirHandle (a real per-browser-session gesture-gated prompt);
+	 * 'imported' and 'browser' ones need nothing at all — both are backed by
+	 * the same IndexedDbFsAdapter, which reads straight from IndexedDB (every
+	 * tab of this origin already has access to it), so multi-tab support for
+	 * either is actually MORE robust than for a folder one.
 	 */
 	async openFromRegistryRoute(projectId: string, view: DocumentKind, sheetPath: string | null): Promise<void> {
 		if (this.state.projectContext?.key !== projectId) {
@@ -601,7 +610,7 @@ export class SessionController {
 				return;
 			}
 			try {
-				if (record.kind === 'imported') {
+				if (record.kind === 'imported' || record.kind === 'browser') {
 					const adapter = new IndexedDbFsAdapter(projectId);
 					if (!record.proFile) {
 						this.statusBar.setStatus(`"${ record.name }" is missing its project file path — reimport it from Home.`);
@@ -644,7 +653,7 @@ export class SessionController {
 				return;
 			}
 		}
-		// Common case: openProjectFolder/newProjectFolder/openProjectZip (or a
+		// Common case: openProjectFolder/newProject/openProjectZip (or a
 		// prior call to this same method) already left the canvas showing
 		// exactly this route — e.g. Home's "Open Folder" flow immediately
 		// navigates the router here right after the picker flow already
@@ -742,6 +751,12 @@ export class SessionController {
 				}
 			}
 			await projectContext.project.saveAll(projectContext.fsAdapter.saveFile);
+			if (this.state.kind === 'board') {
+				this.appState.markBoardSaved();
+			}
+			else {
+				this.appState.markSchematicSaved();
+			}
 			this.statusBar.setStatus('Project saved.');
 		}
 		catch (error) {
@@ -750,47 +765,36 @@ export class SessionController {
 		}
 	}
 
-	/** Scaffolds a brand-new blank project (schematic + board + .kicad_pro,
-	 *  KicadProject.createNew()/saveAll() from Phase A) into a folder the
-	 *  user picks, then opens it the same way openProjectFolder() would. */
-	async newProjectFolder(): Promise<string | null> {
-		const picker = getDirectoryPicker();
-		if (!picker) {
-			this.statusBar.setStatus('This browser can\'t create a project folder (needs Chrome or Edge).');
-			return null;
-		}
-		const name = window.prompt('New project name?', 'NewProject')?.trim();
+	/**
+	 * Scaffolds a brand-new blank project (schematic + board + .kicad_pro,
+	 * KicadProject.createNew()/saveAll() from Phase A) entirely in
+	 * IndexedDB — the same durable, no-folder-needed storage
+	 * openProjectZip() already writes imported projects into (see
+	 * IndexedDbFsAdapter's doc comment). No OS folder picker involved: the
+	 * name from the dialog is the only input, and "Save Project" already
+	 * works against this adapter with no extra wiring.
+	 */
+	async newProject(): Promise<string | null> {
+		const name = await openNewProjectDialog();
 		if (!name) {
 			return null;
 		}
-		let dirHandle: FsDirectoryHandle;
 		try {
-			dirHandle = await picker({ mode: 'readwrite' });
-		}
-		catch (error) {
-			if (error instanceof DOMException && error.name === 'AbortError') {
-				return null;
-			}
-			this.statusBar.setStatus(
-				`Could not open folder — ${ error instanceof Error ? error.message : String(error) }`);
-			return null;
-		}
-		try {
-			const adapter = new BrowserFsAdapter(dirHandle);
+			const key = `browser:${ crypto.randomUUID() }`;
+			const adapter = new IndexedDbFsAdapter(key);
 			const project = KicadProject.createNew(name, '', adapter.pathUtils);
 			await project.saveAll(adapter.saveFile);
-			const key = `folder:${ dirHandle.name }:${ name }.kicad_pro`;
-			this.state.projectContext = new ProjectContext(key, project, adapter, dirHandle.name);
+			this.state.projectContext = new ProjectContext(key, project, adapter, name);
 			this.state.currentSheetNode = project.mainSchematic ?? null;
 			this.dom.saveProjectButton.disabled = false;
 			void this.registry.upsertProject({
-				id: key, name: dirHandle.name, kind: 'folder', dirHandle, proFile: `${ name }.kicad_pro`,
+				id: key, name, kind: 'browser', proFile: `${ name }.kicad_pro`,
 				lastOpenedAt: Date.now(), sheetCount: project.mainSchematic ? this.countSheetsRecursive(project.mainSchematic) : undefined
 			});
 			if (project.mainSchematic) {
 				await this.loadText(project.mainSchematic.data, 'schematic', project.mainSchematic.path);
 			}
-			this.statusBar.setStatus(`Created new project "${ name }" in "${ dirHandle.name }".`);
+			this.statusBar.setStatus(`Created new project "${ name }".`);
 			return key;
 		}
 		catch (error) {

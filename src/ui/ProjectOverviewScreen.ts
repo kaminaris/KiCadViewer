@@ -56,7 +56,7 @@ export class ProjectOverviewScreen {
 		title.textContent = project.name;
 		const meta = document.createElement('div');
 		meta.className = 'project-overview-meta';
-		const kindLabel = project.kind === 'folder' ? 'Folder project' : 'Imported project';
+		const kindLabel = project.kind === 'folder' ? 'Folder project' : project.kind === 'imported' ? 'Imported project' : 'Browser-only project';
 		const sheetLabel = project.sheetCount ? `${ project.sheetCount } sheet(s)` : '';
 		meta.textContent = [kindLabel, sheetLabel].filter(Boolean).join(' · ');
 		header.append(title, meta);

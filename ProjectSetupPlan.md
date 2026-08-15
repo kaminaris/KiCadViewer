@@ -61,7 +61,21 @@ Last updated: 2026-08-14
   the live `KicadRenderSession` (preserving camera/zoom) so the PCB canvas
   reflects the change immediately. Desktop-KiCad bidirectional comparison
   remains, out of scope for this slice per explicit user direction.
-- [ ] Phase 6 — custom rules, embedded files, and imports.
+- [ ] Phase 6 — custom rules, embedded files, and imports. **In progress:**
+  the `.kicad_dru` Custom Rules page is implemented (lossless free-text
+  editor, matching real KiCad's own primary editor for this file). Board and
+  Schematic Embedded Files are also implemented: `.kicad_pcb`/`.kicad_sch`
+  `(embedded_files (file ...))` blocks parse/write losslessly
+  (`KicadElementEmbeddedFiles`/`KicadElementEmbeddedFile` in kicad-io), a
+  hand-ported zero-dependency zstd decoder (`shared/zstd-ts/`, RFC 8878,
+  ground-truth verified against Node's real `zlib.zstdCompressSync`) and MMH3
+  checksum port (`EmbeddedFileHash.ts`, verbatim copy of the already-shipped
+  `api/kicadEmbedStep.ts` implementation) back the pages, and both pages list
+  every embedded file (name/type/size/checksum) with Add (multiple files,
+  written as uncompressed-but-spec-valid Raw_Block frames — no LZ/entropy
+  encoder needed to write, only to read arbitrary real files) and per-row
+  Download (decompresses, checksum-verifies, triggers a browser save) and
+  Remove actions. Cross-project import remains.
 - [ ] Phase 7 — editor/runtime integration and parity verification.
 
 ### Implementation checkpoint — 2026-08-14
@@ -189,6 +203,58 @@ Last updated: 2026-08-14
   fixture exercised Add/Remove/Lock on Physical Stackup and a copper-layer-
   count change applied while the PCB tab was already open, confirming no
   console errors on either flow.
+- Started Phase 6 with Custom Rules (`.kicad_dru`). Confirmed against the
+  real KiCad checkout that Board Setup > Custom Rules is itself a raw text
+  editor over this exact file (`pcbnew/dialogs/panel_setup_rules.cpp`, a
+  Scintilla control with an on-demand Compile button) rather than a
+  structured form, so a lossless free-text passthrough is the correct match
+  for KiCad's own authoring model here, not a placeholder pending a
+  structured editor.
+- Added `KicadDesignRulesFile` (`shared/kicad-io/src/Project/`), mirroring
+  `KicadProjectFile`'s load/save skeleton minus JSON parsing.
+  `KicadProject.openFromProjectRoot` now probes for the optional
+  same-basename `.kicad_dru` sibling via try/catch (every fs adapter in this
+  app throws on a missing file, never returns falsy); `createNew` seeds an
+  unloaded instance for symmetry; `saveAll` only writes it when it already
+  existed on disk or now has real content, so an untouched project never
+  gains a spurious empty `.kicad_dru`.
+- `ProjectSettingsDraft` gained `.kicad_dru` as a third, independent
+  participant using the exact same whole-file-text-diff dirty-tracking,
+  conflict-check, and try/catch-rollback shape the board participant
+  already uses — `apply()` now saves/rolls back rules, board, and project
+  JSON as one transaction.
+- The Custom Rules page is a single free-form textarea (bound to
+  `draft.rulesText`/`setRulesText`), with a hint shown when no `.kicad_dru`
+  exists yet for the project. Deliberately no grammar/syntax validation this
+  pass — the Data Ownership table's "lossless text document first;
+  syntax-aware validation and editor diagnostics second" phasing stays
+  intentional, not deferred by omission.
+- Fixed a re-render gap caught during browser verification: the "no file
+  yet" hint is computed from original (pre-apply) state, so a successful
+  Apply that creates the first `.kicad_dru` for a project left the stale
+  hint showing until the user navigated away and back. `apply()` now
+  re-renders the Custom Rules page specifically after a successful apply;
+  every other page edits its fields in place already and needed no change.
+- Added kicad-io test coverage: `kicadDesignRulesFile.test.ts` (load/save
+  round-trip, including the "file doesn't exist" throw path preserving
+  `.path` for a later create), `kicadProjectDesignRules.test.ts`
+  (`openFromProjectRoot`'s sibling-discovery try/catch, `createNew`,
+  `saveAll`'s no-spurious-file guarantee), and
+  `projectSettingsDraftDesignRules.test.ts` (dirty tracking, reset, apply's
+  conditional save, the "adapter can't save" and "changed outside this tab"
+  error paths) — 16 new tests, all passing, no regressions in the existing
+  suite.
+- Type-check and production build pass. Browser verification against the
+  supplied CM5 project (imported via the IndexedDB-backed zip-import path,
+  which is writable, unlike a raw zip-backed read-only open) confirmed:
+  page renders with the correct "no file yet" hint on a project with no
+  `.kicad_dru`; typing dirties the draft; Apply creates the file, persists
+  it, and the hint correctly disappears; a full page reload (via Home →
+  reopen) shows the persisted rule text; editing again dirties the draft a
+  second time; Revert restores the original text and clears dirty state;
+  browser console stayed clean (the one console error present throughout —
+  "Failed to fetch a worker script" — predates this change and is unrelated
+  to Custom Rules).
 
 ## KiCad source baseline
 
@@ -568,8 +634,15 @@ compute the same thickness and reload the same stack.
 - Custom Rules: lossless `.kicad_dru` editor with syntax highlighting,
   diagnostics, search, and KiCad grammar/version validation. Preserve comments
   and formatting on untouched content.
-- Board and Schematic Embedded Files: list, add, replace, extract/download,
-  checksum, type, referenced/unreferenced state, and guarded removal.
+- Board and Schematic Embedded Files: list (name/type/size/checksum), add
+  (multiple files at once), download (decompress + checksum-verify), and
+  remove. **Done** — hand-ported zstd decoder (`shared/zstd-ts/`) and MMH3
+  checksum (`EmbeddedFileHash.ts`) back it; write side emits spec-valid
+  uncompressed Raw_Block frames (no LZ/entropy encoder needed to write).
+  No reference tracking on removal, matching real KiCad's own
+  `panel_embedded_files.cpp` dialog, which doesn't check references either.
+  Not done: in-place replace (remove + re-add covers it) and
+  referenced/unreferenced display.
 - Import from another board: choose a `.kicad_pcb` and selectively copy board
   layers/stackup/mask-paste plus project board-design settings, matching
   KiCad's applicable pages.

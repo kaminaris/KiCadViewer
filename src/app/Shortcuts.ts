@@ -1,5 +1,5 @@
 export type ShortcutActionId =
-	| 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'duplicate' | 'zoom-fit' | 'move' | 'rotate' | 'tidy'
+	| 'undo' | 'redo' | 'save' | 'cut' | 'copy' | 'paste' | 'duplicate' | 'zoom-fit' | 'move' | 'rotate' | 'tidy'
 	| 'select' | 'place-symbol' | 'power' | 'wire' | 'bus' | 'bus-entry' | 'no-connect' | 'junction'
 	| 'label' | 'directive-label' | 'global-label' | 'hier-label' | 'rule-area'
 	| 'text' | 'text-box' | 'table' | 'line' | 'rect' | 'circle' | 'arc' | 'bezier' | 'image' | 'delete';
@@ -14,6 +14,7 @@ export interface ShortcutAction {
 export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
 	{ id: 'undo', category: 'Common', label: 'Undo', defaultBinding: 'Ctrl+Z' },
 	{ id: 'redo', category: 'Common', label: 'Redo', defaultBinding: 'Ctrl+Shift+Z' },
+	{ id: 'save', category: 'Common', label: 'Save Project', defaultBinding: 'Ctrl+S' },
 	{ id: 'cut', category: 'Common', label: 'Cut', defaultBinding: 'Ctrl+X' },
 	{ id: 'copy', category: 'Common', label: 'Copy', defaultBinding: 'Ctrl+C' },
 	{ id: 'paste', category: 'Common', label: 'Paste', defaultBinding: 'Ctrl+V' },

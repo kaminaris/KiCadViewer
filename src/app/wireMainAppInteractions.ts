@@ -255,7 +255,7 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		void options.sessionController.saveProject();
 	});
 	options.dom.newProjectButton.addEventListener('click', () => {
-		void options.sessionController.newProjectFolder().then(key => { if (key) options.onProjectOpened(key); });
+		void options.sessionController.newProject().then(key => { if (key) options.onProjectOpened(key); });
 	});
 	options.dom.zipInput.addEventListener('change', e => {
 		const file = (e.target as HTMLInputElement).files?.[0];
@@ -463,6 +463,7 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		clearSelectionBookkeeping: options.clearSelectionBookkeeping,
 		performUndo: () => options.sessionController.undo(),
 		performRedo: () => options.sessionController.redo(),
+		performSave: () => options.sessionController.saveProject(),
 		copySelection: session => {
 			options.clipboardController.copySelection(
 				session, options.clipboardController.copyableIds(session, [...session.selectionIds]));

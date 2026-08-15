@@ -12,6 +12,8 @@ type PendingUnitState = { libId: string; reference: string; nextUnit: number; to
 type ChooserListItem =
 	| { type: 'group'; label: string; height: number }
 	| { type: 'row'; item: PendingSymbol; height: number };
+type ScoredSymbol = { item: PendingSymbol; score: number; exact: boolean };
+type SymbolGroup = { label: string; rows: PendingSymbol[] };
 
 export interface SymbolChooserCallbacks {
 	getSession(): KicadRenderSession | null;
@@ -53,11 +55,31 @@ export class SymbolChooser {
 	protected itemOffsets: number[] = [];
 	protected listInnerEl: HTMLDivElement | null = null;
 	protected windowFramePending = false;
+	/** Real KiCad's "-- Recently Used --" pseudo-group (picksymbol.cpp's
+	 *  move-to-front MRU list) — in-memory, most-recent first. Unlike real
+	 *  KiCad (which loses this on app restart) this app also persists it to
+	 *  localStorage, since a browser tab gets closed/reloaded far more often
+	 *  than a desktop KiCad session does. */
+	protected recentlyUsed: PendingSymbol[] = [];
 
 	protected static readonly ROW_HEIGHT = 30;
 	protected static readonly GROUP_HEIGHT = 24;
 	protected static readonly BUFFER_ITEMS = 8;
 	protected static readonly BULK_UNIT_SPACING_MM = 12.7;
+	/** Matches SYMBOL_CHOOSER_FRAME::s_SymbolHistoryMaxCount in real KiCad. */
+	protected static readonly RECENTLY_USED_MAX = 8;
+	protected static readonly RECENT_STORAGE_KEY = 'kionline-recent-symbol-libids';
+	/** Nickname of the app's bundled fallback library — see
+	 *  SymbolLibraryCache.ensureDefaultLibrary's doc comment. Used only to
+	 *  break library-group sort ties in buildGroups(), matching desktop
+	 *  KiCad's real-world "Device sorts first" behavior. */
+	protected static readonly DEVICE_LIBRARY_NICKNAME = 'Device';
+	/** True once the user has explicitly clicked a row this time the dialog
+	 *  is open — before that, renderList() keeps jumping the selection to
+	 *  the top-ranked search match on every keystroke (like real KiCad's
+	 *  tree, whose first visible leaf is implicitly "selected"), rather than
+	 *  clinging to whatever was merely the default before anything was typed. */
+	protected userSelected = false;
 
 	constructor(protected readonly cache: SymbolLibraryCache, protected readonly callbacks: SymbolChooserCallbacks) {
 		for (const eventName of [
@@ -65,7 +87,7 @@ export class SymbolChooser {
 		]) {
 			this.el.addEventListener(eventName, event => event.stopPropagation());
 		}
-		this.filterEl.addEventListener('input', () => this.renderList());
+		this.filterEl.addEventListener('input', () => { this.userSelected = false; this.renderList(); });
 		this.listEl.addEventListener('scroll', () => this.scheduleWindowRender());
 		this.listEl.addEventListener('click', event => this.selectRow(event));
 		this.cancelEl.addEventListener('click', () => this.cancelPlacement());
@@ -82,17 +104,70 @@ export class SymbolChooser {
 			const files = await this.cache.getFiles();
 			this.rows = files.flatMap(
 				file => file.symbols.map(summary => ({ file, summary, libId: this.libraryId(file, summary) })));
-			this.pendingSymbol = this.rows[0] ?? null;
+			if (!this.recentlyUsed.length) {
+				this.recentlyUsed = this.loadRecentLibIds()
+					.map(libId => this.rows.find(row => row.libId === libId))
+					.filter((row): row is PendingSymbol => !!row)
+					.slice(0, SymbolChooser.RECENTLY_USED_MAX);
+			}
+			this.pendingSymbol = null;
+			this.userSelected = false;
 			this.titleEl.textContent = `Choose Symbol (${ this.rows.length } items loaded)`;
 			this.filterEl.value = '';
 			this.el.classList.remove('hidden');
 			this.renderList();
-			void this.renderPreview(this.pendingSymbol);
 			this.filterEl.focus();
 		}
 		catch (error) {
 			this.callbacks.setStatus(error instanceof Error ? error.message : String(error));
 		}
+	}
+
+	protected loadRecentLibIds(): string[] {
+		try {
+			const raw = JSON.parse(localStorage.getItem(SymbolChooser.RECENT_STORAGE_KEY) ?? '[]');
+			return Array.isArray(raw) ? raw.filter((value): value is string => typeof value === 'string') : [];
+		}
+		catch {
+			return [];
+		}
+	}
+
+	protected recordRecentlyUsed(item: PendingSymbol): void {
+		this.recentlyUsed = [item, ...this.recentlyUsed.filter(entry => entry.libId !== item.libId)]
+			.slice(0, SymbolChooser.RECENTLY_USED_MAX);
+		try {
+			localStorage.setItem(SymbolChooser.RECENT_STORAGE_KEY, JSON.stringify(this.recentlyUsed.map(entry => entry.libId)));
+		}
+		catch {
+			// Best-effort — losing the persisted MRU list (private browsing,
+			// storage quota) just means it behaves like real KiCad's in-memory-only one.
+		}
+	}
+
+	/** Real KiCad's "-- Already Placed --" pseudo-group (sch_drawing_tools.cpp):
+	 *  every distinct lib_id already placed on the CURRENT sheet (this app has
+	 *  no cheap way to walk the whole hierarchy from here — see
+	 *  KicadRenderSession.listSymbolPoses's own doc comment), resolved back to
+	 *  a PendingSymbol only when that library is actually indexed. */
+	protected alreadyPlacedRows(): PendingSymbol[] {
+		const session = this.callbacks.getSession();
+		if (!session) {
+			return [];
+		}
+		const seen = new Set<string>();
+		const out: PendingSymbol[] = [];
+		for (const pose of session.listSymbolPoses()) {
+			if (!pose.libId || seen.has(pose.libId)) {
+				continue;
+			}
+			seen.add(pose.libId);
+			const match = this.rows.find(row => row.libId === pose.libId);
+			if (match) {
+				out.push(match);
+			}
+		}
+		return out;
 	}
 
 	close(): void {
@@ -207,66 +282,110 @@ export class SymbolChooser {
 		return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 	}
 
-	protected scoreSearchQuery(query: string, item: PendingSymbol): number {
+	protected libraryNickname(item: PendingSymbol): string {
+		const idx = item.libId.indexOf(':');
+		return idx >= 0 ? item.libId.slice(0, idx) : item.file.relativePath;
+	}
+
+	protected naturalCompare(a: string, b: string): number {
+		return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+	}
+
+	/**
+	 * Ports eeschema's LIB_TREE_NODE::UpdateScore / EDA_COMBINED_MATCHER::
+	 * ScoreTerms (common/lib_tree_model.cpp, common/eda_pattern_match.cpp):
+	 * AND across whitespace-separated search terms (every term must match
+	 * SOMETHING or the item is excluded — returns null), OR across fields
+	 * per term (only the best-scoring field counts). Per field: an exact
+	 * whole-field match scores 8× that field's weight, a prefix match 2×,
+	 * any other substring match 1×. Only a match on an "isName" field
+	 * (the symbol's own lib_id or bare name — never keywords/description)
+	 * can set `exact`, which real KiCad's sort ranks above raw score.
+	 * Field weights mirror LIB_SYMBOL::cacheSearchTerms (lib_symbol.cpp):
+	 * lib_id 16, name 8, library nickname 4, keywords 4, Value 4, description 1.
+	 */
+	protected scoreSearchQuery(query: string, item: PendingSymbol): { score: number; exact: boolean } | null {
 		const cleanedQuery = this.normalizeText(query);
 		if (!cleanedQuery) {
-			return 0;
+			return { score: 0, exact: false };
 		}
 		const terms = cleanedQuery.split(/\s+/).filter(Boolean);
-		if (!terms.length) {
-			return 0;
-		}
 		const candidates = [
+			{ text: item.libId, weight: 16, isName: true },
 			{ text: item.summary.name, weight: 8, isName: true },
-			{ text: item.libId, weight: 8, isName: true },
+			{ text: this.libraryNickname(item), weight: 4, isName: false },
+			{ text: item.summary.keywords, weight: 4, isName: false },
 			{ text: item.summary.value, weight: 4, isName: false },
-			{ text: item.summary.description, weight: 2, isName: false },
-			{ text: item.summary.reference, weight: 2, isName: false },
-			{ text: item.summary.keywords, weight: 1, isName: false },
-			{ text: item.file.relativePath, weight: 1, isName: false }
+			{ text: item.summary.description, weight: 1, isName: false }
 		];
 
-		let score = 0;
+		let total = 0, anyExact = false;
 		for (const term of terms) {
-			let matched = false;
+			let bestFieldScore = 0, bestFieldExact = false;
 			for (const cand of candidates) {
 				const normalized = this.normalizeText(cand.text ?? '');
 				if (!normalized) {
 					continue;
 				}
+				let fieldScore = 0, fieldExact = false;
 				if (normalized === term) {
-					score += 8 * cand.weight;
-					matched = true;
-					break;
+					fieldScore = 8 * cand.weight;
+					fieldExact = cand.isName;
 				}
-				const starts = normalized.startsWith(term);
-				if (starts) {
-					score += 2 * cand.weight;
-					matched = true;
-					break;
+				else if (normalized.startsWith(term)) {
+					fieldScore = 2 * cand.weight;
 				}
-				if (normalized.includes(term)) {
-					score += cand.weight;
-					matched = true;
-					break;
+				else if (normalized.includes(term)) {
+					fieldScore = cand.weight;
+				}
+				if (fieldScore > bestFieldScore) {
+					bestFieldScore = fieldScore;
+					bestFieldExact = fieldExact;
 				}
 			}
-			if (!matched) {
-				return -Infinity;
+			if (bestFieldScore <= 0) {
+				return null;
 			}
+			total += bestFieldScore;
+			anyExact = anyExact || bestFieldExact;
 		}
-		return score;
+		return { score: total, exact: anyExact };
 	}
 
-	protected buildFlatItems(filtered: PendingSymbol[]): void {
-		const items: ChooserListItem[] = [];
-		let previousFile = '';
-		for (const row of filtered) {
-			if (row.file.id !== previousFile) {
-				items.push({ type: 'group', label: row.file.relativePath, height: SymbolChooser.GROUP_HEIGHT });
-				previousFile = row.file.id;
+	/** Scores+filters a row set against the current search box, then sorts:
+	 *  while searching, exact-match items first, then by score, falling back
+	 *  to alphabetical (matches LIB_TREE_NODE::Compare's tier order); with no
+	 *  search text, plain alphabetical by symbol name. */
+	protected scoreAndSort(query: string, rows: PendingSymbol[]): PendingSymbol[] {
+		const searching = this.normalizeText(query).length > 0;
+		const scored: ScoredSymbol[] = [];
+		for (const item of rows) {
+			const result = this.scoreSearchQuery(query, item);
+			if (result) {
+				scored.push({ item, score: result.score, exact: result.exact });
 			}
-			items.push({ type: 'row', item: row, height: SymbolChooser.ROW_HEIGHT });
+		}
+		scored.sort((a, b) => {
+			if (searching) {
+				if (a.exact !== b.exact) {
+					return a.exact ? -1 : 1;
+				}
+				if (a.score !== b.score) {
+					return b.score - a.score;
+				}
+			}
+			return this.naturalCompare(a.item.summary.name, b.item.summary.name);
+		});
+		return scored.map(entry => entry.item);
+	}
+
+	protected buildFlatItems(groups: SymbolGroup[]): void {
+		const items: ChooserListItem[] = [];
+		for (const group of groups) {
+			items.push({ type: 'group', label: group.label, height: SymbolChooser.GROUP_HEIGHT });
+			for (const row of group.rows) {
+				items.push({ type: 'row', item: row, height: SymbolChooser.ROW_HEIGHT });
+			}
 		}
 		this.flatItems = items;
 		let cursor = 0;
@@ -353,13 +472,86 @@ export class SymbolChooser {
 		});
 	}
 
+	/** Real KiCad's group order (panel_symbol_chooser.cpp): "-- Recently Used
+	 *  --" first, then "-- Already Placed --", then ordinary libraries —
+	 *  each alphabetical by nickname (symbol_tree_model_adapter.cpp's
+	 *  AssignIntrinsicRanks uses natural string compare). Every group
+	 *  (pseudo or real) is scored/filtered by the same search query and
+	 *  dropped entirely when it ends up empty. */
+	/**
+	 * Library group ORDER, not just the symbols within each one: real KiCad
+	 * shows whichever library has the strongest matching hit first during a
+	 * search (e.g. "Device" reliably sorts to the top for a generic-part
+	 * query like "c" or "r", since its symbols tend to win the exact-match
+	 * tier) rather than staying pinned to its plain alphabetical position.
+	 * With no search text, groups fall back to alphabetical — the same
+	 * baseline order symbol_tree_model_adapter.cpp's AssignIntrinsicRanks
+	 * establishes before any scoring happens.
+	 *
+	 * Tie-break: when two libraries end up with the same exact/score tier
+	 * for the search (common — plenty of real projects keep a local copy of
+	 * a generic part like "R"/"C" alongside Device's own), plain alphabetical
+	 * comparison would arbitrarily favor whichever nickname happens to sort
+	 * earlier, which is why "Device" doesn't reliably land first the way it
+	 * does in desktop KiCad (there, it's simply always the first entry in
+	 * every install's sym-lib-table, so a stable/rank-preserving tie-break
+	 * keeps it on top). DEVICE_LIBRARY_NICKNAME is special-cased in the
+	 * tie-break only — not in scoring — to reproduce that same outcome here,
+	 * where there is no real per-project sym-lib-table order to preserve.
+	 */
+	protected buildGroups(query: string): SymbolGroup[] {
+		const searching = this.normalizeText(query).length > 0;
+		const groups: SymbolGroup[] = [];
+		const recentRows = this.scoreAndSort(query, this.recentlyUsed);
+		if (recentRows.length) {
+			groups.push({ label: '-- Recently Used --', rows: recentRows });
+		}
+		const placedRows = this.scoreAndSort(query, this.alreadyPlacedRows());
+		if (placedRows.length) {
+			groups.push({ label: '-- Already Placed --', rows: placedRows });
+		}
+		const byLibrary = new Map<string, PendingSymbol[]>();
+		for (const row of this.rows) {
+			const key = this.libraryNickname(row);
+			(byLibrary.get(key) ?? byLibrary.set(key, []).get(key)!).push(row);
+		}
+		const libraryGroups: { label: string; rows: PendingSymbol[]; bestScore: number; bestExact: boolean }[] = [];
+		for (const name of byLibrary.keys()) {
+			const rows = this.scoreAndSort(query, byLibrary.get(name)!);
+			if (!rows.length) {
+				continue;
+			}
+			// rows[0] is already this library's best match (scoreAndSort put it
+			// first) — re-score just that one row instead of tracking scores
+			// through the whole sort.
+			const best = searching ? this.scoreSearchQuery(query, rows[0]!) : null;
+			libraryGroups.push({ label: name, rows, bestScore: best?.score ?? 0, bestExact: best?.exact ?? false });
+		}
+		libraryGroups.sort((a, b) => {
+			if (searching) {
+				if (a.bestExact !== b.bestExact) {
+					return a.bestExact ? -1 : 1;
+				}
+				if (a.bestScore !== b.bestScore) {
+					return b.bestScore - a.bestScore;
+				}
+				// Tied on both tiers — see this method's doc comment: break in
+				// favor of the built-in Device library rather than falling
+				// straight to alphabetical, matching what real KiCad users see.
+				if (a.label === SymbolChooser.DEVICE_LIBRARY_NICKNAME) return -1;
+				if (b.label === SymbolChooser.DEVICE_LIBRARY_NICKNAME) return 1;
+			}
+			return this.naturalCompare(a.label, b.label);
+		});
+		groups.push(...libraryGroups.map(({ label, rows }) => ({ label, rows })));
+		return groups;
+	}
+
 	protected renderList(): void {
 		const query = this.filterEl.value;
-		const filtered = this.rows
-			.filter(item => this.scoreSearchQuery(query, item) > -Infinity)
-			.sort((a, b) => this.scoreSearchQuery(query, b) - this.scoreSearchQuery(query, a))
-			.map(item => item);
-		this.buildFlatItems(filtered);
+		const groups = this.buildGroups(query);
+		const filtered = groups.flatMap(group => group.rows);
+		this.buildFlatItems(groups);
 		if (!this.listInnerEl) {
 			this.listEl.replaceChildren();
 			this.listInnerEl = document.createElement('div');
@@ -368,7 +560,7 @@ export class SymbolChooser {
 		}
 		if (filtered.length) {
 			const currentMatches = this.pendingSymbol && filtered.some(item => item.file.id === this.pendingSymbol!.file.id && item.summary.name === this.pendingSymbol!.summary.name);
-			if (!currentMatches) {
+			if (!this.userSelected || !currentMatches) {
 				this.pendingSymbol = filtered[0] ?? null;
 				void this.renderPreview(this.pendingSymbol);
 			}
@@ -389,6 +581,7 @@ export class SymbolChooser {
 		}
 		this.pendingSymbol = this.rows.find(
 			item => item.file.id === row.dataset.fileId && item.summary.name === row.dataset.symbolName) ?? null;
+		this.userSelected = true;
 		this.renderWindow();
 		void this.renderPreview(this.pendingSymbol);
 	}
@@ -441,6 +634,7 @@ export class SymbolChooser {
 				return;
 			}
 			const totalUnits = session.getLibrarySymbolUnitCount(source, item.summary.name);
+			this.recordRecentlyUsed(item);
 			if (totalUnits > 1 && this.allUnitsEl.checked) {
 				let reference: string | null = null;
 				for (let unit = 1; unit <= totalUnits; unit++) {

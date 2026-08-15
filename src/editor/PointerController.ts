@@ -1,6 +1,7 @@
 import type {
 	KicadRenderSession, SelectionResizeBox, ResizeHandle, EditPreviewState, CurveAnchor, SelectionCurveAnchors
 } from '@kicad-render/KicadRenderSession';
+import { orthogonalWireBend } from '@kicad-render/KicadRenderSession';
 import { Vec2 } from '@kicad-render/math/Vec2';
 import type { AppMode } from '../app/AppState';
 import type { EditTool } from './Toolbar';
@@ -470,11 +471,20 @@ export class PointerController {
 				session.setEditPreview(null);
 			}
 			else {
-				if (editTool === 'wire') {
-					session.addWire(lineChainStart.x, lineChainStart.y, snapped.x, snapped.y);
+				// Real KiCad's default line mode is 90-degree-only: a segment
+				// whose endpoints aren't already axis-aligned gets an
+				// auto-inserted bend instead of being drawn at an arbitrary
+				// angle (see orthogonalWireBend's doc comment).
+				const bend = orthogonalWireBend(lineChainStart, snapped);
+				const add = editTool === 'wire'
+					? (x1: number, y1: number, x2: number, y2: number) => session.addWire(x1, y1, x2, y2)
+					: (x1: number, y1: number, x2: number, y2: number) => session.addBus(x1, y1, x2, y2);
+				if (bend) {
+					add(lineChainStart.x, lineChainStart.y, bend.x, bend.y);
+					add(bend.x, bend.y, snapped.x, snapped.y);
 				}
 				else {
-					session.addBus(lineChainStart.x, lineChainStart.y, snapped.x, snapped.y);
+					add(lineChainStart.x, lineChainStart.y, snapped.x, snapped.y);
 				}
 				this.deps.refreshSchematicText(session);
 				this.deps.setLineChainStart(snapped);

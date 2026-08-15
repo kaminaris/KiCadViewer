@@ -1,13 +1,13 @@
 import type { FsDirectoryHandle } from './BrowserFsAdapter';
 
-export type ProjectRecordKind = 'folder' | 'imported';
+export type ProjectRecordKind = 'folder' | 'imported' | 'browser';
 
 export interface ProjectRecord {
 	/** Stable id — reuses the exact `key` scheme SessionController already
 	 *  computes for ProjectContext (`folder:<dirName>:<proFile>` /
-	 *  `imported:<filename>:<size>`), so this registry and the cross-tab
-	 *  sync layer (see harmonic-munching-trinket plan) recognize "the same
-	 *  project" identically. */
+	 *  `imported:<filename>:<size>` / `browser:<uuid>`), so this registry and
+	 *  the cross-tab sync layer (see harmonic-munching-trinket plan)
+	 *  recognize "the same project" identically. */
 	id: string;
 	name: string;
 	kind: ProjectRecordKind;
@@ -15,14 +15,14 @@ export interface ProjectRecord {
 	 *  handle, structured-clone-stored so a later tab or a fresh page load
 	 *  can re-request permission and reopen without the user re-picking the
 	 *  folder (see BrowserFsAdapter's own FsDirectoryHandle doc comment for
-	 *  the same structured-clone assumption). 'imported' projects need no
-	 *  equivalent — their files already live in IndexedDB (see
-	 *  IndexedDbFsAdapter), so any tab reopens instantly with no permission
-	 *  prompt at all. */
+	 *  the same structured-clone assumption). 'imported' and 'browser'
+	 *  projects need no equivalent — their files already live in IndexedDB
+	 *  (see IndexedDbFsAdapter), so any tab reopens instantly with no
+	 *  permission prompt at all. */
 	dirHandle?: FsDirectoryHandle;
 	/** Bare filename of the .kicad_pro — for 'folder' it's directly inside
-	 *  dirHandle; for 'imported' it's the path IndexedDbFsAdapter extracted
-	 *  it under. Either way, avoids re-deriving it on reopen. */
+	 *  dirHandle; for 'imported'/'browser' it's the path IndexedDbFsAdapter
+	 *  stores it under. Either way, avoids re-deriving it on reopen. */
 	proFile?: string;
 	lastOpenedAt: number;
 	sheetCount?: number;

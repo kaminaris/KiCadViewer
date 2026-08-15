@@ -107,7 +107,7 @@ export class HomeScreen {
 
 		const meta = document.createElement('div');
 		meta.className = 'project-card-meta';
-		const kindLabel = project.kind === 'folder' ? 'Folder' : 'Imported';
+		const kindLabel = project.kind === 'folder' ? 'Folder' : project.kind === 'imported' ? 'Imported' : 'Browser';
 		const sheetLabel = project.sheetCount ? `${ project.sheetCount } sheet(s)` : '';
 		const dateLabel = new Date(project.lastOpenedAt).toLocaleString();
 		meta.textContent = [kindLabel, sheetLabel, `Opened ${ dateLabel }`].filter(Boolean).join(' · ');

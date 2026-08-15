@@ -30,6 +30,10 @@
 			"@clipper2-ts/*": [
 				"../../shared/clipper2-ts/src/*",
 				"shared/clipper2-ts/src/*"
+			],
+			"@zstd-ts/*": [
+				"../../shared/zstd-ts/src/*",
+				"shared/zstd-ts/src/*"
 			]
 		}
 	},
@@ -39,9 +43,11 @@
 		"../../shared/kicad-render/**/*.ts",
 		"../../shared/kicad-io/src/**/*.ts",
 		"../../shared/clipper2-ts/src/**/*.ts",
+		"../../shared/zstd-ts/src/**/*.ts",
 		"shared/kicad-layout/**/*.ts",
 		"shared/kicad-render/**/*.ts",
 		"shared/kicad-io/src/**/*.ts",
-		"shared/clipper2-ts/src/**/*.ts"
+		"shared/clipper2-ts/src/**/*.ts",
+		"shared/zstd-ts/src/**/*.ts"
 	]
 }

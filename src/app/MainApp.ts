@@ -114,6 +114,7 @@ const propertyDialogRenderers = new PropertyDialogRenderers(propertiesDialog, {
 	show: hitId => propertiesController.showPropertiesModal(hitId)
 });
 const symbolLibraryCache = new SymbolLibraryCache();
+void symbolLibraryCache.ensureDefaultLibrary();
 const symbolLibraryIndexer = new SymbolLibraryIndexer(symbolLibraryCache, {
 	setStatus,
 	indexSymbolsButton: dom.indexSymbolsButton,
@@ -427,11 +428,31 @@ function updateBreadcrumb(): void {
 		: doc.kind === 'board'
 		? 'PCB'
 		: (doc.currentSheetNode?.name || projectContext.rootName);
+	updateDirtyIndicators();
 	dom.viewTabSchematicBtn.classList.toggle('active', activeEditorView === 'schematic');
 	dom.viewTabBoardBtn.classList.toggle('active', activeEditorView === 'board');
 	dom.viewTabProjectSettingsBtn.classList.toggle('active', activeEditorView === 'project-settings');
 	dom.viewTabBoardBtn.disabled = !projectContext.project.mainBoard;
 }
+
+function updateDirtyIndicators(): void {
+	const schematicDirty = doc.hasUnsavedSchematicChanges;
+	const schematicViewActive = activeEditorView === 'schematic' && doc.kind === 'schematic';
+	dom.saveProjectButton.classList.toggle('dirty', schematicViewActive && schematicDirty);
+	const baseSheetLabel = activeEditorView === 'project-settings'
+		? 'Project Setup'
+		: doc.kind === 'board'
+			? 'PCB'
+			: (doc.currentSheetNode?.name || doc.projectContext?.rootName || 'Schematic');
+	dom.breadcrumbSheetEl.classList.toggle('modified', schematicViewActive && schematicDirty);
+	dom.breadcrumbSheetEl.textContent = schematicViewActive && schematicDirty
+		? `${ baseSheetLabel } *`
+		: baseSheetLabel;
+	document.title = schematicViewActive && schematicDirty ? '* KiOnline' : 'KiOnline';
+}
+
+appState.setTextChangedHandler(() => updateDirtyIndicators());
+updateDirtyIndicators();
 
 function updateCircuitHint(): void {
 	if (doc.kind === 'board') {
@@ -548,7 +569,8 @@ function applyPreferences(): void {
 
 function syncShortcutLabels(): void {
 	const actionsByTarget: Readonly<Record<string, string>> = {
-		'btn-undo': 'undo', 'btn-redo': 'redo', 'btn-export-edit': '', 'btn-highlight-net': ''
+		'btn-undo': 'undo', 'btn-redo': 'redo', 'btn-save-project': 'save',
+		'btn-export-edit': '', 'btn-highlight-net': ''
 	};
 	for (const command of document.querySelectorAll<HTMLButtonElement>('.menu-command')) {
 		const action = command.dataset.tool ?? command.dataset.shortcut ??
@@ -740,8 +762,8 @@ wireMainAppInteractions({
 	chooseSymbolDirectory: () => symbolLibraryIndexer.chooseDirectory(),
 	indexFallbackDirectory: files => symbolLibraryIndexer.indexFallbackDirectory(files),
 	refreshSymbolLibraryButton: () => symbolLibraryIndexer.refreshButton(),
-	onProjectOpened: projectId => router.navigate(
-		{ screen: 'editor', projectId, view: 'schematic', sheet: null }, { replace: true })
+	onProjectOpened: projectId => { void navigateWithGuards(
+		{ screen: 'editor', projectId, view: 'schematic', sheet: null }, { replace: true }); }
 });
 
 /**
@@ -754,13 +776,45 @@ wireMainAppInteractions({
  */
 const router = new Router();
 
+function routeLeavesSchematicEditor(next: Route): boolean {
+	const current = router.route;
+	return current.screen === 'editor'
+		&& current.view === 'schematic'
+		&& next.screen === 'editor'
+		&& next.view === 'board'
+		&& doc.hasUnsavedSchematicChanges;
+}
+
+async function confirmLeaveSchematicEditor(): Promise<boolean> {
+	const saveBeforeLeave = window.confirm(
+		'Schematic has unsaved changes. Press OK to save before leaving this view.\nPress Cancel for discard/stay options.'
+	);
+	if (saveBeforeLeave) {
+		await sessionController.saveProject();
+		return !doc.hasUnsavedSchematicChanges;
+	}
+	return window.confirm('Discard unsaved schematic changes and continue to the next view?');
+}
+
+async function navigateWithGuards(route: Route, options?: { replace?: boolean }): Promise<void> {
+	if (activeEditorView === 'project-settings' && !(route.screen === 'editor' && route.view === 'project-settings')
+		&& !projectSetup.requestLeave()) {
+		return;
+	}
+	if (routeLeavesSchematicEditor(route) && !await confirmLeaveSchematicEditor()) {
+		return;
+	}
+	router.navigate(route, options);
+}
+
 // Editor screen otherwise has no way back to Project overview / Home short
 // of the browser's own back button (not discoverable, and a dead end for
 // e.g. a zip-opened project reached via a fresh tab, which can't silently
 // reopen itself the way a folder project can via requestPermission()).
 dom.brandHomeButton.addEventListener('click', () => {
-	if (activeEditorView === 'project-settings' && !projectSetup.requestLeave()) return;
-	router.navigate(doc.projectContext ? { screen: 'project', projectId: doc.projectContext.key } : { screen: 'home' });
+	void navigateWithGuards(doc.projectContext
+		? { screen: 'project', projectId: doc.projectContext.key }
+		: { screen: 'home' });
 });
 
 // Schematic/PCB view-switcher tabs — client-side navigation within the
@@ -770,54 +824,52 @@ dom.viewTabSchematicBtn.addEventListener('click', () => {
 	if (!doc.projectContext || activeEditorView === 'schematic') {
 		return;
 	}
-	if (activeEditorView === 'project-settings' && !projectSetup.requestLeave()) return;
-	router.navigate({ screen: 'editor', projectId: doc.projectContext.key, view: 'schematic', sheet: null });
+	void navigateWithGuards({ screen: 'editor', projectId: doc.projectContext.key, view: 'schematic', sheet: null });
 });
 dom.viewTabBoardBtn.addEventListener('click', () => {
 	if (!doc.projectContext || activeEditorView === 'board') {
 		return;
 	}
-	if (activeEditorView === 'project-settings' && !projectSetup.requestLeave()) return;
-	router.navigate({ screen: 'editor', projectId: doc.projectContext.key, view: 'board', sheet: null });
+	void navigateWithGuards({ screen: 'editor', projectId: doc.projectContext.key, view: 'board', sheet: null });
 });
 dom.viewTabProjectSettingsBtn.addEventListener('click', () => {
 	if (!doc.projectContext || activeEditorView === 'project-settings') return;
-	router.navigate({ screen: 'editor', projectId: doc.projectContext.key, view: 'project-settings', sheet: null });
+	void navigateWithGuards({ screen: 'editor', projectId: doc.projectContext.key, view: 'project-settings', sheet: null });
 });
 
 const homeScreen = new HomeScreen(dom.screenHomeEl, registry, {
 	openFolder: () => {
 		void sessionController.openProjectFolder().then(key => {
 			if (key) {
-				router.navigate({ screen: 'editor', projectId: key, view: 'schematic', sheet: null });
+				void navigateWithGuards({ screen: 'editor', projectId: key, view: 'schematic', sheet: null });
 			}
 		});
 	},
 	newProject: () => {
-		void sessionController.newProjectFolder().then(key => {
+		void sessionController.newProject().then(key => {
 			if (key) {
-				router.navigate({ screen: 'editor', projectId: key, view: 'schematic', sheet: null });
+				void navigateWithGuards({ screen: 'editor', projectId: key, view: 'schematic', sheet: null });
 			}
 		});
 	},
 	openZip: file => {
 		void sessionController.openProjectZip(file).then(key => {
 			if (key) {
-				router.navigate({ screen: 'editor', projectId: key, view: 'schematic', sheet: null });
+				void navigateWithGuards({ screen: 'editor', projectId: key, view: 'schematic', sheet: null });
 			}
 		});
 	},
-	openProject: projectId => router.navigate({ screen: 'project', projectId }),
-	openScratchEditor: () => router.navigate({ screen: 'editor', projectId: null, view: 'schematic', sheet: null })
+	openProject: projectId => { void navigateWithGuards({ screen: 'project', projectId }); },
+	openScratchEditor: () => { void navigateWithGuards({ screen: 'editor', projectId: null, view: 'schematic', sheet: null }); }
 });
 
 const projectOverviewScreen = new ProjectOverviewScreen(dom.screenProjectEl, registry, {
-	openView: (projectId, view) => router.navigate({ screen: 'editor', projectId, view, sheet: null }),
+	openView: (projectId, view) => { void navigateWithGuards({ screen: 'editor', projectId, view, sheet: null }); },
 	openViewNewTab: (projectId, view) => {
 		const params = new URLSearchParams({ project: projectId, view });
 		window.open(`${ window.location.pathname }?${ params.toString() }`, '_blank');
 	},
-	back: () => router.navigate({ screen: 'home' })
+	back: () => { void navigateWithGuards({ screen: 'home' }); }
 });
 
 function showScreen(name: Route['screen']): void {

@@ -1,5 +1,8 @@
 import type { ProjectContext } from '../app/ProjectContext';
 import type { KicadLayerType } from '@kicad-io/KicadElementLayers';
+import type { KicadElementEmbeddedFile } from '@kicad-io/KicadElementEmbeddedFiles';
+import { mmh3Hash128Hex } from '@kicad-io/Project/EmbeddedFileHash';
+import { decompress } from '@zstd-ts/decode';
 import {
 	ProjectSettingsDraft,
 	type BomFieldRecord,
@@ -62,8 +65,27 @@ const IMPLEMENTED_PAGES = new Set<PageId>([
 	'pin-conflicts', 'board-layers', 'physical-stackup', 'board-finish', 'mask-paste',
 	'board-defaults', 'board-formatting', 'board-constraints',
 	'predefined-sizes', 'zone-defaults', 'teardrops', 'length-tuning',
-	'drc-severity'
+	'drc-severity', 'custom-rules', 'board-embedded', 'schematic-embedded'
 ]);
+
+const EMBEDDED_FILE_TYPE_BY_EXTENSION: Record<string, string> = {
+	step: 'model', stp: 'model', wrl: 'model',
+	ttf: 'font', otf: 'font',
+	kicad_wks: 'worksheet',
+	pdf: 'datasheet'
+};
+
+function guessEmbeddedFileType(filename: string): string {
+	const match = /\.([^.]+)$/.exec(filename);
+	const extension = match?.[1]?.toLowerCase();
+	return (extension && EMBEDDED_FILE_TYPE_BY_EXTENSION[extension]) || 'other';
+}
+
+function formatFileSize(bytes: number): string {
+	if (bytes < 1024) return `${ bytes } B`;
+	if (bytes < 1024 * 1024) return `${ (bytes / 1024).toFixed(1) } KB`;
+	return `${ (bytes / (1024 * 1024)).toFixed(1) } MB`;
+}
 
 export interface ProjectSetupControllerDeps {
 	setStatus(message: string): void;
@@ -86,6 +108,14 @@ function textInput(value: string, onInput: (value: string) => void): HTMLInputEl
 	input.value = value;
 	input.addEventListener('input', () => onInput(input.value));
 	return input;
+}
+
+function textareaInput(value: string, onInput: (value: string) => void): HTMLTextAreaElement {
+	const textarea = document.createElement('textarea');
+	textarea.value = value;
+	textarea.spellcheck = false;
+	textarea.addEventListener('input', () => onInput(textarea.value));
+	return textarea;
 }
 
 function numberInput(value: unknown, onInput: (value: number) => void, step = '0.01', min: string | null = '0'): HTMLInputElement {
@@ -119,6 +149,258 @@ function checkboxInput(checked: boolean, labelText: string, onChange: (checked: 
 	checkbox.addEventListener('change', () => onChange(checkbox.checked));
 	label.append(checkbox, document.createTextNode(labelText));
 	return label;
+}
+
+const KICAD_COLOR_UNSET = 'rgba(0, 0, 0, 0.000)';
+
+/** .kicad_pro color strings: rgba(0, 0, 0, 0.000) means "unset", rgb(r, g, b) (no alpha) means a real user pick. */
+function kicadColorToHex(value: string | null | undefined): string | null {
+	if (!value) return null;
+	const match = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(value);
+	if (match) return `#${ [match[1], match[2], match[3]].map(channel => Number(channel).toString(16).padStart(2, '0')).join('') }`;
+	return /^#[0-9a-f]{6}$/i.test(value) ? value : null;
+}
+
+function hexToKicadColor(hex: string): string {
+	const r = parseInt(hex.slice(1, 3), 16);
+	const g = parseInt(hex.slice(3, 5), 16);
+	const b = parseInt(hex.slice(5, 7), 16);
+	return `rgb(${ r }, ${ g }, ${ b })`;
+}
+
+/** A native color picker plus a Clear link, using the .kicad_pro rgb(a) string convention. */
+function colorInput(value: string, onChange: (value: string) => void): HTMLElement {
+	const wrap = document.createElement('div');
+	wrap.className = 'project-settings-color';
+	const picker = document.createElement('input');
+	picker.type = 'color';
+	picker.value = kicadColorToHex(value) ?? '#808080';
+	picker.addEventListener('input', () => onChange(hexToKicadColor(picker.value)));
+	wrap.append(picker, button('Clear', 'danger-link', () => {
+		picker.value = '#000000';
+		onChange(KICAD_COLOR_UNSET);
+	}));
+	return wrap;
+}
+
+// pcbnew/board_stackup_manager/stackup_predefined_prms.cpp: GetStandardColors() — used for Silkscreen/Soldermask items.
+const GBRJOB_COLORS: ReadonlyArray<readonly [string, string]> = [
+	['Not specified', '#505050'], ['Green', '#3c9650'], ['Red', '#800000'], ['Blue', '#000080'],
+	['Purple', '#500050'], ['Black', '#141414'], ['White', '#c8c8c8'], ['Yellow', '#808000']
+];
+
+// Same source: dielectric-item predefined colors.
+const DIELECTRIC_COLORS: ReadonlyArray<readonly [string, string]> = [
+	['Not specified', '#505050'], ['FR4 natural', '#6d744b'], ['PTFE natural', '#fcfcfa'],
+	['Polyimide', '#cd8200'], ['Phenolic natural', '#5c1106'], ['Aluminum', '#d5d5d5']
+];
+
+// pcbnew/board_stackup_manager/dielectric_material.cpp: substrateMaterial/solderMaskMaterial/silkscreenMaterial.
+const DIELECTRIC_MATERIALS: ReadonlyArray<readonly [string, number, number]> = [
+	['Not specified', 0, 0], ['FR4', 4.5, 0.02], ['FR408-HR', 3.69, 0.0091], ['Polyimide', 3.2, 0.004],
+	['Kapton', 3.2, 0.004], ['Polyolefin', 1.0, 0], ['Al', 8.7, 0.001], ['PTFE', 2.1, 0.0002],
+	['Teflon', 2.1, 0.0002], ['Ceramic', 1.0, 0]
+];
+const SOLDERMASK_MATERIALS: ReadonlyArray<readonly [string, number, number]> = [
+	['Not specified', 3.3, 0], ['Epoxy', 3.3, 0], ['Liquid Ink', 3.3, 0], ['Dry Film', 3.3, 0]
+];
+const SILKSCREEN_MATERIALS: ReadonlyArray<readonly [string, number, number]> = [
+	['Not specified', 1.0, 0], ['Liquid Photo', 1.0, 0], ['Direct Printing', 1.0, 0]
+];
+
+type StackupRowKind = 'dielectric' | 'copper' | 'soldermask' | 'silkscreen' | 'other';
+
+/** pcbnew/board_stackup_manager/board_stackup.cpp: IsMaterialEditable()/IsColorEditable() are true only for these three kinds. */
+function stackupRowKind(row: { name: string; type: string }): StackupRowKind {
+	if (/^dielectric\s+/i.test(row.name)) return 'dielectric';
+	const type = row.type.toLowerCase();
+	if (type === 'copper') return 'copper';
+	if (type.includes('solder mask')) return 'soldermask';
+	if (type.includes('silk screen')) return 'silkscreen';
+	return 'other';
+}
+
+interface MaterialDialogResult { name: string; epsilonR: number; lossTangent: number }
+
+/**
+ * pcbnew/board_stackup_manager/panel_board_stackup.cpp's onMaterialChange: "Ensure m_materialList
+ * contains all materials already in use in stackup list" — the predefined list plus any material
+ * from another row of the same kind that isn't already present (matched by name+εr+tanδ, like
+ * DIELECTRIC_SUBSTRATE_LIST::FindSubstrate), so distinct real-world values under the same name
+ * (e.g. two different "FR4" mixes) both show up.
+ */
+function materialsInUse(
+	rows: ReadonlyArray<{ name: string; type: string; material?: string; epsilonR?: number; lossTangent?: number }>,
+	kind: StackupRowKind, predefined: ReadonlyArray<readonly [string, number, number]>
+): ReadonlyArray<readonly [string, number, number]> {
+	const result = [...predefined];
+	for (const row of rows) {
+		if (stackupRowKind(row) !== kind || !row.material) continue;
+		const epsilonR = row.epsilonR ?? 0;
+		const lossTangent = row.lossTangent ?? 0;
+		const exists = result.some(([name, e, l]) => name.toLowerCase() === row.material!.toLowerCase() && e === epsilonR && l === lossTangent);
+		if (!exists) result.push([row.material, epsilonR, lossTangent]);
+	}
+	return result;
+}
+
+/** pcbnew/board_stackup_manager/dialog_dielectric_list_manager.cpp+.fbp: DIALOG_DIELECTRIC_MATERIAL. */
+function openMaterialDialog(
+	materials: ReadonlyArray<readonly [string, number, number]>,
+	current: MaterialDialogResult,
+	onConfirm: (result: MaterialDialogResult) => void
+): void {
+	const backdrop = document.createElement('div');
+	backdrop.className = 'material-dialog-backdrop';
+	const dialog = document.createElement('div');
+	dialog.className = 'material-dialog';
+
+	const heading = document.createElement('h3');
+	heading.textContent = 'Dielectric Material Characteristics';
+
+	const fields = document.createElement('div');
+	fields.className = 'material-dialog-fields';
+	const nameInput = document.createElement('input'); nameInput.type = 'text'; nameInput.value = current.name;
+	const epsilonInput = document.createElement('input'); epsilonInput.type = 'text'; epsilonInput.value = String(current.epsilonR);
+	const lossInput = document.createElement('input'); lossInput.type = 'text'; lossInput.value = String(current.lossTangent);
+	for (const [labelText, input] of [['Name:', nameInput], ['Epsilon R:', epsilonInput], ['Loss Tan:', lossInput]] as const) {
+		const label = document.createElement('label');
+		const caption = document.createElement('span'); caption.textContent = labelText;
+		label.append(caption, input);
+		fields.append(label);
+	}
+
+	const listHeading = document.createElement('p');
+	listHeading.className = 'material-dialog-list-heading';
+	listHeading.textContent = 'Common materials:';
+	const table = document.createElement('table');
+	table.className = 'project-settings-table';
+	table.innerHTML = '<thead><tr><th>Material</th><th>Epsilon R</th><th>Loss Tan</th></tr></thead>';
+	const body = document.createElement('tbody');
+	for (const [name, epsilonR, lossTangent] of materials) {
+		const tr = document.createElement('tr');
+		tr.className = 'material-dialog-row';
+		const nameCell = document.createElement('td'); nameCell.textContent = name;
+		const epsilonCell = document.createElement('td'); epsilonCell.textContent = String(epsilonR);
+		const lossCell = document.createElement('td'); lossCell.textContent = String(lossTangent);
+		tr.append(nameCell, epsilonCell, lossCell);
+		tr.addEventListener('click', () => {
+			nameInput.value = name;
+			epsilonInput.value = String(epsilonR);
+			lossInput.value = String(lossTangent);
+		});
+		body.append(tr);
+	}
+	table.append(body);
+	const listWrap = document.createElement('div');
+	listWrap.className = 'material-dialog-list';
+	listWrap.append(table);
+
+	const actions = document.createElement('div');
+	actions.className = 'table-modal-actions';
+	actions.append(
+		button('Cancel', '', () => backdrop.remove()),
+		button('OK', 'primary', () => {
+			// Mirrors TransferDataFromWindow(): both values must parse as non-negative doubles.
+			const epsilonR = Number(epsilonInput.value);
+			const lossTangent = Number(lossInput.value);
+			if (!Number.isFinite(epsilonR) || epsilonR < 0) { window.alert('Incorrect value for Epsilon R'); return; }
+			if (!Number.isFinite(lossTangent) || lossTangent < 0) { window.alert('Incorrect value for Loss Tangent'); return; }
+			onConfirm({ name: nameInput.value, epsilonR, lossTangent });
+			backdrop.remove();
+		})
+	);
+
+	dialog.append(heading, fields, listHeading, listWrap, actions);
+	backdrop.append(dialog);
+	backdrop.addEventListener('mousedown', event => { if (event.target === backdrop) backdrop.remove(); });
+	document.body.append(backdrop);
+	nameInput.focus();
+}
+
+/**
+ * .kicad_pcb stackup color: a predefined name string (e.g. "FR4 natural"), or a "#RRGGBBAA" hex
+ * string for a user-defined color (panel_board_stackup.cpp's "starts with # = custom" rule).
+ *
+ * Mirrors createColorBox()'s wxBitmapComboBox: a trigger showing a color swatch + label, a popup
+ * list with a swatch per predefined color, and a last "User defined" entry that immediately opens
+ * a color picker (like onColorSelected's dlg.ShowModal()) instead of revealing an inline control.
+ */
+function stackupColorCell(value: string | undefined, predefined: ReadonlyArray<readonly [string, string]>, onChange: (value: string) => void): HTMLElement {
+	const wrap = document.createElement('div');
+	wrap.className = 'stackup-color-combo';
+
+	const trigger = document.createElement('button');
+	trigger.type = 'button';
+	trigger.className = 'stackup-color-trigger';
+	const triggerSwatch = document.createElement('span'); triggerSwatch.className = 'stackup-color-swatch';
+	const triggerLabel = document.createElement('span'); triggerLabel.className = 'stackup-color-label';
+	const triggerCaret = document.createElement('span'); triggerCaret.className = 'stackup-color-caret'; triggerCaret.textContent = '▾';
+	trigger.append(triggerSwatch, triggerLabel, triggerCaret);
+
+	const menu = document.createElement('div');
+	menu.className = 'stackup-color-menu hidden';
+
+	const nativeInput = document.createElement('input');
+	nativeInput.type = 'color';
+	nativeInput.className = 'stackup-color-native';
+
+	function isCustom(current: string | undefined): boolean { return (current ?? '').startsWith('#'); }
+	function customHex(current: string | undefined): string { return isCustom(current) ? current!.slice(0, 7) : '#808080'; }
+
+	function onDocClick(event: MouseEvent): void {
+		if (!wrap.contains(event.target as Node)) closeMenu();
+	}
+	function closeMenu(): void {
+		menu.classList.add('hidden');
+		document.removeEventListener('mousedown', onDocClick, true);
+	}
+	function updateTrigger(current: string | undefined): void {
+		const custom = isCustom(current);
+		const matchedName = predefined.find(([name]) => name.toLowerCase() === (current ?? '').toLowerCase())?.[0];
+		triggerLabel.textContent = custom ? current!.toUpperCase() : (matchedName ?? 'Not specified');
+		triggerSwatch.style.background = custom ? customHex(current) : (predefined.find(([name]) => name === (matchedName ?? 'Not specified'))?.[1] ?? '#505050');
+		customOptionSwatch.style.background = customHex(current);
+		customOptionLabel.textContent = custom ? current!.toUpperCase() : 'User defined';
+	}
+
+	for (const [name, hex] of predefined) {
+		const option = document.createElement('button');
+		option.type = 'button';
+		option.className = 'stackup-color-option';
+		const swatch = document.createElement('span'); swatch.className = 'stackup-color-swatch'; swatch.style.background = hex;
+		const label = document.createElement('span'); label.textContent = name;
+		option.append(swatch, label);
+		option.addEventListener('click', () => { onChange(name); updateTrigger(name); closeMenu(); });
+		menu.append(option);
+	}
+
+	const customOption = document.createElement('button');
+	customOption.type = 'button';
+	customOption.className = 'stackup-color-option';
+	const customOptionSwatch = document.createElement('span'); customOptionSwatch.className = 'stackup-color-swatch';
+	const customOptionLabel = document.createElement('span');
+	customOption.append(customOptionSwatch, customOptionLabel);
+	customOption.addEventListener('click', () => { nativeInput.value = customHex(value); nativeInput.click(); });
+	menu.append(customOption);
+
+	nativeInput.addEventListener('input', () => {
+		const hex = `${ nativeInput.value }FF`.toUpperCase();
+		value = hex;
+		onChange(hex);
+		updateTrigger(hex);
+		closeMenu();
+	});
+
+	trigger.addEventListener('click', () => {
+		const willOpen = menu.classList.contains('hidden');
+		if (willOpen) { menu.classList.remove('hidden'); document.addEventListener('mousedown', onDocClick, true); }
+		else closeMenu();
+	});
+
+	updateTrigger(value);
+	wrap.append(trigger, menu, nativeInput);
+	return wrap;
 }
 
 export class ProjectSetupController {
@@ -159,7 +441,9 @@ export class ProjectSetupController {
 			const projectFile = context.project.projectFile;
 			if (!projectFile) throw new Error('This project has no .kicad_pro file.');
 			this.context = context;
-			this.draft = new ProjectSettingsDraft(projectFile.raw, context.project.mainBoard);
+			this.draft = new ProjectSettingsDraft(
+				projectFile.raw, context.project.mainBoard, context.project.designRules, context.project.mainSchematic
+			);
 			this.syncLocalRows();
 		}
 		this.root.classList.remove('hidden');
@@ -253,7 +537,9 @@ export class ProjectSetupController {
 				for (const item of pages) {
 					const pageButton = button(item.label, 'project-setup-nav-item', () => {
 						this.page = item.id;
-						this.renderNavigation();
+						for (const other of list.querySelectorAll('.project-setup-nav-item')) {
+							other.classList.toggle('active', other === pageButton);
+						}
 						this.renderPage();
 					});
 					pageButton.classList.toggle('active', this.page === item.id);
@@ -293,6 +579,9 @@ export class ProjectSetupController {
 		else if (this.page === 'teardrops') this.renderTeardrops();
 		else if (this.page === 'length-tuning') this.renderLengthTuning();
 		else if (this.page === 'drc-severity') this.renderDrcSeverity();
+		else if (this.page === 'custom-rules') this.renderCustomRules();
+		else if (this.page === 'board-embedded') this.renderEmbeddedFilesPage('board');
+		else if (this.page === 'schematic-embedded') this.renderEmbeddedFilesPage('schematic');
 		else this.renderPlannedPage();
 	}
 
@@ -382,14 +671,14 @@ export class ProjectSetupController {
 	protected renderNetClassForm(netClass: NetClassRecord, index: number): HTMLElement {
 		const form = document.createElement('div');
 		form.className = 'netclass-form';
-		const addField = (labelText: string, input: HTMLInputElement | HTMLSelectElement): void => {
+		const addField = (labelText: string, input: HTMLElement): void => {
 			const label = document.createElement('label');
 			const caption = document.createElement('span');
 			caption.textContent = labelText;
 			label.append(caption, input);
 			form.append(label);
 		};
-		addField('Name', textInput(netClass.name, value => { netClass.name = value; this.changed(); this.renderNavigation(); }));
+		addField('Name', textInput(netClass.name, value => { netClass.name = value; this.changed(); }));
 		addField('Priority', numberInput(netClass.priority, value => { netClass.priority = value; this.changed(); }, '1'));
 		const groups: Array<[string, Array<[string, keyof NetClassRecord, string?]>]> = [
 			['PCB routing (mm)', [
@@ -407,8 +696,8 @@ export class ProjectSetupController {
 			form.append(heading);
 			for (const [label, key, step] of fields) addField(label, numberInput(netClass[key], value => { netClass[key] = value; this.changed(); }, step));
 		}
-		addField('PCB color', textInput(String(netClass.pcb_color ?? ''), value => { netClass.pcb_color = value; this.changed(); }));
-		addField('Schematic color', textInput(String(netClass.schematic_color ?? ''), value => { netClass.schematic_color = value; this.changed(); }));
+		addField('PCB color', colorInput(String(netClass.pcb_color ?? ''), value => { netClass.pcb_color = value; this.changed(); }));
+		addField('Schematic color', colorInput(String(netClass.schematic_color ?? ''), value => { netClass.schematic_color = value; this.changed(); }));
 		addField('Tuning profile', textInput(String(netClass.tuning_profile ?? ''), value => { netClass.tuning_profile = value; this.changed(); }));
 		if (netClass.name !== 'Default') form.append(button('Delete Net Class', 'danger', () => {
 			if (!window.confirm(`Delete net class “${ netClass.name }”? Assignments to it must be changed before Apply.`)) return;
@@ -458,8 +747,8 @@ export class ProjectSetupController {
 		title.textContent = 'Net Colors';
 		section.append(title, this.renderTwoColumnRows(
 			this.netColorRows, ['Net name', 'KiCad color'], ['net', 'color'],
-			() => this.netColorRows.push({ net: '', color: 'rgba(0, 0, 0, 0.000)' }),
-			'Add Net Color', () => this.commitNetColors()
+			() => this.netColorRows.push({ net: '', color: KICAD_COLOR_UNSET }),
+			'Add Net Color', () => this.commitNetColors(), 'color'
 		));
 		this.contentEl.append(section);
 	}
@@ -756,7 +1045,7 @@ export class ProjectSetupController {
 
 	protected renderTwoColumnRows<T extends Record<string, any>>(
 		rows: T[], headings: [string, string], keys: [keyof T, keyof T], add: () => void, addLabel: string,
-		onChange: () => void = () => this.changed()
+		onChange: () => void = () => this.changed(), colorColumn?: keyof T
 	): HTMLElement {
 		const wrap = document.createElement('div');
 		const table = document.createElement('table');
@@ -774,7 +1063,11 @@ export class ProjectSetupController {
 			const tr = document.createElement('tr');
 			for (const key of keys) {
 				const td = document.createElement('td');
-				td.append(textInput(String(row[key] ?? ''), value => { row[key] = value as T[keyof T]; onChange(); }));
+				if (key === colorColumn) {
+					td.append(colorInput(String(row[key] ?? ''), value => { row[key] = value as T[keyof T]; onChange(); }));
+				} else {
+					td.append(textInput(String(row[key] ?? ''), value => { row[key] = value as T[keyof T]; onChange(); }));
+				}
 				tr.append(td);
 			}
 			const td = document.createElement('td');
@@ -1196,7 +1489,8 @@ export class ProjectSetupController {
 		const table = document.createElement('table'); table.className = 'project-settings-table stackup-table';
 		table.innerHTML = '<thead><tr><th>Layer</th><th>Type</th><th>Thickness (mm)</th><th>Locked</th><th>Material</th><th>Color</th><th>εr</th><th>Loss tan</th><th></th></tr></thead>';
 		const body = document.createElement('tbody');
-		for (const row of draft.stackupLayers) {
+		const stackupLayers = draft.stackupLayers;
+		for (const row of stackupLayers) {
 			const tr = document.createElement('tr');
 			const name = document.createElement('td'); name.textContent = row.name; name.className = 'project-settings-mono';
 			const dielectric = /^dielectric\s+/i.test(row.name);
@@ -1212,8 +1506,38 @@ export class ProjectSetupController {
 			const lockedCheckbox = document.createElement('input'); lockedCheckbox.type = 'checkbox'; lockedCheckbox.checked = Boolean(row.lockThickness);
 			lockedCheckbox.addEventListener('change', () => { draft.updateStackupLayer(row.index, { lockThickness: lockedCheckbox.checked }); this.changed(); });
 			locked.append(lockedCheckbox);
-			const material = document.createElement('td'); material.append(textInput(row.material ?? '', value => { draft.updateStackupLayer(row.index, { material: value }); this.changed(); }));
-			const color = document.createElement('td'); color.append(textInput(row.color ?? '', value => { draft.updateStackupLayer(row.index, { color: value }); this.changed(); }));
+			const kind = stackupRowKind(row);
+			const material = document.createElement('td');
+			const color = document.createElement('td');
+			if (kind === 'dielectric' || kind === 'soldermask' || kind === 'silkscreen') {
+				const baseMaterials = kind === 'dielectric' ? DIELECTRIC_MATERIALS : kind === 'soldermask' ? SOLDERMASK_MATERIALS : SILKSCREEN_MATERIALS;
+				const isSpecified = row.material && row.material.toLowerCase() !== 'not specified';
+				const materialInput = document.createElement('input');
+				materialInput.type = 'text';
+				materialInput.value = isSpecified ? row.material! : 'Not specified';
+				materialInput.addEventListener('input', () => { draft.updateStackupLayer(row.index, { material: materialInput.value }); this.changed(); });
+				const materialButton = button('…', 'material-dialog-trigger', () => {
+					openMaterialDialog(
+						materialsInUse(stackupLayers, kind, baseMaterials),
+						{ name: isSpecified ? row.material! : baseMaterials[0]![0], epsilonR: row.epsilonR ?? 0, lossTangent: row.lossTangent ?? 0 },
+						result => {
+							draft.updateStackupLayer(row.index, { material: result.name, epsilonR: result.epsilonR, lossTangent: result.lossTangent });
+							this.changed();
+							this.renderPage();
+						}
+					);
+				});
+				const materialGroup = document.createElement('div');
+				materialGroup.className = 'material-input-group';
+				materialGroup.append(materialInput, materialButton);
+				material.append(materialGroup);
+
+				const predefined = kind === 'dielectric' ? DIELECTRIC_COLORS : GBRJOB_COLORS;
+				color.append(stackupColorCell(row.color, predefined, value => { draft.updateStackupLayer(row.index, { color: value }); this.changed(); }));
+			} else {
+				material.textContent = '—';
+				color.textContent = '—';
+			}
 			const epsilon = document.createElement('td'); epsilon.append(numberInput(row.epsilonR ?? 0, value => { draft.updateStackupLayer(row.index, { epsilonR: value }); this.changed(); }, '0.01'));
 			const loss = document.createElement('td'); loss.append(numberInput(row.lossTangent ?? 0, value => { draft.updateStackupLayer(row.index, { lossTangent: value }); this.changed(); }, '0.001'));
 			const action = document.createElement('td'); action.className = 'stackup-row-actions';
@@ -1578,6 +1902,128 @@ export class ProjectSetupController {
 		table.append(body); this.contentEl.append(table); this.renderIssues();
 	}
 
+	protected renderCustomRules(): void {
+		this.pageHeading('Custom Rules', 'Free-form KiCad custom design rules (.kicad_dru) — the same syntax as Board Setup > Custom Rules in desktop KiCad. Syntax is not checked here yet; invalid rules are simply ignored by KiCad’s DRC engine.');
+		if (!this.draft!.hasRulesFile) {
+			const hint = document.createElement('p');
+			hint.className = 'project-setup-hint';
+			hint.textContent = 'No custom rules file exists yet for this project — start typing to create one.';
+			this.contentEl.append(hint);
+		}
+		const textarea = textareaInput(this.draft!.rulesText, value => { this.draft!.setRulesText(value); this.changed(); });
+		textarea.className = 'project-setup-rules-editor';
+		this.contentEl.append(textarea);
+		this.renderIssues();
+	}
+
+	protected renderEmbeddedFilesPage(kind: 'board' | 'schematic'): void {
+		const draft = this.draft!;
+		const label = kind === 'board' ? 'Board' : 'Schematic';
+		this.pageHeading(
+			`${ label } Data / Embedded Files`,
+			`Binary files (3D models, fonts, worksheets, datasheets) embedded directly in the ${ label.toLowerCase() } file, matching KiCad 9+’s Embedded Files feature.`
+		);
+
+		const hasFile = kind === 'board' ? draft.hasBoard : draft.hasSchematic;
+		if (!hasFile) {
+			const hint = document.createElement('p');
+			hint.className = 'project-setup-hint';
+			hint.textContent = `This project has no ${ label.toLowerCase() } file to embed files into.`;
+			this.contentEl.append(hint);
+			return;
+		}
+
+		const files = kind === 'board' ? draft.boardEmbeddedFiles : draft.schematicEmbeddedFiles;
+		const table = document.createElement('table');
+		table.className = 'project-settings-table';
+		table.innerHTML = '<thead><tr><th>Name</th><th>Type</th><th>Size</th><th>Checksum</th><th></th></tr></thead>';
+		const body = document.createElement('tbody');
+		for (const file of files) {
+			const tr = document.createElement('tr');
+			const nameCell = document.createElement('td');
+			nameCell.textContent = file.getName();
+			const typeCell = document.createElement('td');
+			typeCell.textContent = file.getType();
+			const sizeCell = document.createElement('td');
+			sizeCell.textContent = formatFileSize(file.getDataBytes().length);
+			const checksumCell = document.createElement('td');
+			checksumCell.className = 'project-settings-mono';
+			checksumCell.textContent = file.getChecksum();
+			const actionCell = document.createElement('td');
+			actionCell.append(
+				button('Download', '', () => this.downloadEmbeddedFile(file)),
+				button('Remove', 'danger-link', () => {
+					const removed = kind === 'board'
+						? draft.removeBoardEmbeddedFile(file.getName())
+						: draft.removeSchematicEmbeddedFile(file.getName());
+					if (removed) {
+						this.changed();
+						this.renderPage();
+					}
+				})
+			);
+			tr.append(nameCell, typeCell, sizeCell, checksumCell, actionCell);
+			body.append(tr);
+		}
+		table.append(body);
+		this.contentEl.append(table);
+
+		const addLabel = document.createElement('label');
+		addLabel.className = 'project-setup-file-btn';
+		addLabel.textContent = 'Add File(s)';
+		const fileInput = document.createElement('input');
+		fileInput.type = 'file';
+		fileInput.multiple = true;
+		fileInput.hidden = true;
+		fileInput.addEventListener('change', () => {
+			const selected = Array.from(fileInput.files ?? []);
+			fileInput.value = '';
+			if (selected.length) void this.addEmbeddedFiles(kind, selected);
+		});
+		addLabel.append(fileInput);
+		this.contentEl.append(addLabel);
+		this.renderIssues();
+	}
+
+	protected async addEmbeddedFiles(kind: 'board' | 'schematic', files: File[]): Promise<void> {
+		const draft = this.draft!;
+		for (const file of files) {
+			const bytes = new Uint8Array(await file.arrayBuffer());
+			const type = guessEmbeddedFileType(file.name);
+			if (kind === 'board') draft.addBoardEmbeddedFile(file.name, type, bytes);
+			else draft.addSchematicEmbeddedFile(file.name, type, bytes);
+		}
+		this.changed();
+		this.renderPage();
+	}
+
+	/** Real KiCad's own embedded-files dialog doesn't reference-check before
+	 *  removal either (common/dialogs/panel_embedded_files.cpp) — deletion
+	 *  just removes the entry, so an orphaned `kicad-embed://` reference
+	 *  elsewhere in the file is possible in real KiCad too; this matches
+	 *  that rather than adding tracking real KiCad itself doesn't have. */
+	protected downloadEmbeddedFile(file: KicadElementEmbeddedFile): void {
+		let bytes: Uint8Array;
+		try {
+			bytes = decompress(file.getDataBytes());
+		}
+		catch (error) {
+			this.deps.setStatus(`Could not decompress “${ file.getName() }” — ${ error instanceof Error ? error.message : String(error) }`);
+			return;
+		}
+		const checksum = mmh3Hash128Hex(bytes);
+		if (checksum !== file.getChecksum()) {
+			this.deps.setStatus(`Warning: “${ file.getName() }” checksum mismatch (stored ${ file.getChecksum() }, computed ${ checksum }) — the embedded data may be corrupt.`);
+		}
+		const blob = new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = file.getName();
+		link.click();
+		URL.revokeObjectURL(url);
+	}
+
 	protected renderPlannedPage(): void {
 		const definition = PAGES.find(item => item.id === this.page)!;
 		this.pageHeading(definition.label, `${ definition.group } settings from KiCad's setup dialogs.`);
@@ -1722,8 +2168,21 @@ export class ProjectSetupController {
 			projectFile.saveFile = this.context.fsAdapter.saveFile;
 			const board = this.context.project.mainBoard;
 			if (board) board.saveFile = this.context.fsAdapter.saveFile;
-			await this.draft.apply(projectFile, board);
+			const designRules = this.context.project.designRules;
+			if (designRules) designRules.saveFile = this.context.fsAdapter.saveFile;
+			const schematic = this.context.project.mainSchematic;
+			if (schematic) schematic.saveFile = this.context.fsAdapter.saveFile;
+			await this.draft.apply(projectFile, board, designRules, schematic);
 			this.syncLocalRows();
+			// Custom Rules shows a "no file yet" hint driven by original
+			// (pre-apply) state — a successful Apply can flip that (creating
+			// the file for the first time), so this page specifically needs
+			// a re-render to stop showing the stale hint. Every other page's
+			// fields are edited in place already and don't need this.
+			if (this.page === 'custom-rules') {
+				this.contentEl.replaceChildren();
+				this.renderCustomRules();
+			}
 			this.deps.onApplied(boardChanged);
 			this.deps.setStatus('Project settings applied and saved.');
 		}

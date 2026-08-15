@@ -24,6 +24,7 @@ export interface KeyboardControllerCallbacks {
 	clearSelectionBookkeeping(): void;
 	performUndo(): Promise<void>;
 	performRedo(): Promise<void>;
+	performSave(): Promise<void>;
 	copySelection(session: KicadRenderSession): void;
 	cutSelection(session: KicadRenderSession): void;
 	pasteSelection(session: KicadRenderSession, world: Vec2): Promise<void>;
@@ -83,6 +84,11 @@ export class KeyboardController {
 		if (this.matches(e, 'redo')) {
 			e.preventDefault();
 			void this.cb.performRedo();
+			return;
+		}
+		if (this.matches(e, 'save')) {
+			e.preventDefault();
+			void this.cb.performSave();
 			return;
 		}
 		if (this.matches(e, 'zoom-fit')) {
@@ -188,6 +194,12 @@ export class KeyboardController {
 			}
 			else if (this.cb.getPendingShapeActive()) {
 				this.cb.resetEditToolState();
+			}
+			else if (editTool !== 'select') {
+				// A tool armed but with nothing clicked yet (no in-progress
+				// gesture for getPendingShapeActive() to catch above) — real
+				// KiCad's Escape always falls back to the Select tool here.
+				this.cb.setEditTool('select');
 			}
 			else {
 				this.cb.clearSelectionBookkeeping();
@@ -384,7 +396,7 @@ export class KeyboardController {
 
 	protected toolForShortcut(event: KeyboardEvent): EditTool | null {
 		const tools: Readonly<Record<ShortcutActionId, EditTool | null>> = {
-			undo: null, redo: null, cut: null, copy: null, paste: null, duplicate: null, 'zoom-fit': null,
+			undo: null, redo: null, save: null, cut: null, copy: null, paste: null, duplicate: null, 'zoom-fit': null,
 			move: null, rotate: null, tidy: null, select: 'select', 'place-symbol': 'place-symbol', power: 'power', wire: 'wire',
 			bus: 'bus', 'bus-entry': 'bus-entry', 'no-connect': 'no-connect', junction: 'junction', label: 'label',
 			'directive-label': 'directive-label', 'global-label': 'global-label', 'hier-label': 'hier-label',

@@ -42,6 +42,11 @@ export interface CachedSymbolFile {
 	sourceText?: string;
 	/** Available when the browser supports persistent file handles. */
 	handle?: SymbolFileHandle;
+	/** True only for the app's own bundled fallback libraries (see
+	 * ensureDefaultLibrary) — protected from indexDirectory()/indexFiles()'s
+	 * reindex-clear so pointing the chooser at a personal folder doesn't wipe
+	 * out the one library (Device) every project can otherwise rely on. */
+	builtIn?: boolean;
 }
 
 export interface SymbolLibrarySummary {
@@ -109,12 +114,50 @@ export class SymbolLibraryCache {
 		});
 	}
 
-	protected async clearStoredIndex(): Promise<void> {
+	protected async getAllFileRecords(): Promise<CachedSymbolFile[]> {
 		const db = await this.openDb();
-		const transaction = db.transaction([META_STORE, FILE_STORE], 'readwrite');
-		transaction.objectStore(META_STORE).clear();
-		transaction.objectStore(FILE_STORE).clear();
+		return new Promise((resolve, reject) => {
+			const request = db.transaction(FILE_STORE, 'readonly').objectStore(FILE_STORE).getAll();
+			request.onsuccess = () => resolve((request.result as CachedSymbolFile[] | undefined) ?? []);
+			request.onerror = () => reject(request.error ?? new Error('Could not read cached symbols.'));
+		});
+	}
+
+	/** Drops every indexed file EXCEPT builtIn ones — indexDirectory()/
+	 * indexFiles()'s "start fresh" step, scoped to leave the app's own
+	 * bundled libraries (see ensureDefaultLibrary) untouched. A stale
+	 * user-indexed file that no longer exists on disk is expected to
+	 * disappear on the next reindex; a builtIn one has no "disk" to go
+	 * stale against, so it's exempt. */
+	protected async clearUserIndex(): Promise<void> {
+		const files = await this.getAllFileRecords();
+		const db = await this.openDb();
+		const transaction = db.transaction(FILE_STORE, 'readwrite');
+		const store = transaction.objectStore(FILE_STORE);
+		for (const file of files) {
+			if (!file.builtIn) {
+				store.delete(file.id);
+			}
+		}
 		await this.transactionDone(transaction);
+	}
+
+	/** Recomputes and stores the summary from whatever's actually in the
+	 * file store right now (builtIn + user-indexed together) — the count the
+	 * chooser's title bar shows should always reflect the true total, not
+	 * just whatever the most recent indexDirectory()/indexFiles() call
+	 * touched. */
+	protected async recomputeSummary(rootName: string, errorCount: number): Promise<SymbolLibrarySummary> {
+		const files = await this.getAllFileRecords();
+		const summary: SymbolLibrarySummary = {
+			rootName,
+			indexedAt: Date.now(),
+			fileCount: files.length,
+			symbolCount: files.reduce((sum, file) => sum + file.symbols.length, 0),
+			errorCount
+		};
+		await this.putSummary(summary);
+		return summary;
 	}
 
 	/** `handle` (a live FileSystemFileHandle, from the indexDirectory path)
@@ -233,25 +276,34 @@ export class SymbolLibraryCache {
 		directory: SymbolDirectoryHandle,
 		onProgress?: (progress: SymbolLibraryProgress) => void
 	): Promise<SymbolLibrarySummary> {
-		await this.clearStoredIndex();
+		await this.clearUserIndex();
+		// Enumerate the whole tree up front — just directory listings, no file
+		// reads yet — so onProgress can report a real total instead of only a
+		// running count (a progress modal with an unknown denominator can't
+		// show a meaningful percentage/bar fill).
+		const entries: { handle: SymbolFileHandle; relativePath: string }[] = [];
+		for await (const entry of this.walkDirectory(directory)) {
+			entries.push(entry);
+		}
 		let processedFiles = 0;
-		let symbolCount = 0;
 		let errorCount = 0;
 
-		for await (const entry of this.walkDirectory(directory)) {
+		for (const entry of entries) {
 			processedFiles++;
 			try {
 				const file = await entry.handle.getFile();
 				const record = await this.processFile(
 					file, entry.relativePath, entry.handle.name, entry.relativePath, entry.handle);
-				symbolCount += record.symbols.length;
 				await this.putFile(record);
-				onProgress?.({ processedFiles, fileName: entry.relativePath, symbolCount: record.symbols.length });
+				onProgress?.({
+					processedFiles, totalFiles: entries.length, fileName: entry.relativePath, symbolCount: record.symbols.length
+				});
 			}
 			catch (error) {
 				errorCount++;
 				onProgress?.({
 					processedFiles,
+					totalFiles: entries.length,
 					fileName: entry.relativePath,
 					symbolCount: 0,
 					error: error instanceof Error ? error.message : String(error)
@@ -259,15 +311,7 @@ export class SymbolLibraryCache {
 			}
 		}
 
-		const summary: SymbolLibrarySummary = {
-			rootName: directory.name,
-			indexedAt: Date.now(),
-			fileCount: processedFiles,
-			symbolCount,
-			errorCount
-		};
-		await this.putSummary(summary);
-		return summary;
+		return this.recomputeSummary(directory.name, errorCount);
 	}
 
 	/** Fallback for browsers without showDirectoryPicker(). File handles are
@@ -277,7 +321,7 @@ export class SymbolLibraryCache {
 		rootName: string,
 		onProgress?: (progress: SymbolLibraryProgress) => void
 	): Promise<SymbolLibrarySummary> {
-		await this.clearStoredIndex();
+		await this.clearUserIndex();
 		const symbolFiles = Array.from(files).filter(file => {
 			// Chromium always defines `webkitRelativePath` as `""` (never
 			// `undefined`) on files that weren't picked via a `webkitdirectory`
@@ -287,14 +331,12 @@ export class SymbolLibraryCache {
 			return relative.toLowerCase().endsWith('.kicad_sym');
 		});
 		let processedFiles = 0;
-		let symbolCount = 0;
 		let errorCount = 0;
 		for (const file of symbolFiles) {
 			processedFiles++;
 			const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
 			try {
 				const record = await this.processFile(file, relativePath, file.name, relativePath, undefined);
-				symbolCount += record.symbols.length;
 				await this.putFile(record);
 				onProgress?.({
 					processedFiles,
@@ -314,15 +356,44 @@ export class SymbolLibraryCache {
 				});
 			}
 		}
-		const summary: SymbolLibrarySummary = {
-			rootName,
-			indexedAt: Date.now(),
-			fileCount: symbolFiles.length,
-			symbolCount,
-			errorCount
-		};
-		await this.putSummary(summary);
-		return summary;
+		return this.recomputeSummary(rootName, errorCount);
+	}
+
+	/**
+	 * Real KiCad ships a "Device" library (generic passives — R, C, L, D, ...)
+	 * bundled with every install, always present as the first/default place
+	 * to look when placing a symbol. This app has no filesystem to bundle a
+	 * library into, so `public/libraries/Device.kicad_sym` (a real, unmodified
+	 * copy — see shared/kicad-io/test/fixtures/kicad-qa/libraries/Device.
+	 * kicad_sym) stands in for it, fetched and indexed once, flagged
+	 * `builtIn: true` so indexDirectory()/indexFiles()'s clearUserIndex()
+	 * never removes it — pointing the chooser at a personal folder is meant
+	 * to ADD libraries (matching real KiCad's persistent, multi-library
+	 * sym-lib-table), not replace the one library every project can rely on.
+	 */
+	async ensureDefaultLibrary(): Promise<void> {
+		const files = await this.getAllFileRecords();
+		if (files.some(file => file.id === 'Device.kicad_sym')) {
+			return;
+		}
+		try {
+			const response = await fetch('/libraries/Device.kicad_sym');
+			if (!response.ok) {
+				return;
+			}
+			const text = await response.text();
+			const symbols = await this.extractSymbols(text);
+			await this.putFile({
+				id: 'Device.kicad_sym', name: 'Device.kicad_sym', relativePath: 'Device.kicad_sym',
+				size: text.length, lastModified: Date.now(), symbols, sourceText: text, builtIn: true
+			});
+			await this.recomputeSummary((await this.getSummary())?.rootName ?? 'Device (built-in)', 0);
+		}
+		catch {
+			// Best-effort — a fetch/parse failure here just leaves the chooser
+			// empty until the user indexes their own library, same as before
+			// this method existed.
+		}
 	}
 
 	async getSummary(): Promise<SymbolLibrarySummary | null> {
@@ -336,18 +407,10 @@ export class SymbolLibraryCache {
 	}
 
 	async getFiles(): Promise<CachedSymbolFile[]> {
-		const db = await this.openDb();
-		return new Promise((resolve, reject) => {
-			const transaction = db.transaction(FILE_STORE, 'readonly');
-			const request = transaction.objectStore(FILE_STORE).getAll();
-			request.onsuccess = () => {
-				const records = (request.result as CachedSymbolFile[]) ?? [];
-				// Never bring the persisted source text for every library file into
-				// memory just to populate the chooser; it is loaded on demand below.
-				resolve(records.map(({ sourceText: _sourceText, ...metadata }) => metadata));
-			};
-			request.onerror = () => reject(request.error ?? new Error('Could not read cached symbols.'));
-		});
+		const records = await this.getAllFileRecords();
+		// Never bring the persisted source text for every library file into
+		// memory just to populate the chooser; it is loaded on demand below.
+		return records.map(({ sourceText: _sourceText, ...metadata }) => metadata);
 	}
 
 	/** Future symbol-placement code can opt into loading one cached library

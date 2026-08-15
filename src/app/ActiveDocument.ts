@@ -57,5 +57,27 @@ export class ActiveDocument {
 	boardText = '';
 	filename = '';
 
+	/** Snapshots of schematicText/boardText as of the last successful load or
+	 *  save — compared against the live text to know whether the open
+	 *  document has unsaved changes. Kept separate from the live text itself
+	 *  (rather than diffing against project file contents) because a board
+	 *  edit's commit handler already writes every keystroke straight into
+	 *  the project's KicadBoard.data, so that would never look "dirty". */
+	savedSchematicText = '';
+	savedBoardText = '';
+
+	get hasUnsavedSchematicChanges(): boolean {
+		return this.schematicText !== this.savedSchematicText;
+	}
+
+	get hasUnsavedBoardChanges(): boolean {
+		return this.boardText !== this.savedBoardText;
+	}
+
+	/** Whether the currently active document kind has unsaved edits. */
+	get isDirty(): boolean {
+		return this.kind === 'board' ? this.hasUnsavedBoardChanges : this.hasUnsavedSchematicChanges;
+	}
+
 	constructor(public readonly canvas: HTMLCanvasElement, public readonly canvasGl: HTMLCanvasElement) {}
 }
