@@ -84,6 +84,22 @@ export class ActiveDocument {
 	 *  direct segment at any angle. */
 	routeCornerMode: '45' | '90' | 'free' = '45';
 	routerSettings: RouterSettings = defaultRouterSettings();
+	/** Selected index into board.design_settings.track_widths (0 = "use
+	 *  netclass width", matching real KiCad's own PCB_EDIT_FRAME index
+	 *  convention exactly — see getRoutingSizes in MainApp.ts). */
+	trackWidthIndex = 0;
+	/** Same convention for board.design_settings.via_dimensions. */
+	viaSizeIndex = 0;
+	/** Real KiCad's "auto track width" / m_UseConnectedTrackWidth: when
+	 *  starting or continuing a route onto an EXISTING track, use that
+	 *  track's own current width instead of trackWidthIndex/net class. */
+	useConnectedTrackWidth = false;
+	/** Which two copper layers a newly placed via spans — real KiCad's
+	 *  "Select Layer Pair" toolbar button. */
+	viaLayerPair: [string, string] = ['F.Cu', 'B.Cu'];
+	/** Toolbar "Override locks" toggle — see BoardPointerController's
+	 *  lock-enforcement checks in onMouseDown/delete handling. */
+	overrideLocks = false;
 
 	recipe: CircuitDesignRecipe | null = null;
 	icSymbolText = '';

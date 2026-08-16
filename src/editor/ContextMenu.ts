@@ -1,5 +1,5 @@
 import type {
-	AlignAxis, KicadDirectiveLabelShape, KicadGlobalLabelShape, KicadRenderSession
+	AlignAxis, HitResult, KicadDirectiveLabelShape, KicadGlobalLabelShape, KicadRenderSession
 } from '@kicad-render/KicadRenderSession';
 
 export interface ContextMenuToolButton {
@@ -53,12 +53,18 @@ export interface BoardContextMenuBuildOptions {
 		rotate: (session: KicadRenderSession, id: string) => void;
 		flip: (session: KicadRenderSession, id: string) => void;
 		delete: (session: KicadRenderSession, ids: string[]) => void;
+		setLocked: (session: KicadRenderSession, ids: string[], locked: boolean) => void;
 	};
 }
 
 /** Owns the context-menu surface, command construction, and positioning. */
 export class ContextMenu {
 	protected readonly element = document.getElementById('context-menu') as HTMLDivElement;
+	/** Scoped to a disambiguation popup's open lifetime (see
+	 *  showDisambiguation) — torn down in close() so it never outlives the
+	 *  popup regardless of which path closed it (item click, outside click,
+	 *  Escape, or a fresh showDisambiguation call from "Show More"). */
+	protected disambiguationKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 
 	constructor(protected readonly stage: HTMLElement) {
 		window.addEventListener('click', event => {
@@ -73,6 +79,7 @@ export class ContextMenu {
 	close(): void {
 		this.element.classList.add('hidden');
 		this.element.replaceChildren();
+		this.teardownDisambiguationKeys();
 	}
 
 	show(items: HTMLElement[], clientX: number, clientY: number): void {
@@ -147,10 +154,131 @@ export class ContextMenu {
 		items.push(this.item('Rotate', () => actions.rotate(session, singleId!), !isFootprint));
 		items.push(this.item('Flip', () => actions.flip(session, singleId!), !isFootprint));
 		items.push(this.separator());
+		const allLocked = selectedIds.every(id => session.isBoardElementLocked(id));
+		const noneLocked = selectedIds.every(id => !session.isBoardElementLocked(id));
+		items.push(this.item('Lock', () => actions.setLocked(session, selectedIds, true), allLocked));
+		items.push(this.item('Unlock', () => actions.setLocked(session, selectedIds, false), noneLocked));
+		items.push(this.separator());
 		items.push(this.item(
 			selectedIds.length > 1 ? `Delete ${ selectedIds.length } Items` : 'Delete',
 			() => actions.delete(session, selectedIds)));
 		return items;
+	}
+
+	/** Real-KiCad-style disambiguation popup for an ambiguous board click
+	 *  (see KicadRenderSession.hitTestCandidatesAtScreen) — numbered rows
+	 *  (1-9, also pickable by digit key), "Select All", and "Show More
+	 *  Choices…" (re-opens using the unreduced `all` list; only shown when
+	 *  reduction actually dropped something). Reuses show()/close() as-is;
+	 *  `all === reduced` (the "Show More" re-open) simply omits that row. */
+	showDisambiguation(
+		reduced: HitResult[], all: HitResult[],
+		actions: { pick: (candidate: HitResult) => void; selectAll: (candidates: HitResult[]) => void },
+		clientX: number, clientY: number
+	): void {
+		this.teardownDisambiguationKeys();
+		const numbered = reduced.slice(0, 9);
+		const showMore = () => this.showDisambiguation(all, all, actions, clientX, clientY);
+		this.show(this.buildDisambiguationItems(reduced, all, numbered, { ...actions, showMore }), clientX, clientY);
+		this.disambiguationKeyHandler = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') {
+				this.close();
+				return;
+			}
+			const digit = Number(e.key);
+			if (Number.isInteger(digit) && digit >= 1 && digit <= numbered.length) {
+				this.close();
+				actions.pick(numbered[digit - 1]!);
+				return;
+			}
+			if (e.key.toLowerCase() === 'a') {
+				this.close();
+				actions.selectAll(reduced);
+				return;
+			}
+			if (e.key.toLowerCase() === 'm' && all.length > reduced.length) {
+				showMore();
+			}
+		};
+		window.addEventListener('keydown', this.disambiguationKeyHandler);
+	}
+
+	protected teardownDisambiguationKeys(): void {
+		if (this.disambiguationKeyHandler) {
+			window.removeEventListener('keydown', this.disambiguationKeyHandler);
+			this.disambiguationKeyHandler = null;
+		}
+	}
+
+	protected buildDisambiguationItems(
+		reduced: HitResult[], all: HitResult[], numbered: HitResult[],
+		actions: { pick: (candidate: HitResult) => void; selectAll: (candidates: HitResult[]) => void; showMore: () => void }
+	): HTMLElement[] {
+		const items: HTMLElement[] = numbered.map(
+			(candidate, index) => this.disambiguationItem(index + 1, candidate, () => actions.pick(candidate)));
+		items.push(this.separator());
+		items.push(this.hintItem('Select All', 'A', () => actions.selectAll(reduced)));
+		if (all.length > reduced.length) {
+			items.push(this.hintItem('Show More Choices…', 'M', actions.showMore));
+		}
+		return items;
+	}
+
+	protected disambiguationItem(index: number, candidate: HitResult, onSelect: () => void): HTMLButtonElement {
+		const badge = document.createElement('span');
+		badge.className = 'badge';
+		badge.textContent = String(index);
+		const label = document.createElement('span');
+		label.className = 'label';
+		label.textContent = this.disambiguationLabel(candidate);
+		return this.disambiguationRow([badge, label], onSelect);
+	}
+
+	protected hintItem(label: string, hint: string, onSelect: () => void): HTMLButtonElement {
+		const labelEl = document.createElement('span');
+		labelEl.className = 'label';
+		labelEl.textContent = label;
+		const hintEl = document.createElement('span');
+		hintEl.className = 'hint';
+		hintEl.textContent = hint;
+		return this.disambiguationRow([labelEl, hintEl], onSelect);
+	}
+
+	protected disambiguationRow(children: HTMLElement[], onSelect: () => void): HTMLButtonElement {
+		const button = document.createElement('button');
+		button.type = 'button';
+		button.className = 'menu-item disambiguation-item';
+		button.append(...children);
+		button.addEventListener('click', () => {
+			this.close();
+			onSelect();
+		});
+		return button;
+	}
+
+	/** Real KiCad's own candidate labels include ref designators and pad
+	 *  numbers (they read them straight off BOARD_ITEM::GetSelectMenuText) —
+	 *  this app's board HitResult doesn't carry a footprint reference today,
+	 *  so pad/footprint labels are net+layer only. A reasonable, statable
+	 *  simplification rather than threading a new lookup through hitTestCandidatesAtScreen
+	 *  for this cosmetic-only gap. */
+	protected disambiguationLabel(candidate: HitResult): string {
+		const net = candidate.netName ? ` [${ candidate.netName }]` : '';
+		switch (candidate.kind) {
+			case 'track':
+				return `Track${ net } on ${ candidate.layer }`
+					+ (candidate.length != null ? `, length ${ candidate.length.toFixed(4) } mm` : '');
+			case 'via':
+				return `Via${ net }`;
+			case 'pad':
+				return `Pad${ net } on ${ candidate.layer }`;
+			case 'footprint':
+				return `Footprint on ${ candidate.layer }`;
+			case 'footprint-ref':
+				return `Reference on ${ candidate.layer }`;
+			default:
+				return `Graphic on ${ candidate.layer }`;
+		}
 	}
 
 	protected item(label: string, onSelect: () => void, disabled = false): HTMLButtonElement {

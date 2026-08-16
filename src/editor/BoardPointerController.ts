@@ -1,4 +1,4 @@
-import type { KicadRenderSession } from '@kicad-render/KicadRenderSession';
+import type { KicadRenderSession, HitResult } from '@kicad-render/KicadRenderSession';
 import { Vec2 }                    from '@kicad-render/math/Vec2';
 import type { AppMode }            from '../app/AppState';
 import { PendingShapeTracker, type PendingShape } from './PendingShape';
@@ -47,6 +47,23 @@ export interface BoardPointerControllerDeps {
 	 *  route on an unassigned/no-net point) — real KiCad sizes a route from
 	 *  the routed net's OWN class, not a single board-wide default. */
 	getRoutingSizes(netName: string | null): { trackWidth: number; viaSize: number; viaDrill: number };
+	/** Real KiCad's "auto track width" toolbar toggle
+	 *  (BOARD_DESIGN_SETTINGS::m_UseConnectedTrackWidth) — see
+	 *  routeAnchorSnap's connectedWidth capture. */
+	getUseConnectedTrackWidth(): boolean;
+	/** Real KiCad's "Select Layer Pair" toolbar button — which two copper
+	 *  layers a newly placed via spans. */
+	getViaLayerPair(): [string, string];
+	/** Toolbar "Override locks" checkbox — see onMouseDown's lock checks
+	 *  before committing to a drag gesture. */
+	getOverrideLocks(): boolean;
+	/** Real KiCad's disambiguation popup (GuessSelectionCandidates +
+	 *  doSelectionMenu) — see onMouseDown's candidate-count branching. */
+	showDisambiguation(
+		reduced: HitResult[], all: HitResult[],
+		actions: { pick: (candidate: HitResult) => void; selectAll: (candidates: HitResult[]) => void },
+		clientX: number, clientY: number
+	): void;
 	/** The project's net classes/patterns/assignments, for resolving
 	 *  per-net-pair clearance (NetClassResolver.resolveClearanceMm) during
 	 *  live collision checks. */
@@ -385,9 +402,9 @@ export class BoardPointerController {
 			e.preventDefault();
 			return;
 		}
-		const hit = session.hitTestAtScreen(screenPos);
 		this.dragUndoCaptured = false;
-		if (!hit) {
+		const { reduced, all } = session.hitTestCandidatesAtScreen(screenPos, this.deps.getActiveLayer());
+		if (reduced.length === 0) {
 			// Empty-space mousedown begins a rect-select gesture — onMouseUp
 			// decides whether it was a real drag (marquee-select) or a plain
 			// click (clear selection), matching PointerController's identical
@@ -395,19 +412,60 @@ export class BoardPointerController {
 			this.gesture = { kind: 'rect', originWorld: session.screenToWorld(screenPos), originScreen: screenPos, moved: false };
 			return;
 		}
+		if (reduced.length === 1) {
+			this.resolveHit(session, reduced[0]!, screenPos, true, e);
+			return;
+		}
+		// Genuinely ambiguous — real KiCad's own disambiguation popup
+		// (pcb_selection_tool.cpp GuessSelectionCandidates/doSelectionMenu).
+		// The mouse button is already back up by the time the user picks a
+		// row, so resolved picks never arm a drag gesture (allowGesture:
+		// false) — a deliberate, called-out simplification vs. real KiCad,
+		// which lets you disambiguate mid-drag.
+		e.preventDefault();
+		this.deps.showDisambiguation(reduced, all, {
+			pick: candidate => this.resolveHit(session, candidate, screenPos, false),
+			selectAll: candidates => {
+				session.selectMultiple(candidates.map(candidate => candidate.id), 'replace');
+				this.deps.refreshAppearance();
+			}
+		}, e.clientX, e.clientY);
+	}
+
+	/** The single-candidate tail of onMouseDown's hit-and-select flow —
+	 *  also the disambiguation popup's pick/Select-All target. `allowGesture`
+	 *  is false for a disambiguated pick (resolved well after the triggering
+	 *  mousedown's button is back up, so there's no live drag to arm) — the
+	 *  item still gets selected and lock-refused exactly as normal, it just
+	 *  never becomes a drag gesture or starts a drag preview. `e` is the
+	 *  live mousedown event for the direct (allowGesture: true) path only;
+	 *  omitted for a disambiguated pick, which isn't itself a DOM event. */
+	protected resolveHit(session: KicadRenderSession, hit: HitResult, screenPos: Vec2, allowGesture: boolean, e?: MouseEvent): void {
 		if (hit.kind === 'via') {
 			session.select(hit.id);
 			this.deps.refreshAppearance();
-			this.gesture = { kind: 'via', paintId: hit.id };
-			e.preventDefault();
+			if (session.isBoardElementLocked(hit.id) && !this.deps.getOverrideLocks()) {
+				this.deps.setStatus('Item locked — enable "Override locks" to move it.');
+				this.gesture = { kind: 'none' };
+				e?.preventDefault();
+				return;
+			}
+			this.gesture = allowGesture ? { kind: 'via', paintId: hit.id } : { kind: 'none' };
+			e?.preventDefault();
 			return;
 		}
 		if (hit.kind === 'track') {
 			session.select(hit.id);
 			this.deps.refreshAppearance();
-			const endpoint = session.trackEndpointNear(hit.id, screenPos);
+			const endpoint = allowGesture ? session.trackEndpointNear(hit.id, screenPos) : null;
+			if (endpoint && session.isBoardElementLocked(hit.id) && !this.deps.getOverrideLocks()) {
+				this.deps.setStatus('Item locked — enable "Override locks" to move it.');
+				this.gesture = { kind: 'none' };
+				e?.preventDefault();
+				return;
+			}
 			this.gesture = endpoint ? { kind: 'track-endpoint', paintId: hit.id, endpoint } : { kind: 'none' };
-			e.preventDefault();
+			e?.preventDefault();
 			return;
 		}
 		if (hit.kind !== 'pad' && hit.kind !== 'footprint') {
@@ -419,7 +477,7 @@ export class BoardPointerController {
 			session.select(hit.id);
 			this.deps.refreshAppearance();
 			this.gesture = { kind: 'none' };
-			e.preventDefault();
+			e?.preventDefault();
 			return;
 		}
 		// Normalize a pad hit to its owning footprint's own id — selectedIds
@@ -428,20 +486,38 @@ export class BoardPointerController {
 		// normalized hit.id would never find a match and group-drag could
 		// never trigger.
 		const footprintId = session.footprintPaintIdForHit(hit.id);
-		if (session.selectionIds.size > 1 && session.selectionIds.has(footprintId)) {
+		if (allowGesture && session.selectionIds.size > 1 && session.selectionIds.has(footprintId)) {
+			// Simplified scope vs. real KiCad's per-item exclusion: refuse the
+			// whole group drag if ANY selected item is locked, rather than
+			// silently dragging everything else around it.
+			if (!this.deps.getOverrideLocks() && [...session.selectionIds].some(id => session.isBoardElementLocked(id))) {
+				this.deps.setStatus('Locked item(s) in selection — enable "Override locks" to move them.');
+				e?.preventDefault();
+				return;
+			}
 			this.gesture = { kind: 'group', lastSnapped: this.snappedWorld(session, screenPos) };
 			// See KicadRenderSession.beginBoardDragPreview's doc comment —
 			// pulls every selected footprint out of the real (static-buffer)
 			// scene up front so the drag's per-frame cost stays cheap.
 			session.beginBoardDragPreview(session.selectionIds);
-			e.preventDefault();
+			e?.preventDefault();
 			return;
 		}
 		session.select(footprintId);
 		this.deps.refreshAppearance();
-		this.gesture = { kind: 'single', paintId: footprintId, lastSnapped: this.snappedWorld(session, screenPos) };
-		session.beginBoardDragPreview([footprintId]);
-		e.preventDefault();
+		if (session.isBoardElementLocked(footprintId) && !this.deps.getOverrideLocks()) {
+			this.deps.setStatus('Item locked — enable "Override locks" to move it.');
+			this.gesture = { kind: 'none' };
+			e?.preventDefault();
+			return;
+		}
+		this.gesture = allowGesture
+			? { kind: 'single', paintId: footprintId, lastSnapped: this.snappedWorld(session, screenPos) }
+			: { kind: 'none' };
+		if (allowGesture) {
+			session.beginBoardDragPreview([footprintId]);
+		}
+		e?.preventDefault();
 	}
 
 	protected onMouseMove(e: MouseEvent): void {
@@ -869,10 +945,12 @@ export class BoardPointerController {
 	 *  outline, not just a few pixels around its exact center — user
 	 *  feedback after the first pass used too tight a radius to feel like
 	 *  snapping at all). */
-	protected routeAnchorSnap(session: KicadRenderSession, screenPos: Vec2, netFilter?: number | null): { point: Vec2; netId: number | null; snapped: boolean } {
+	protected routeAnchorSnap(session: KicadRenderSession, screenPos: Vec2, netFilter?: number | null): { point: Vec2; netId: number | null; snapped: boolean; trackWidth?: number } {
 		const point = this.snappedWorld(session, screenPos);
 		const anchor = session.nearestAnchorPoint(session.screenToWorld(screenPos), session.pickToleranceWorld * 8, netFilter);
-		return anchor ? { point: anchor.point, netId: anchor.netId, snapped: true } : { point, netId: null, snapped: false };
+		return anchor
+			? { point: anchor.point, netId: anchor.netId, snapped: true, trackWidth: anchor.kind === 'track' ? anchor.width : undefined }
+			: { point, netId: null, snapped: false };
 	}
 
 	/** The net a route-tool anchor-snap should be restricted to right now —
@@ -921,7 +999,8 @@ export class BoardPointerController {
 				kind: 'route',
 				netId,
 				layer: this.deps.getActiveLayer(),
-				corners: [startPoint]
+				corners: [startPoint],
+				connectedWidth: this.deps.getUseConnectedTrackWidth() ? snap.trackWidth : undefined
 			});
 			this.rebuildRouterNode(session);
 			this.updateRoutePreview(session, screenPos);
@@ -958,7 +1037,7 @@ export class BoardPointerController {
 		}
 		const from = pending.corners[pending.corners.length - 1]!;
 		const cursor = this.routeAnchorSnap(session, screenPos, pending.netId).point;
-		const width = this.deps.getRoutingSizes(session.netNameForId(pending.netId)).trackWidth;
+		const width = pending.connectedWidth ?? this.deps.getRoutingSizes(session.netNameForId(pending.netId)).trackWidth;
 		const { path, collides: rawCollides } = this.computeRoutePath(session, from, cursor, pending, width);
 		const settings = this.deps.getRouterSettings();
 		// Shove mode never mutates during preview (see attemptShove's doc
@@ -1263,7 +1342,7 @@ export class BoardPointerController {
 		const sizes = this.deps.getRoutingSizes(session.netNameForId(netId));
 		const id = session.addVia(
 			point.x, point.y, sizes.viaSize, sizes.viaDrill,
-			['F.Cu', 'B.Cu'], netId, routedAdded === 0);
+			this.deps.getViaLayerPair(), netId, routedAdded === 0);
 		if (!id) {
 			return false;
 		}
@@ -1292,7 +1371,7 @@ export class BoardPointerController {
 		point: Vec2
 	): { added: number; blocked: boolean } {
 		const from = pending.corners[pending.corners.length - 1] as Vec2;
-		const trackWidth = this.deps.getRoutingSizes(session.netNameForId(pending.netId)).trackWidth;
+		const trackWidth = pending.connectedWidth ?? this.deps.getRoutingSizes(session.netNameForId(pending.netId)).trackWidth;
 		const settings = this.deps.getRouterSettings();
 		// Shove only actually moves copper here, at commit time — the live
 		// preview (computeRoutePath, called from updateRoutePreview too)

@@ -55,6 +55,8 @@ import { FootprintChooser }                                                  fro
 import { SymbolFieldsTable }                                                 from '../ui/SymbolFieldsTable';
 import { UpdatePcbFromSchematic }                                            from '../ui/UpdatePcbFromSchematic';
 import { RouterSettingsDialog }                                              from '../ui/RouterSettingsDialog';
+import { BoardAuxToolbar }                                                   from '../ui/BoardAuxToolbar';
+import { LayerPairDialog }                                                   from '../ui/LayerPairDialog';
 import { KicadBoard }                                                        from '@kicad-io/Project/KicadBoard';
 import { resolveNetClass, buildNetClassRules, type NetClassRules }          from '@kicad-layout/NetClassResolver';
 import { wireMainAppInteractions }                                          from './wireMainAppInteractions';
@@ -184,10 +186,12 @@ function setStatus(msg: string): void { statusBar.setStatus(msg); }
 let propertiesController: PropertiesController;
 let toolStateController: ToolStateController;
 let boardAppearance: BoardAppearancePanel | null = null;
+let boardAuxToolbar: BoardAuxToolbar | null = null;
 
 function updateEditSidebar(): void {
 	propertiesController.updateEditSidebar();
 	boardAppearance?.refresh();
+	boardAuxToolbar?.refresh();
 }
 
 function updateUndoStackPane(): void { propertiesController.updateUndoStackPane(); }
@@ -419,6 +423,18 @@ const projectSetup = new ProjectSetupController(dom.projectSetupWorkspaceEl, {
 			boardAppearance?.refresh();
 			updateBreadcrumb();
 		});
+	},
+	onCategoryChange: category => {
+		if (!doc.projectContext) {
+			return;
+		}
+		void navigateWithGuards({
+			screen: 'editor',
+			projectId: doc.projectContext.key,
+			view: 'project-settings',
+			sheet: null,
+			category
+		}, { replace: true });
 	}
 });
 
@@ -426,7 +442,64 @@ boardAppearance = new BoardAppearancePanel(dom.boardAppearanceEl, {
 	getSession: () => doc.session,
 	setStatus,
 	getActiveLayer: () => doc.activeBoardLayer,
-	setActiveLayer: layer => { doc.activeBoardLayer = layer; }
+	setActiveLayer: layer => {
+		doc.activeBoardLayer = layer;
+		updateEditSidebar();
+		setStatus(`Active PCB layer: ${ layer }.`);
+	},
+	onLayerStateChange: state => {
+		// Persist per-layer visibility/opacity into the project's local settings
+		const project = doc.projectContext?.project;
+		if (!project || !project.localSettings) return;
+		try {
+			project.localSettings.setLayerState(state);
+			// Save project in background — non-blocking UI
+			void sessionController.saveProject();
+			setStatus('Saved layer visibility.');
+		}
+		catch (err) {
+			setStatus('Could not persist layer visibility.');
+		}
+	}
+});
+
+function getBoardCopperLayers(): string[] {
+	return (doc.session?.activeScene?.layersPresent ?? []).filter(layer => layer.endsWith('.Cu'));
+}
+
+const layerPairDialog = new LayerPairDialog({
+	getBoardCopperLayers,
+	getViaLayerPair: () => doc.viaLayerPair,
+	setViaLayerPair: pair => {
+		doc.viaLayerPair = pair;
+		setStatus(`New vias will span ${ pair[0] } ↔ ${ pair[1] }.`);
+	}
+});
+
+boardAuxToolbar = new BoardAuxToolbar({
+	getProjectRaw: () => doc.projectContext?.project.projectFile?.raw,
+	getTrackWidthIndex: () => doc.trackWidthIndex,
+	setTrackWidthIndex: index => { doc.trackWidthIndex = index; boardAuxToolbar?.refresh(); },
+	getViaSizeIndex: () => doc.viaSizeIndex,
+	setViaSizeIndex: index => { doc.viaSizeIndex = index; boardAuxToolbar?.refresh(); },
+	getUseConnectedTrackWidth: () => doc.useConnectedTrackWidth,
+	setUseConnectedTrackWidth: value => { doc.useConnectedTrackWidth = value; },
+	getActiveBoardLayer: () => doc.activeBoardLayer,
+	setActiveBoardLayer: layer => {
+		doc.activeBoardLayer = layer;
+		updateEditSidebar();
+		setStatus(`Active PCB layer: ${ layer }.`);
+	},
+	getBoardCopperLayers,
+	getOverrideLocks: () => doc.overrideLocks,
+	setOverrideLocks: value => { doc.overrideLocks = value; },
+	openLayerPairDialog: () => layerPairDialog.open(),
+	openProjectSetup: () => {
+		if (!doc.projectContext) {
+			return;
+		}
+		void navigateWithGuards({ screen: 'editor', projectId: doc.projectContext.key, view: 'project-settings', sheet: null });
+	}
 });
 
 /** Project / sheet name + Schematic|PCB tabs — replaced the old View/
@@ -457,18 +530,21 @@ function updateBreadcrumb(): void {
 
 function updateDirtyIndicators(): void {
 	const schematicDirty = doc.hasUnsavedSchematicChanges;
+	const boardDirty = doc.hasUnsavedBoardChanges;
 	const schematicViewActive = activeEditorView === 'schematic' && doc.kind === 'schematic';
-	dom.saveProjectButton.classList.toggle('dirty', schematicViewActive && schematicDirty);
+	const boardViewActive = activeEditorView === 'board' && doc.kind === 'board';
+	dom.saveProjectButton.classList.toggle('dirty', (schematicViewActive && schematicDirty) || (boardViewActive && boardDirty));
 	const baseSheetLabel = activeEditorView === 'project-settings'
 		? 'Project Setup'
 		: doc.kind === 'board'
 			? 'PCB'
 			: (doc.currentSheetNode?.name || doc.projectContext?.rootName || 'Schematic');
-	dom.breadcrumbSheetEl.classList.toggle('modified', schematicViewActive && schematicDirty);
-	dom.breadcrumbSheetEl.textContent = schematicViewActive && schematicDirty
+	const modified = (schematicViewActive && schematicDirty) || (boardViewActive && boardDirty);
+	dom.breadcrumbSheetEl.classList.toggle('modified', modified);
+	dom.breadcrumbSheetEl.textContent = modified
 		? `${ baseSheetLabel } *`
 		: baseSheetLabel;
-	document.title = schematicViewActive && schematicDirty ? '* KiOnline' : 'KiOnline';
+	document.title = modified ? '* KiOnline' : 'KiOnline';
 }
 
 appState.setTextChangedHandler(() => updateDirtyIndicators());
@@ -771,11 +847,30 @@ wireMainAppInteractions({
 	setBoardRatsnestVisible: visible => {
 		doc.session?.setRatsnestVisible(visible);
 		setStatus(`PCB ratsnest ${ visible ? 'shown' : 'hidden' }.`);
+		// persist into project local settings if present
+		const project = doc.projectContext?.project;
+		if (project?.localSettings) {
+			try {
+				project.localSettings.setRatsnestVisible(Boolean(visible));
+				void sessionController.saveProject();
+				setStatus(`PCB ratsnest ${ visible ? 'shown' : 'hidden' } (saved).`);
+			}
+			catch (err) { setStatus('Could not persist ratsnest setting.'); }
+		}
 	},
 	getBoardZoneDisplayMode: () => doc.session?.currentZoneDisplayMode ?? 'filled',
 	setBoardZoneDisplayMode: mode => {
 		doc.session?.setZoneDisplayMode(mode);
 		setStatus(`PCB zones: ${ mode === 'filled' ? 'filled areas' : 'outlines only' }.`);
+		const project = doc.projectContext?.project;
+		if (project?.localSettings) {
+			try {
+				project.localSettings.setZoneDisplayMode(mode);
+				void sessionController.saveProject();
+				setStatus(`PCB zones: ${ mode === 'filled' ? 'filled areas' : 'outlines only' } (saved).`);
+			}
+			catch (err) { setStatus('Could not persist zone display mode.'); }
+		}
 	},
 	isBoardHighContrast: () => boardAppearance?.isHighContrast ?? false,
 	cycleBoardHighContrastMode: () => {
@@ -787,18 +882,47 @@ wireMainAppInteractions({
 		const next = doc.session?.currentPadDisplayMode === 'outline' ? 'filled' : 'outline';
 		doc.session?.setPadDisplayMode(next);
 		setStatus(`Pads: ${ next === 'outline' ? 'sketch (outline only)' : 'filled' }.`);
+		const project = doc.projectContext?.project;
+		if (project?.localSettings) {
+			try {
+				project.localSettings.setPadDisplayMode(next);
+				void sessionController.saveProject();
+				setStatus(`Pads: ${ next === 'outline' ? 'sketch (outline only)' : 'filled' } (saved).`);
+			}
+			catch (err) { setStatus('Could not persist pad display mode.'); }
+		}
 	},
+
 	getBoardViaDisplayMode: () => doc.session?.currentViaDisplayMode ?? 'filled',
 	cycleBoardViaDisplayMode: () => {
 		const next = doc.session?.currentViaDisplayMode === 'outline' ? 'filled' : 'outline';
 		doc.session?.setViaDisplayMode(next);
 		setStatus(`Vias: ${ next === 'outline' ? 'sketch (outline only)' : 'filled' }.`);
+		const project = doc.projectContext?.project;
+		if (project?.localSettings) {
+			try {
+				project.localSettings.setViaDisplayMode(next);
+				void sessionController.saveProject();
+				setStatus(`Vias: ${ next === 'outline' ? 'sketch (outline only)' : 'filled' } (saved).`);
+			}
+			catch (err) { setStatus('Could not persist via display mode.'); }
+		}
 	},
+
 	getBoardTrackDisplayMode: () => doc.session?.currentTrackDisplayMode ?? 'filled',
 	cycleBoardTrackDisplayMode: () => {
 		const next = doc.session?.currentTrackDisplayMode === 'outline' ? 'filled' : 'outline';
 		doc.session?.setTrackDisplayMode(next);
 		setStatus(`Tracks: ${ next === 'outline' ? 'sketch (outline only)' : 'filled' }.`);
+		const project = doc.projectContext?.project;
+		if (project?.localSettings) {
+			try {
+				project.localSettings.setTrackDisplayMode(next);
+				void sessionController.saveProject();
+				setStatus(`Tracks: ${ next === 'outline' ? 'sketch (outline only)' : 'filled' } (saved).`);
+			}
+			catch (err) { setStatus('Could not persist track display mode.'); }
+		}
 	},
 	getBoardAppearanceVisible: () => doc.boardAppearanceVisible,
 	setBoardAppearanceVisible: visible => {
@@ -818,11 +942,45 @@ wireMainAppInteractions({
 	getBoardRoutingSizes: netName => {
 		const rules = buildNetClassRules(doc.projectContext?.project.projectFile?.raw);
 		const netClass = resolveNetClass(netName ?? '', rules);
-		return {
-			trackWidth: Number(netClass.track_width) || 0.25,
-			viaSize: Number(netClass.via_diameter) || 0.6,
-			viaDrill: Number(netClass.via_drill) || 0.3
-		};
+		let trackWidth = Number(netClass.track_width) || 0.25;
+		let viaSize = Number(netClass.via_diameter) || 0.6;
+		let viaDrill = Number(netClass.via_drill) || 0.3;
+
+		// Manual overrides from the new auxiliary toolbar's track-width/
+		// via-size dropdowns take priority over the net class — index 0
+		// means "use netclass" (real KiCad's own convention), matching
+		// ActiveDocument.trackWidthIndex/viaSizeIndex's own doc comment.
+		// board.design_settings.track_widths/via_dimensions are the same
+		// raw JSON paths ProjectSettingsDraft.trackWidths/viaDimensions
+		// read/write from Project Setup — read them directly here rather
+		// than instantiating a whole ProjectSettingsDraft for one lookup,
+		// mirroring buildNetClassRules's own direct-raw-read pattern.
+		const raw = doc.projectContext?.project.projectFile?.raw;
+		const designSettings = raw && typeof raw === 'object'
+			? (raw as { board?: { design_settings?: Record<string, unknown> } }).board?.design_settings
+			: undefined;
+		if (doc.trackWidthIndex > 0) {
+			const list = designSettings?.track_widths;
+			const value = Array.isArray(list) ? Number(list[doc.trackWidthIndex - 1]) : NaN;
+			if (Number.isFinite(value) && value > 0) {
+				trackWidth = value;
+			}
+		}
+		if (doc.viaSizeIndex > 0) {
+			const list = designSettings?.via_dimensions;
+			const entry = Array.isArray(list)
+				? list[doc.viaSizeIndex - 1] as { diameter?: unknown; drill?: unknown } | undefined
+				: undefined;
+			const diameter = Number(entry?.diameter);
+			const drill = Number(entry?.drill);
+			if (Number.isFinite(diameter) && diameter > 0) {
+				viaSize = diameter;
+			}
+			if (Number.isFinite(drill) && drill > 0) {
+				viaDrill = drill;
+			}
+		}
+		return { trackWidth, viaSize, viaDrill };
 	},
 	getBoardNetClassRules: (): NetClassRules => buildNetClassRules(doc.projectContext?.project.projectFile?.raw),
 	getBoardRouteCornerMode: () => doc.routeCornerMode,
@@ -905,6 +1063,28 @@ async function confirmLeaveSchematicEditor(): Promise<boolean> {
 	return window.confirm('Discard unsaved schematic changes and continue to the next view?');
 }
 
+function routeLeavesBoardEditor(next: Route): boolean {
+	const current = router.route;
+	if (current.screen !== 'editor' || current.view !== 'board') {
+		return false;
+	}
+	if (next.screen === 'editor' && next.view === 'board') {
+		return false;
+	}
+	return doc.hasUnsavedBoardChanges;
+}
+
+async function confirmLeaveBoardEditor(): Promise<boolean> {
+	const saveBeforeLeave = window.confirm(
+		'PCB has unsaved changes. Press OK to save before leaving this view.\nPress Cancel for discard/stay options.'
+	);
+	if (saveBeforeLeave) {
+		await sessionController.saveProject();
+		return !doc.hasUnsavedBoardChanges;
+	}
+	return window.confirm('Discard unsaved PCB changes and continue to the next view?');
+}
+
 function routeLeavesSymbolEditor(next: Route): boolean {
 	const current = router.route;
 	return current.screen === 'symbol'
@@ -929,6 +1109,9 @@ async function navigateWithGuards(route: Route, options?: { replace?: boolean })
 		return;
 	}
 	if (routeLeavesSchematicEditor(route) && !await confirmLeaveSchematicEditor()) {
+		return;
+	}
+	if (routeLeavesBoardEditor(route) && !await confirmLeaveBoardEditor()) {
 		return;
 	}
 	if (routeLeavesSymbolEditor(route) && !await confirmLeaveSymbolEditor()) {
@@ -1128,7 +1311,7 @@ async function applyRoute(route: Route): Promise<void> {
 		if (projectSetupActive) {
 			await sessionController.openFromRegistryRoute(route.projectId, doc.kind, doc.currentSheetNode?.path ?? null);
 			if (doc.projectContext) {
-				projectSetup.activate(doc.projectContext);
+				projectSetup.activate(doc.projectContext, route.category ?? null);
 				updateBreadcrumb();
 				statusBar.setHint('Project Setup · changes remain in a draft until Apply');
 			}

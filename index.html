@@ -190,6 +190,37 @@
 			<input type="file" id="symbol-directory-input" webkitdirectory directory multiple hidden />
 			<input type="file" id="footprint-directory-input" accept=".kicad_mod" webkitdirectory directory multiple hidden />
 		</div>
+		<!-- PCB routing toolbar (real KiCad's TOP_AUX toolbar) — .menu-board
+			reuses the same document-kind visibility rule the menu bar's board-
+			only entries already use, hidden outside board mode. -->
+		<div class="board-aux-toolbar menu-board" role="toolbar" aria-label="PCB routing toolbar">
+			<label class="aux-select-group" for="aux-track-width">Track:
+				<select id="aux-track-width" title="Select the default width for new tracks. Can be overridden by the width of an existing track if 'Auto track width' is enabled.">
+					<option value="0" selected>use netclass width</option>
+				</select>
+			</label>
+			<button type="button" class="toolbar-button aux-toggle" id="aux-auto-track-width" title="Auto track width — continue at the width of the track you're connecting to instead of the selection above" aria-pressed="false">
+				<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12 H9 M15 12 H21"/><circle cx="12" cy="12" r="2.5"/></svg>
+			</button>
+			<div class="toolbar-divider" aria-hidden="true"></div>
+			<label class="aux-select-group" for="aux-via-size">Via:
+				<select id="aux-via-size" title="Select the diameter/drill for new vias">
+					<option value="0" selected>use netclass sizes</option>
+				</select>
+			</label>
+			<div class="toolbar-divider" aria-hidden="true"></div>
+			<label class="aux-select-group" for="aux-layer-select">Layer:
+				<select id="aux-layer-select" title="Active copper layer (+/- to switch)"></select>
+			</label>
+			<button type="button" class="toolbar-button" id="aux-layer-pair" title="Select Layer Pair — which two layers a new via spans" aria-haspopup="dialog">
+				<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8 L12 4 L19 8 L12 12 Z M5 12 L12 16 L19 12 M5 16 L12 20 L19 16"/></svg>
+			</button>
+			<div class="toolbar-divider" aria-hidden="true"></div>
+			<label class="aux-checkbox-group" title="Allow editing locked footprints/tracks/vias">
+				<input type="checkbox" id="aux-override-locks" />
+				Override locks
+			</label>
+		</div>
 		<!-- Circuit Layout (auto-place/auto-wire demo) is parked, not deleted —
 			no button reaches setMode('circuit') anymore, so this stays
 			permanently hidden until it comes back as a project-overview tile

@@ -1,3 +1,5 @@
+import { KicadElement } from '@kicad-io/KicadElement';
+import { KicadElementPin } from '@kicad-io/KicadElementPin';
 import { KicadElementSymbol } from '@kicad-io/KicadElementSymbol';
 import { KicadParser } from '@kicad-io/KicadParser';
 import type { SymbolLibraryCache } from '../io/SymbolLibraryCache';
@@ -23,8 +25,14 @@ export class SymbolEditorScreen {
 	protected readonly saveBtn: HTMLButtonElement;
 	protected readonly revertBtn: HTMLButtonElement;
 	protected readonly placeholder: HTMLDivElement;
+	protected readonly inspectorEl: HTMLElement;
+	protected readonly propertiesEl: HTMLDivElement;
+	protected readonly pinsEl: HTMLDivElement;
 	protected initialText = '';
 	protected currentFileLabel = 'Symbol library';
+	protected currentRoot: KicadElement | null = null;
+	protected currentSymbol: KicadElementSymbol | null = null;
+	protected selectedPin: KicadElementPin | null = null;
 
 	constructor(root: HTMLElement, cache: SymbolLibraryCache, callbacks: SymbolEditorScreenCallbacks) {
 		this.cache = cache;
@@ -94,6 +102,10 @@ export class SymbolEditorScreen {
 
 		const form = document.createElement('div');
 		form.className = 'symbol-editor-form';
+		const editorSurface = document.createElement('div');
+		editorSurface.className = 'symbol-editor-surface';
+		const codePanel = document.createElement('div');
+		codePanel.className = 'symbol-editor-code-panel';
 		this.textarea = document.createElement('textarea');
 		this.textarea.className = 'symbol-editor-textarea';
 		this.textarea.spellcheck = false;
@@ -101,7 +113,16 @@ export class SymbolEditorScreen {
 		this.placeholder = document.createElement('div');
 		this.placeholder.className = 'symbol-editor-empty';
 		this.placeholder.textContent = 'No symbol library file is indexed yet.';
-		form.append(this.textarea, this.placeholder);
+		codePanel.append(this.textarea, this.placeholder);
+		this.inspectorEl = document.createElement('aside');
+		this.inspectorEl.className = 'symbol-editor-inspector';
+		this.propertiesEl = document.createElement('div');
+		this.propertiesEl.className = 'symbol-editor-inspector-section';
+		this.pinsEl = document.createElement('div');
+		this.pinsEl.className = 'symbol-editor-inspector-section';
+		this.inspectorEl.append(this.propertiesEl, this.pinsEl);
+		editorSurface.append(codePanel, this.inspectorEl);
+		form.append(editorSurface);
 
 		layout.append(sidebar, form);
 		shell.append(header, actions, layout);
@@ -142,13 +163,315 @@ export class SymbolEditorScreen {
 		this.textarea.value = sourceText;
 		this.textarea.disabled = false;
 		this.placeholder.hidden = true;
+		this.currentRoot = this.parseRootText(sourceText);
+		this.currentSymbol = this.currentRoot ? this.findPrimarySymbol(this.currentRoot) : null;
 		const symbolName = this.extractSymbolName(sourceText);
 		this.currentSymbolName = symbolName;
 		this.titleEl.textContent = symbolName;
 		this.metaEl.textContent = `${ this.currentFileLabel } • Symbol library source`;
 		this.renderFileList(files, file.id);
 		this.renderSymbolList(file.symbols, symbolName);
+		this.renderSymbolInspector(this.currentSymbol);
 		this.syncDirtyState();
+	}
+
+	protected parseRootText(sourceText: string): KicadElement | null {
+		try {
+			return new KicadParser().parse(sourceText) as KicadElement;
+		}
+		catch {
+			return null;
+		}
+	}
+
+	protected findPrimarySymbol(root: KicadElement | null): KicadElementSymbol | null {
+		if (!root) {
+			return null;
+		}
+		return root.findChildrenByClass(KicadElementSymbol)[0] ?? null;
+	}
+
+	protected refreshTextFromAst(): void {
+		if (!this.currentRoot) {
+			return;
+		}
+		this.textarea.value = this.currentRoot.write();
+		this.syncDirtyState();
+		if (this.currentSymbol) {
+			const name = this.currentSymbol.symbolName || 'Symbol';
+			this.currentSymbolName = name;
+			this.titleEl.textContent = name;
+		}
+	}
+
+	protected createEditorField(label: string, value: string, onChange: (nextValue: string) => void): HTMLElement {
+		const row = document.createElement('label');
+		row.className = 'symbol-editor-field-row';
+		const title = document.createElement('span');
+		title.className = 'symbol-editor-field-label';
+		title.textContent = label;
+		const input = document.createElement('input');
+		input.type = 'text';
+		input.value = value;
+		input.addEventListener('change', () => onChange(input.value));
+		row.append(title, input);
+		return row;
+	}
+
+	protected renderSymbolInspector(symbol: KicadElementSymbol | null): void {
+		this.propertiesEl.replaceChildren();
+		this.pinsEl.replaceChildren();
+		if (!symbol) {
+			const empty = document.createElement('div');
+			empty.className = 'symbol-editor-empty-item';
+			empty.textContent = 'No symbol selected';
+			this.propertiesEl.append(empty);
+			return;
+		}
+
+		const metaCard = document.createElement('div');
+		metaCard.className = 'symbol-editor-inspector-card';
+		const metaTitle = document.createElement('div');
+		metaTitle.className = 'symbol-editor-inspector-title';
+		metaTitle.textContent = 'Symbol';
+		metaCard.append(metaTitle);
+		metaCard.append(this.createEditorField('Name', symbol.symbolName ?? '', value => {
+			const nextName = value.trim() || 'Symbol';
+			symbol.setSymbolName(nextName);
+			this.currentSymbolName = nextName;
+			this.titleEl.textContent = nextName;
+			this.refreshTextFromAst();
+		}));
+		const descriptionValue = symbol.getPropertyByName('Description')?.propertyValue ?? '';
+		metaCard.append(this.createEditorField('Description', descriptionValue, value => {
+			symbol.setProperty('Description', value);
+			this.refreshTextFromAst();
+		}));
+		const addPropertyBtn = document.createElement('button');
+		addPropertyBtn.type = 'button';
+		addPropertyBtn.className = 'symbol-editor-mini-button';
+		addPropertyBtn.textContent = 'Add property';
+		addPropertyBtn.addEventListener('click', () => {
+			const name = `Property_${ symbol.getProperties().length + 1 }`;
+			symbol.setProperty(name, '');
+			this.refreshTextFromAst();
+			this.renderSymbolInspector(symbol);
+		});
+		metaCard.append(addPropertyBtn);
+		this.propertiesEl.append(metaCard);
+
+		const propertyList = document.createElement('div');
+		propertyList.className = 'symbol-editor-property-list';
+		for (const property of symbol.getProperties()) {
+			const row = document.createElement('div');
+			row.className = 'symbol-editor-property-row';
+			const nameInput = document.createElement('input');
+			nameInput.type = 'text';
+			nameInput.value = property.propertyName ?? '';
+			const valueInput = document.createElement('input');
+			valueInput.type = 'text';
+			valueInput.value = property.propertyValue ?? '';
+			const removeBtn = document.createElement('button');
+			removeBtn.type = 'button';
+			removeBtn.className = 'symbol-editor-mini-button';
+			removeBtn.textContent = '×';
+			removeBtn.title = 'Remove property';
+			removeBtn.addEventListener('click', () => {
+				const currentName = property.propertyName ?? '';
+				if (currentName) {
+					symbol.deleteProperty(currentName);
+					this.refreshTextFromAst();
+					this.renderSymbolInspector(symbol);
+				}
+			});
+			nameInput.addEventListener('change', () => {
+				const currentName = property.propertyName ?? '';
+				const nextName = nameInput.value.trim();
+				if (!nextName) {
+					return;
+				}
+				if (currentName) {
+					symbol.deleteProperty(currentName);
+				}
+				symbol.setProperty(nextName, valueInput.value);
+				this.refreshTextFromAst();
+				this.renderSymbolInspector(symbol);
+			});
+			valueInput.addEventListener('change', () => {
+				const name = property.propertyName ?? nameInput.value.trim();
+				if (!name) {
+					return;
+				}
+				symbol.setProperty(name, valueInput.value);
+				this.refreshTextFromAst();
+			});
+			row.append(nameInput, valueInput, removeBtn);
+			propertyList.append(row);
+		}
+		this.propertiesEl.append(propertyList);
+
+		const pinCard = document.createElement('div');
+		pinCard.className = 'symbol-editor-inspector-card';
+		const pinTitle = document.createElement('div');
+		pinTitle.className = 'symbol-editor-inspector-title';
+		pinTitle.textContent = 'Pins';
+		const addPinBtn = document.createElement('button');
+		addPinBtn.type = 'button';
+		addPinBtn.className = 'symbol-editor-mini-button';
+		addPinBtn.textContent = 'Add pin';
+		addPinBtn.addEventListener('click', () => {
+			const pin = new KicadElementPin();
+			const existingPins = this.collectPins(symbol);
+			const nextNumber = `${ existingPins.length + 1 }`;
+			pin.setPin('PIN', nextNumber);
+			pin.setOrigin(0, 0, 0);
+			pin.setLength(100);
+			pin.setType('passive', 'line');
+			symbol.addChild(pin);
+			this.selectedPin = pin;
+			this.refreshTextFromAst();
+			this.renderSymbolInspector(symbol);
+		});
+		pinCard.append(pinTitle, addPinBtn);
+		const pins = this.collectPins(symbol);
+		if (!pins.length) {
+			const empty = document.createElement('div');
+			empty.className = 'symbol-editor-empty-item';
+			empty.textContent = 'No pins defined';
+			pinCard.append(empty);
+			this.pinsEl.append(pinCard);
+			return;
+		}
+		const pinList = document.createElement('div');
+		pinList.className = 'symbol-editor-pin-list';
+		for (const pin of pins) {
+			const pinItem = document.createElement('button');
+			pinItem.type = 'button';
+			pinItem.className = 'symbol-editor-pin-item';
+			if (this.selectedPin === pin) {
+				pinItem.classList.add('is-selected');
+			}
+			const pinInfo = pin.getPin();
+			pinItem.textContent = `${ pinInfo.number || '?' } ${ pinInfo.name ? `- ${ pinInfo.name }` : '' }`;
+			pinItem.title = pinInfo.name || pinInfo.number || 'Pin';
+			pinItem.addEventListener('click', () => {
+				this.selectedPin = pin;
+				this.renderSymbolInspector(symbol);
+			});
+			pinList.append(pinItem);
+		}
+		pinCard.append(pinList);
+		this.pinsEl.append(pinCard);
+		if (!this.selectedPin || !pins.includes(this.selectedPin)) {
+			this.selectedPin = pins[0] ?? null;
+		}
+		if (this.selectedPin) {
+			const editor = document.createElement('div');
+			editor.className = 'symbol-editor-pin-editor';
+			const pinInfo = this.selectedPin.getPin();
+			const origin = this.selectedPin.getOrigin();
+			const typeInfo = this.selectedPin.getType();
+			editor.append(this.createEditorField('Pin number', pinInfo.number, value => {
+				this.selectedPin!.setPin(this.selectedPin!.getPin().name, value || '1');
+				this.refreshTextFromAst();
+				this.renderSymbolInspector(symbol);
+			}));
+			editor.append(this.createEditorField('Pin name', pinInfo.name, value => {
+				this.selectedPin!.setPin(value, this.selectedPin!.getPin().number || '1');
+				this.refreshTextFromAst();
+				this.renderSymbolInspector(symbol);
+			}));
+			editor.append(this.createEditorField('X', `${ origin.x }`, value => {
+				const next = Number.parseFloat(value) || 0;
+				this.selectedPin!.setOrigin(next, origin.y, origin.rotation);
+				this.refreshTextFromAst();
+			}));
+			editor.append(this.createEditorField('Y', `${ origin.y }`, value => {
+				const next = Number.parseFloat(value) || 0;
+				this.selectedPin!.setOrigin(origin.x, next, origin.rotation);
+				this.refreshTextFromAst();
+			}));
+			editor.append(this.createEditorField('Length', `${ this.selectedPin.getLength() }`, value => {
+				this.selectedPin!.setLength(Number.parseFloat(value) || 0);
+				this.refreshTextFromAst();
+			}));
+			const typeRow = document.createElement('label');
+			typeRow.className = 'symbol-editor-field-row';
+			const typeLabel = document.createElement('span');
+			typeLabel.className = 'symbol-editor-field-label';
+			typeLabel.textContent = 'Type';
+			const typeSelect = document.createElement('select');
+			for (const value of ['input', 'output', 'bidirectional', 'tri_state', 'passive', 'power_in', 'power_out', 'open_collector', 'open_emitter', 'no_connect', 'free', 'unspecified']) {
+				const option = document.createElement('option');
+				option.value = value;
+				option.textContent = value;
+				if (value === typeInfo.electricalType) {
+					option.selected = true;
+				}
+				typeSelect.append(option);
+			}
+			typeSelect.addEventListener('change', () => {
+				this.selectedPin!.setType(typeSelect.value as any, typeInfo.shape);
+				this.refreshTextFromAst();
+			});
+			typeRow.append(typeLabel, typeSelect);
+			editor.append(typeRow);
+			const shapeRow = document.createElement('label');
+			shapeRow.className = 'symbol-editor-field-row';
+			const shapeLabel = document.createElement('span');
+			shapeLabel.className = 'symbol-editor-field-label';
+			shapeLabel.textContent = 'Shape';
+			const shapeSelect = document.createElement('select');
+			for (const value of ['line', 'inverted', 'clock', 'inverted_clock', 'input_low', 'clock_low', 'output_low', 'edge_clock_high', 'non_logic']) {
+				const option = document.createElement('option');
+				option.value = value;
+				option.textContent = value;
+				if (value === typeInfo.shape) {
+					option.selected = true;
+				}
+				shapeSelect.append(option);
+			}
+			shapeSelect.addEventListener('change', () => {
+				this.selectedPin!.setType(typeInfo.electricalType, shapeSelect.value as any);
+				this.refreshTextFromAst();
+			});
+			shapeRow.append(shapeLabel, shapeSelect);
+			editor.append(shapeRow);
+			const hideRow = document.createElement('label');
+			hideRow.className = 'symbol-editor-field-row';
+			const hideLabel = document.createElement('span');
+			hideLabel.className = 'symbol-editor-field-label';
+			hideLabel.textContent = 'Hidden';
+			const hideToggle = document.createElement('input');
+			hideToggle.type = 'checkbox';
+			hideToggle.checked = this.selectedPin.isHidden();
+			hideToggle.addEventListener('change', () => {
+				this.selectedPin!.setHidden(hideToggle.checked);
+				this.refreshTextFromAst();
+			});
+			hideRow.append(hideLabel, hideToggle);
+			editor.append(hideRow);
+			this.pinsEl.append(editor);
+		}
+	}
+
+	protected collectPins(symbol: KicadElementSymbol): KicadElementPin[] {
+		const pins: KicadElementPin[] = [];
+		const seen = new Set<string>();
+		const walk = (node: KicadElementSymbol) => {
+			for (const pin of node.findChildrenByClass(KicadElementPin)) {
+				const key = pin.getUuid?.() ?? `${ pin.getPin().number }-${ pin.getPin().name }-${ pin.getOrigin().x }-${ pin.getOrigin().y }`;
+				if (!seen.has(key)) {
+					seen.add(key);
+					pins.push(pin);
+				}
+			}
+			for (const unit of node.getLayers()) {
+				walk(unit);
+			}
+		};
+		walk(symbol);
+		return pins;
 	}
 
 	async save(): Promise<boolean> {
@@ -174,7 +497,11 @@ export class SymbolEditorScreen {
 		if (!this.fileId) {
 			return;
 		}
+		this.currentRoot = this.parseRootText(this.initialText);
+		this.currentSymbol = this.currentRoot ? this.findPrimarySymbol(this.currentRoot) : null;
+		this.selectedPin = null;
 		this.textarea.value = this.initialText;
+		this.renderSymbolInspector(this.currentSymbol);
 		this.syncDirtyState();
 	}
 

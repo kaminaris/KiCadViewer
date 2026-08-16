@@ -433,6 +433,11 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		showTextBoxInput: (first, second, event) => options.textInputFlow.showTextBox(first, second, event),
 		getHighlightNetEnabled: options.getHighlightNetEnabled,
 		getRoutingSizes: options.getBoardRoutingSizes,
+		getUseConnectedTrackWidth: () => options.doc.useConnectedTrackWidth,
+		getViaLayerPair: () => options.doc.viaLayerPair,
+		getOverrideLocks: () => options.doc.overrideLocks,
+		showDisambiguation: (reduced, all, actions, clientX, clientY) =>
+			options.contextMenu.showDisambiguation(reduced, all, actions, clientX, clientY),
 		getNetClassRules: options.getBoardNetClassRules,
 		getCornerMode: options.getBoardRouteCornerMode,
 		getRouterSettings: options.getBoardRouterSettings,
@@ -532,6 +537,22 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 			const layers = options.getSession()?.activeScene?.layersPresent ?? [];
 			return layers.filter(layer => layer.endsWith('.Cu'));
 		}
+		,getOverrideLocks: () => options.doc.overrideLocks
+		,expandBoardConnection: () => {
+			const session = options.getSession();
+			if (!session) {
+				return;
+			}
+			const hadSelection = session.selectionIds.size > 0;
+			const added = session.expandBoardConnection();
+			if (added > 0) {
+				options.updateEditSidebar();
+				options.setStatus(`Select/Expand Connection: ${ added } item(s) added.`);
+			}
+			else {
+				options.setStatus(hadSelection ? 'Nothing more to select on this connection.' : 'Select a track, via, or pad first.');
+			}
+		}
 		,refreshBoardUi: options.updateEditSidebar
 		,beginSchematicMove: () => schematicPointerController.beginInteractiveMove()
 		,hasSchematicMove: () => schematicPointerController.hasInteractiveMove()
@@ -575,6 +596,7 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		autoplaceSelectedFields: () => options.sessionController.tidySelectedFields(),
 		showEditLabelInput: id => options.textInputFlow.showEditLabel(id)
 		,refreshBoardUi: options.updateEditSidebar
+		,getOverrideLocks: () => options.doc.overrideLocks
 	});
 
 	options.dom.propertiesModalCloseButton?.addEventListener(

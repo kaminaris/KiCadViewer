@@ -47,6 +47,11 @@ export interface KeyboardControllerCallbacks {
 	getActiveBoardLayer(): string;
 	setActiveBoardLayer(layer: string): void;
 	getBoardCopperLayers(): string[];
+	getOverrideLocks(): boolean;
+	/** Real KiCad's "Select/Expand Connection" (U key) — see
+	 *  KicadRenderSession.expandBoardConnection's own doc comment for the
+	 *  3-tier junction/pad/whole-net escalation. */
+	expandBoardConnection(): void;
 	refreshBoardUi(): void;
 	beginSchematicMove(): boolean;
 	hasSchematicMove(): boolean;
@@ -333,6 +338,11 @@ export class KeyboardController {
 			}
 			return;
 		}
+		if (e.key.toLowerCase() === 'u' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+			e.preventDefault();
+			this.cb.expandBoardConnection();
+			return;
+		}
 		if (e.key === 'PageUp' || e.key === 'PageDown') {
 			e.preventDefault();
 			this.cb.setActiveBoardLayer(e.key === 'PageUp' ? 'F.Cu' : 'B.Cu');
@@ -350,7 +360,15 @@ export class KeyboardController {
 		}
 		if (this.matches(e, 'delete') && session.selectionIds.size > 0) {
 			e.preventDefault();
-			const removed = session.deleteElements([...session.selectionIds]);
+			const ids = [...session.selectionIds];
+			// Simplified scope vs. real KiCad's per-item exclusion: refuse the
+			// whole deletion if ANY selected item is locked, rather than
+			// silently deleting everything else around it.
+			if (!this.cb.getOverrideLocks() && ids.some(id => session.isBoardElementLocked(id))) {
+				this.cb.setStatus('Locked item(s) in selection — enable "Override locks" to delete them.');
+				return;
+			}
+			const removed = session.deleteElements(ids);
 			if (removed) {
 				this.cb.refreshBoardText(session);
 				this.cb.refreshBoardUi();

@@ -148,7 +148,10 @@ export class SessionController {
 		// BroadcastChannelTransport's own doc comments on why a stale peer
 		// entry left behind that way isn't a correctness problem).
 		window.addEventListener('beforeunload', event => {
-			if (this.state.kind === 'schematic' && this.appState.hasUnsavedSchematicChanges) {
+			const hasUnsavedChanges = this.state.kind === 'schematic'
+				? this.appState.hasUnsavedSchematicChanges
+				: this.appState.hasUnsavedBoardChanges;
+			if (hasUnsavedChanges) {
 				event.preventDefault();
 				event.returnValue = '';
 			}
@@ -243,7 +246,45 @@ export class SessionController {
 		return this.state.session;
 	}
 
-	resizeCanvas(): void {
+			/** Apply persisted per-project local settings into the active render session.
+			 *  This maps a subset of PRL keys into live session calls (per-layer
+			 *  visibility/opacity, ratsnest, zone/pad/track/via display modes). It also
+			 *  reads the custom _kionline_layer_state if present to restore named layer
+			 *  toggles that KiCad's bitmask style doesn't express as layer names.
+			 */
+			protected applyLocalSettingsToSession(local: import('@kicad-io/Project/KicadProjectLocalSettingsFile').KicadProjectLocalSettingsFile): void {
+				const session = this.state.session;
+				if (!session || !local) return;
+				// Restore any saved per-layer map first (preferred, explicit by-name).
+				const layerState = local.getLayerState();
+				if (layerState) {
+					for (const [layer, s] of Object.entries(layerState)) {
+						session.setLayerVisible(layer, Boolean(s.visible));
+						session.setLayerOpacity(layer, Number(s.opacity) || 1);
+					}
+				}
+				// visible_items -> map a few obvious toggles (ratsnest, grid, pad/net)
+				const items = local.getBoardVisibleItems();
+				if (items && items.length) {
+					session.setRatsnestVisible(items.includes('ratsnest'));
+					// grid presence toggle (match viewer's grid visibility semantics)
+					session.setGridVisible(items.includes('grid') || this.state.kind !== 'board');
+				}
+				// zone/pad/track/via display modes
+				const zone = local.getZoneDisplayMode();
+				if (zone) session.setZoneDisplayMode(zone === 'outline' ? 'outline' : 'filled');
+				const padMode = (this.state.projectContext?.project.localSettings?.parsed?.board?.pad_display_mode) ?? null;
+				if (padMode === 'outline' || padMode === 1) session.setPadDisplayMode('outline');
+				else if (padMode === 'filled' || padMode === 0) session.setPadDisplayMode('filled');
+				const trackMode = (this.state.projectContext?.project.localSettings?.parsed?.board?.track_display_mode) ?? null;
+				if (trackMode === 'outline' || trackMode === 1) session.setTrackDisplayMode('outline');
+				else if (trackMode === 'filled' || trackMode === 0) session.setTrackDisplayMode('filled');
+				const viaMode = (this.state.projectContext?.project.localSettings?.parsed?.board?.via_display_mode) ?? null;
+				if (viaMode === 'outline' || viaMode === 1) session.setViaDisplayMode('outline');
+				else if (viaMode === 'filled' || viaMode === 0) session.setViaDisplayMode('filled');
+			}
+
+			resizeCanvas(): void {
 		const dpr = window.devicePixelRatio || 1;
 		const width = Math.max(1, Math.floor(this.dom.stage.clientWidth * dpr));
 		const height = Math.max(1, Math.floor(this.dom.stage.clientHeight * dpr));
@@ -371,6 +412,16 @@ export class SessionController {
 				this.appState.markBoardSaved();
 				this.state.placements = [];
 				this.state.lockedNetlist = null;
+				// Apply per-project local settings (if any) so UI state is preserved on reload.
+				try {
+					const project = this.state.projectContext?.project;
+					if (project && project.localSettings) {
+						this.applyLocalSettingsToSession(project.localSettings);
+					}
+				}
+				catch (err) {
+					this.statusBar.dbg('applyLocalSettingsToSession failed', err);
+				}
 			}
 			else {
 				this.appState.setSchematicText(text);

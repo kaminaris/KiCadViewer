@@ -2,8 +2,10 @@
 
 ## Progress
 
-Last updated: 2026-08-13
+Last updated: 2026-08-16
 
+- [x] Source provenance audit: direct KiCad algorithm ports are documented in `apps/kicad-viewer/License.md` and cross-referenced with the local KiCad source tree.
+- [x] Symbol editor visual cleanup pass: the editor shell now uses a clearer three-panel layout, the right-hand inspector is separated into compact cards, and property/pin controls are styled to read like a real KiCad inspector instead of a raw form dump.
 - [x] PCB editor shell and KiCad-style Appearance/layer panel.
 - [x] Phase 0 implementation: retained mutable board AST, board serialization, board edit mode, footprint dragging, board-aware undo/redo, and board text cache synchronization.
 - [x] Phase 1 implementation: whole-footprint hit target and visible selection outline, rectangle selection/group drag, track/via click selection, rotate/flip/delete shortcuts, and a PCB-specific context menu.

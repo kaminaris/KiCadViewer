@@ -91,6 +91,14 @@ export interface ProjectSetupControllerDeps {
 	setStatus(message: string): void;
 	/** boardChanged is true when the applied draft wrote a new .kicad_pcb, so the caller can refresh the live board session. */
 	onApplied(boardChanged: boolean): void;
+	onCategoryChange?(category: string): void;
+}
+
+function normalizePageId(value: string | null | undefined): PageId {
+	if (value && PAGES.some(item => item.id === value)) {
+		return value;
+	}
+	return 'net-classes';
 }
 
 function button(label: string, className: string, onClick: () => void): HTMLButtonElement {
@@ -436,7 +444,10 @@ export class ProjectSetupController {
 		return !!this.draft?.isDirty || this.hasPendingLocalRows() || this.validateLocalRows().length > 0;
 	}
 
-	activate(context: ProjectContext): void {
+	activate(context: ProjectContext, requestedPage?: string | null): void {
+		if (requestedPage) {
+			this.page = normalizePageId(requestedPage);
+		}
 		if (this.context?.key !== context.key || !this.draft) {
 			const projectFile = context.project.projectFile;
 			if (!projectFile) throw new Error('This project has no .kicad_pro file.');
@@ -536,7 +547,8 @@ export class ProjectSetupController {
 				list.append(heading);
 				for (const item of pages) {
 					const pageButton = button(item.label, 'project-setup-nav-item', () => {
-						this.page = item.id;
+						this.page = normalizePageId(item.id);
+						this.deps.onCategoryChange?.(this.page);
 						for (const other of list.querySelectorAll('.project-setup-nav-item')) {
 							other.classList.toggle('active', other === pageButton);
 						}

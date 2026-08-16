@@ -14,6 +14,8 @@ export interface BoardAppearancePanelCallbacks {
 	setStatus(message: string): void;
 	getActiveLayer(): string;
 	setActiveLayer(layer: string): void;
+	/** Optional: called whenever the user changes per-layer visibility/opacity */
+	onLayerStateChange?: (state: Record<string, { visible: boolean; opacity: number }>) => void;
 }
 
 /** KiCad-style PCB Appearance dock. Layer controls are live today; the
@@ -267,15 +269,20 @@ export class BoardAppearancePanel {
 	}
 
 	protected applyLayerState(session: KicadRenderSession, layers: string[]): void {
-		for (const layer of layers) {
-			const visible = (this.baseVisibility.get(layer) ?? true) &&
-				(this.displayMode !== 'hide' || layer === this.activeLayer);
-			const opacity = this.displayMode === 'dim' && layer !== this.activeLayer
-				? Math.min(this.baseOpacity.get(layer) ?? 1, 0.18) : (this.baseOpacity.get(layer) ?? 1);
-			session.setLayerVisible(layer, visible);
-			session.setLayerOpacity(layer, opacity);
+			const state: Record<string, { visible: boolean; opacity: number }> = {};
+			for (const layer of layers) {
+				const visible = (this.baseVisibility.get(layer) ?? true) &&
+					(this.displayMode !== 'hide' || layer === this.activeLayer);
+				const opacity = this.displayMode === 'dim' && layer !== this.activeLayer
+					? Math.min(this.baseOpacity.get(layer) ?? 1, 0.18) : (this.baseOpacity.get(layer) ?? 1);
+				session.setLayerVisible(layer, visible);
+				session.setLayerOpacity(layer, opacity);
+				state[layer] = { visible, opacity };
+			}
+			if (typeof this.callbacks.onLayerStateChange === 'function') {
+				this.callbacks.onLayerStateChange(state);
+			}
 		}
-	}
 
 	protected count(value: number): HTMLElement {
 		const count = document.createElement('span');

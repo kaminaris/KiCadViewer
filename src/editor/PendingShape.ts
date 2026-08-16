@@ -15,7 +15,15 @@ export type PendingShape =
 	| { kind: 'bezier'; points: Vec2[] }      // 0-4 points
 	| { kind: 'polygon'; points: Vec2[] }     // 0-N points, closes on first-point click/double-click
 	| { kind: 'rule-area'; points: Vec2[] }   // 0-N points, closes on same-point click
-	| { kind: 'route'; netId: number | null; layer: string; corners: Vec2[] };
+	| {
+		kind: 'route'; netId: number | null; layer: string; corners: Vec2[];
+		/** Set once, at route-start, when the "auto track width" toggle is on
+		 *  and the route started by snapping onto an existing track — real
+		 *  KiCad's m_UseConnectedTrackWidth: the whole route continues at that
+		 *  track's own width instead of the selected default/net class for
+		 *  its entire length, not just the first leg. */
+		connectedWidth?: number;
+	};
 
 export class PendingShapeTracker {
 	protected shape: PendingShape = { kind: 'none' };

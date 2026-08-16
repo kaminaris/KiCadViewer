@@ -39,6 +39,7 @@ export interface ContextMenuControllerDeps {
 	autoplaceSelectedFields(): void;
 	showEditLabelInput(id: string): void;
 	refreshBoardUi(): void;
+	getOverrideLocks(): boolean;
 }
 
 export class ContextMenuController {
@@ -89,12 +90,25 @@ export class ContextMenuController {
 						}
 					},
 					delete: (s, ids) => {
+						if (!this.deps.getOverrideLocks() && ids.some(id => s.isBoardElementLocked(id))) {
+							this.deps.setStatus('Locked item(s) in selection — enable "Override locks" to delete them.');
+							return;
+						}
 						const removed = s.deleteElements(ids);
 						if (removed) {
 							this.deps.appState.refreshBoardText(s);
 							this.deps.updateUndoStackPane();
 							this.deps.refreshBoardUi();
 							this.deps.setStatus(`Deleted ${ removed } item(s).`);
+						}
+					},
+					setLocked: (s, ids, locked) => {
+						const count = s.mutateElementsByPaintIds(ids, el => el.setLocked(locked));
+						if (count) {
+							this.deps.appState.refreshBoardText(s);
+							this.deps.updateUndoStackPane();
+							this.deps.refreshBoardUi();
+							this.deps.setStatus(`${ locked ? 'Locked' : 'Unlocked' } ${ count } item(s).`);
 						}
 					}
 				}

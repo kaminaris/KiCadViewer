@@ -20,6 +20,7 @@ export interface RouteEditor {
 	projectId: string | null;
 	view: EditorView;
 	sheet: string | null;
+	category?: string | null;
 }
 
 export interface RouteSymbolEditor {
@@ -46,7 +47,8 @@ function parseRoute(search: string): Route {
 	if (view !== 'schematic' && view !== 'board' && view !== 'project-settings') {
 		return { screen: 'project', projectId };
 	}
-	return { screen: 'editor', projectId, view, sheet: params.get('sheet') };
+	const category = view === 'project-settings' ? params.get('category') : null;
+	return { screen: 'editor', projectId, view, sheet: params.get('sheet'), category };
 }
 
 function routeToUrl(route: Route): string {
@@ -59,6 +61,9 @@ function routeToUrl(route: Route): string {
 	}
 	if (route.screen === 'editor') {
 		params.set('view', route.view);
+		if (route.view === 'project-settings' && route.category) {
+			params.set('category', route.category);
+		}
 		if (route.sheet) {
 			params.set('sheet', route.sheet);
 		}
