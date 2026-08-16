@@ -9,6 +9,7 @@
 <body>
 	<div class="screen" id="screen-home"></div>
 	<div class="screen hidden" id="screen-project"></div>
+	<div class="screen hidden" id="screen-symbol"></div>
 	<div class="screen hidden" id="screen-editor">
 	<header class="top">
 		<div class="top-title-row">
@@ -124,7 +125,7 @@
 					<button type="button" class="menu-command" disabled>Route Differential Pair</button>
 					<div class="menu-divider"></div>
 					<button type="button" class="menu-command" disabled>Length Tune</button>
-					<button type="button" class="menu-command" disabled>Router Settings…</button>
+					<button type="button" class="menu-command" data-action-target="btn-router-settings">Router Settings…</button>
 				</div></div>
 				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Inspect</button><div class="menu-popover">
 					<button type="button" class="menu-command menu-schematic" data-action-target="btn-highlight-net">Highlight Net</button>
@@ -145,7 +146,9 @@
 					<button type="button" class="menu-command" disabled>Update Footprints from Library…</button>
 					<div class="menu-divider"></div>
 					<button type="button" class="menu-command" disabled>Zones Manager…</button>
-					<button type="button" class="menu-command" disabled>Cleanup Tracks and Vias…</button>
+					<button type="button" class="menu-command" data-board-command="cleanup-tracks">Cleanup Tracks and Vias…</button>
+					<div class="menu-divider"></div>
+					<button type="button" class="menu-command" data-board-command="recreate-pcb">Recreate PCB…</button>
 				</div></div>
 				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Preferences</button><div class="menu-popover">
 					<button type="button" class="menu-command" data-action-target="btn-preferences">Preferences…<span>Ctrl+,</span></button>
@@ -218,6 +221,7 @@
 		<button type="button" id="btn-preferences" hidden></button>
 		<button type="button" id="btn-symbol-fields-table" hidden></button>
 		<button type="button" id="btn-update-pcb-from-schematic" hidden></button>
+		<button type="button" id="btn-router-settings" hidden></button>
 	</header>
 	<main>
 		<aside class="edit-left-pane" id="left-dock">
@@ -302,6 +306,9 @@
 			</button>
 			<button type="button" class="tool-btn" data-board-toggle="track-display" title="Sketch Tracks" aria-label="Sketch Tracks" aria-pressed="false">
 				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 17 L10 12 L14 15 L19 7"/><path d="M5 20 L10 15 L14 18 L19 10"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-board-toggle="corner-mode" title="Route Corner Mode: 45° Corners" aria-label="Route Corner Mode: 45° Corners" aria-pressed="false">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 19 L13 19 L19 13 L19 5"/></svg>
 			</button>
 
 			<div class="tool-sep"></div>

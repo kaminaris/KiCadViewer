@@ -7,6 +7,7 @@ import type {
 
 export interface FootprintLibraryIndexerDeps {
 	setStatus(message: string): void;
+
 	indexFootprintsButton: HTMLButtonElement;
 	footprintDirectoryInput: HTMLInputElement;
 }

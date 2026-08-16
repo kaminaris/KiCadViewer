@@ -12,6 +12,53 @@ import type { ProjectContext }                                                  
  *  harmonic-munching-trinket plan's Phase 0); nothing branches on it. */
 export type DocumentKind = 'schematic' | 'board';
 
+/** Interactive router mode — mirrors real KiCad's PNS_MODE
+ *  (pns_routing_settings.h): 'highlight' (RM_MarkObstacles) never auto-
+ *  avoids anything, just flags a colliding candidate path; 'shove'
+ *  (RM_Shove) pushes existing same-layer tracks out of the way; 'walkaround'
+ *  (RM_Walkaround) routes around the first obstacle it meets. Only one is
+ *  active at a time — see BoardPointerController.computeRoutePath/
+ *  attemptShove's mode gating. */
+export type RouterMode = 'highlight' | 'shove' | 'walkaround';
+
+/** Full Route → Interactive Router Settings state — field names/defaults
+ *  transcribed from the real KiCad dialog (pcbnew's DIALOG_PNS_SETTINGS).
+ *  Only `mode`, `allowDrcViolations`, and `removeRedundantTracks` actually
+ *  change router behavior right now (see BoardPointerController and
+ *  KicadRenderSession.cleanupTracks call sites); the rest are persisted so
+ *  the dialog round-trips correctly but don't yet affect placement — see
+ *  [[kicad-viewer-interactive-router-port]] memory for the honest scope
+ *  note before assuming one of them is wired. */
+export interface RouterSettings {
+	mode: RouterMode;
+	freeAngleMode: boolean;
+	allowDrcViolations: boolean;
+	shoveVias: boolean;
+	jumpOverObstacles: boolean;
+	removeRedundantTracks: boolean;
+	optimizePadConnections: boolean;
+	smoothDraggedSegments: boolean;
+	optimizeEntireDraggedTrack: boolean;
+	useMousePathForPosture: boolean;
+	fixAllSegmentsOnClick: boolean;
+}
+
+export function defaultRouterSettings(): RouterSettings {
+	return {
+		mode: 'walkaround',
+		freeAngleMode: false,
+		allowDrcViolations: false,
+		shoveVias: true,
+		jumpOverObstacles: false,
+		removeRedundantTracks: false,
+		optimizePadConnections: true,
+		smoothDraggedSegments: true,
+		optimizeEntireDraggedTrack: false,
+		useMousePathForPosture: true,
+		fixAllSegmentsOnClick: true
+	};
+}
+
 /** The single document this page load owns. A browser tab IS the "tab" now
  *  (see the harmonic-munching-trinket plan) — this class is what's left of
  *  the earlier TabDocument/WorkspaceController pair once the in-page
@@ -30,6 +77,13 @@ export class ActiveDocument {
 	boardPolarCoordinates = false;
 	boardAppearanceVisible = true;
 	boardTool: BoardTool = 'select';
+	/** Interactive router's corner-placement mode — mirrors real KiCad's
+	 *  placer setting (pns_routing_settings.cpp): '45' mates the shorter
+	 *  orthogonal leg with a 45° diagonal (this app's original/default
+	 *  behavior), '90' is a pure right-angle L-bend, 'free' is a single
+	 *  direct segment at any angle. */
+	routeCornerMode: '45' | '90' | 'free' = '45';
+	routerSettings: RouterSettings = defaultRouterSettings();
 
 	recipe: CircuitDesignRecipe | null = null;
 	icSymbolText = '';

@@ -22,6 +22,7 @@ import { ProjectRegistry }                                                  from
 import { Router, type EditorView, type Route }                              from './Router';
 import { HomeScreen }                                                       from '../ui/HomeScreen';
 import { ProjectOverviewScreen }                                            from '../ui/ProjectOverviewScreen';
+import { SymbolEditorScreen }                                               from '../ui/SymbolEditorScreen';
 import { PreferencesDialog }                                                 from '../ui/PreferencesDialog';
 import { BoardAppearancePanel }                                              from '../ui/BoardAppearancePanel';
 import { SymbolChooser }                                                    from '../ui/SymbolChooser';
@@ -53,6 +54,9 @@ import { FootprintLibraryIndexer }                                           fro
 import { FootprintChooser }                                                  from '../ui/FootprintChooser';
 import { SymbolFieldsTable }                                                 from '../ui/SymbolFieldsTable';
 import { UpdatePcbFromSchematic }                                            from '../ui/UpdatePcbFromSchematic';
+import { RouterSettingsDialog }                                              from '../ui/RouterSettingsDialog';
+import { KicadBoard }                                                        from '@kicad-io/Project/KicadBoard';
+import { resolveNetClass, buildNetClassRules, type NetClassRules }          from '@kicad-layout/NetClassResolver';
 import { wireMainAppInteractions }                                          from './wireMainAppInteractions';
 import { MenuBar, wireToolbarCommandForwarding }                             from './MenuBar';
 import { applySchematicTheme }                                                from './SchematicThemes';
@@ -612,6 +616,11 @@ window.addEventListener('keydown', event => {
 	if ((event.ctrlKey || event.metaKey) && event.key === ',') {
 		event.preventDefault();
 		preferencesDialog.open();
+		return;
+	}
+	if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && router.route.screen === 'symbol') {
+		event.preventDefault();
+		void symbolEditorScreen.save();
 	}
 });
 
@@ -635,6 +644,63 @@ const updatePcbFromSchematic = new UpdatePcbFromSchematic(footprintLibraryCache,
 	refreshSidebar: updateEditSidebar
 });
 dom.updatePcbFromSchematicButton.addEventListener('click', () => updatePcbFromSchematic.open());
+
+const routerSettingsDialog = new RouterSettingsDialog({
+	getRouterSettings: () => doc.routerSettings,
+	setRouterSettings: settings => { doc.routerSettings = settings; }
+});
+dom.routerSettingsButton.addEventListener('click', () => routerSettingsDialog.open());
+
+// Board Tools menu's "Recreate PCB…" — rides the same 'kionline:board-
+// command' channel as the Edit menu's Fill/Unfill All Zones (see
+// wireMainAppInteractions.ts's identical pattern/comment); kept as its own
+// listener here instead since this needs doc/sessionController directly.
+// Wipes every footprint/track/via/zone/net and replaces the board's AST
+// with a fresh KicadBoard.createBlank() — the same generator "New Project"
+// uses — so a board that's accumulated stale/inconsistent net data (e.g.
+// from before a net-assignment bug fix) can be regenerated cleanly via
+// "Update PCB from Schematic" instead of hand-fixing every footprint.
+window.addEventListener('kionline:board-command', event => {
+	const command = (event as CustomEvent<string>).detail;
+	if (command === 'cleanup-tracks') {
+		const session = doc.session;
+		if (!session || session.documentTypeLoaded !== 'board') {
+			return;
+		}
+		const { merged, removed } = session.cleanupTracks();
+		if (merged === 0 && removed === 0) {
+			setStatus('Cleanup Tracks and Vias: nothing to clean up.');
+			return;
+		}
+		void (async () => {
+			await sessionController.saveProject();
+			updateEditSidebar();
+			setStatus(`Cleanup Tracks and Vias: merged ${ merged } segment${ merged === 1 ? '' : 's' }, removed ${ removed } zero-length segment${ removed === 1 ? '' : 's' }.`);
+		})();
+		return;
+	}
+	if (command !== 'recreate-pcb') {
+		return;
+	}
+	const session = doc.session;
+	const board = doc.projectContext?.project.mainBoard;
+	if (!session || !board || session.documentTypeLoaded !== 'board') {
+		return;
+	}
+	const confirmed = window.confirm(
+		'This deletes every footprint, track, via, zone, and net on this board and replaces it with a blank PCB. This cannot be undone. Continue?'
+	);
+	if (!confirmed) {
+		return;
+	}
+	board.rootElement = KicadBoard.createBlank();
+	void (async () => {
+		await session.resyncBoardFromAst(board.rootElement!.write() + '\n');
+		await sessionController.saveProject();
+		updateEditSidebar();
+		setStatus('PCB recreated from scratch.');
+	})();
+});
 
 dom.recipeInput.addEventListener('change', async (e) => {
 	const file = (e.target as HTMLInputElement).files?.[0];
@@ -749,17 +815,20 @@ wireMainAppInteractions({
 		sessionController.resizeCanvas();
 		setStatus(`PCB Appearance ${ visible ? 'shown' : 'hidden' }.`);
 	},
-	getBoardRoutingSizes: () => {
-		const classes = doc.projectContext?.project.projectFile?.raw?.net_settings?.classes;
-		const defaultClass = Array.isArray(classes)
-			? (classes.find((item: any) => item?.name === 'Default') ?? classes[0])
-			: null;
+	getBoardRoutingSizes: netName => {
+		const rules = buildNetClassRules(doc.projectContext?.project.projectFile?.raw);
+		const netClass = resolveNetClass(netName ?? '', rules);
 		return {
-			trackWidth: Number(defaultClass?.track_width) || 0.25,
-			viaSize: Number(defaultClass?.via_diameter) || 0.6,
-			viaDrill: Number(defaultClass?.via_drill) || 0.3
+			trackWidth: Number(netClass.track_width) || 0.25,
+			viaSize: Number(netClass.via_diameter) || 0.6,
+			viaDrill: Number(netClass.via_drill) || 0.3
 		};
 	},
+	getBoardNetClassRules: (): NetClassRules => buildNetClassRules(doc.projectContext?.project.projectFile?.raw),
+	getBoardRouteCornerMode: () => doc.routeCornerMode,
+	setBoardRouteCornerMode: mode => { doc.routeCornerMode = mode; },
+	getBoardRouterSettings: () => doc.routerSettings,
+	setBoardRouterSettings: settings => { doc.routerSettings = settings; },
 	ensurePlacement: ref => sessionController.ensurePlacement(ref),
 	getPlacements: () => doc.placements,
 	getRuleAreaPoints: () => doc.ruleAreaPoints,
@@ -836,12 +905,33 @@ async function confirmLeaveSchematicEditor(): Promise<boolean> {
 	return window.confirm('Discard unsaved schematic changes and continue to the next view?');
 }
 
+function routeLeavesSymbolEditor(next: Route): boolean {
+	const current = router.route;
+	return current.screen === 'symbol'
+		&& next.screen !== 'symbol'
+		&& symbolEditorScreen.isDirty;
+}
+
+async function confirmLeaveSymbolEditor(): Promise<boolean> {
+	const saveBeforeLeave = window.confirm(
+		'Symbol has unsaved changes. Press OK to save before leaving this editor.\nPress Cancel to discard and stay here.'
+	);
+	if (saveBeforeLeave) {
+		const saved = await symbolEditorScreen.save();
+		return saved;
+	}
+	return window.confirm('Discard unsaved symbol changes and continue?');
+}
+
 async function navigateWithGuards(route: Route, options?: { replace?: boolean }): Promise<void> {
 	if (activeEditorView === 'project-settings' && !(route.screen === 'editor' && route.view === 'project-settings')
 		&& !projectSetup.requestLeave()) {
 		return;
 	}
 	if (routeLeavesSchematicEditor(route) && !await confirmLeaveSchematicEditor()) {
+		return;
+	}
+	if (routeLeavesSymbolEditor(route) && !await confirmLeaveSymbolEditor()) {
 		return;
 	}
 	router.navigate(route, options);
@@ -975,12 +1065,29 @@ const projectOverviewScreen = new ProjectOverviewScreen(dom.screenProjectEl, reg
 		const params = new URLSearchParams({ project: projectId, view });
 		window.open(`${ window.location.pathname }?${ params.toString() }`, '_blank');
 	},
+	openSymbolEditor: projectId => { void navigateWithGuards({ screen: 'symbol', projectId, fileId: null }); },
 	back: () => { void navigateWithGuards({ screen: 'home' }); }
+});
+
+const symbolEditorScreen = new SymbolEditorScreen(dom.screenSymbolEl, symbolLibraryCache, {
+	saveFile: async (fileId, text) => {
+		await symbolLibraryCache.updateFileText(fileId, text);
+	},
+	onBack: () => {
+		const current = router.route;
+		if (current.screen === 'symbol' && current.projectId) {
+			void navigateWithGuards({ screen: 'project', projectId: current.projectId });
+		}
+		else {
+			void navigateWithGuards({ screen: 'home' });
+		}
+	}
 });
 
 function showScreen(name: Route['screen']): void {
 	dom.screenHomeEl.classList.toggle('hidden', name !== 'home');
 	dom.screenProjectEl.classList.toggle('hidden', name !== 'project');
+	dom.screenSymbolEl.classList.toggle('hidden', name !== 'symbol');
 	dom.screenEditorEl.classList.toggle('hidden', name !== 'editor');
 }
 
@@ -993,6 +1100,11 @@ async function applyRoute(route: Route): Promise<void> {
 	if (route.screen === 'project') {
 		showScreen('project');
 		void projectOverviewScreen.load(route.projectId);
+		return;
+	}
+	if (route.screen === 'symbol') {
+		showScreen('symbol');
+		await symbolEditorScreen.open(route.fileId);
 		return;
 	}
 	// .stage is display:none until this line runs, so resizeCanvas() here

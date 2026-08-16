@@ -22,6 +22,7 @@ export interface MainDomRefs {
 	screenHomeEl: HTMLElement;
 	screenProjectEl: HTMLElement;
 	screenEditorEl: HTMLElement;
+	screenSymbolEl: HTMLElement;
 	brandHomeButton: HTMLButtonElement;
 	stage: HTMLElement;
 	canvas: HTMLCanvasElement;
@@ -87,6 +88,7 @@ export interface MainDomRefs {
 	preferencesButton: HTMLButtonElement;
 	symbolFieldsTableButton: HTMLButtonElement;
 	updatePcbFromSchematicButton: HTMLButtonElement;
+	routerSettingsButton: HTMLButtonElement;
 	propertiesModalCloseButton: HTMLElement | null;
 	paneSplitters: HTMLElement[];
 
@@ -98,6 +100,7 @@ export function createMainDomRefs(): MainDomRefs {
 		screenHomeEl: requiredById<HTMLElement>('screen-home'),
 		screenProjectEl: requiredById<HTMLElement>('screen-project'),
 		screenEditorEl: requiredById<HTMLElement>('screen-editor'),
+		screenSymbolEl: requiredById<HTMLElement>('screen-symbol'),
 		brandHomeButton: requiredById<HTMLButtonElement>('brand-home-btn'),
 		stage: requiredById<HTMLElement>('stage'),
 		canvas: requiredById<HTMLCanvasElement>('canvas2d'),
@@ -158,6 +161,7 @@ export function createMainDomRefs(): MainDomRefs {
 		preferencesButton: requiredById<HTMLButtonElement>('btn-preferences'),
 		symbolFieldsTableButton: requiredById<HTMLButtonElement>('btn-symbol-fields-table'),
 		updatePcbFromSchematicButton: requiredById<HTMLButtonElement>('btn-update-pcb-from-schematic'),
+		routerSettingsButton: requiredById<HTMLButtonElement>('btn-router-settings'),
 		propertiesModalCloseButton: optionalById<HTMLElement>('properties-modal-close'),
 		paneSplitters: Array.from(document.querySelectorAll<HTMLElement>('.pane-splitter')),
 		getToolGroupButton: id => optionalById<HTMLButtonElement>(id)

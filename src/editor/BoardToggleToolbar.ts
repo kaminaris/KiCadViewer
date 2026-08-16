@@ -26,7 +26,15 @@ export interface BoardToggleToolbarCallbacks {
 	cycleTrackDisplayMode(): void;
 	getAppearanceVisible(): boolean;
 	setAppearanceVisible(visible: boolean): void;
+	getRouteCornerMode(): '45' | '90' | 'free';
+	cycleRouteCornerMode(): void;
 }
+
+const CORNER_MODE_LABELS: Record<'45' | '90' | 'free', string> = {
+	'45': '45° Corners',
+	'90': '90° Corners',
+	free: 'Free-Angle Corners',
+};
 
 const CROSSHAIR_LABELS: Record<BoardCrosshairMode, string> = {
 	small: 'Small Crosshairs',
@@ -64,6 +72,8 @@ export class BoardToggleToolbar {
 		'#board-toggle-panel [data-board-toggle="track-display"]');
 	protected readonly appearanceButton = document.querySelector<HTMLButtonElement>(
 		'#board-toggle-panel [data-board-toggle="appearance"]');
+	protected readonly cornerModeButton = document.querySelector<HTMLButtonElement>(
+		'#board-toggle-panel [data-board-toggle="corner-mode"]');
 
 	constructor(protected readonly callbacks: BoardToggleToolbarCallbacks) {
 		this.gridButton?.addEventListener('click', () => {
@@ -118,6 +128,10 @@ export class BoardToggleToolbar {
 			this.callbacks.setAppearanceVisible(!this.callbacks.getAppearanceVisible());
 			this.refresh();
 		});
+		this.cornerModeButton?.addEventListener('click', () => {
+			this.callbacks.cycleRouteCornerMode();
+			this.refresh();
+		});
 		this.refresh();
 	}
 
@@ -148,6 +162,10 @@ export class BoardToggleToolbar {
 		this.setPressed(this.trackDisplayButton, trackMode === 'outline');
 		this.trackDisplayButton?.setAttribute('title', trackMode === 'outline' ? 'Sketch Tracks (outline only)' : 'Sketch Tracks');
 		this.setPressed(this.appearanceButton, this.callbacks.getAppearanceVisible());
+		const cornerMode = this.callbacks.getRouteCornerMode();
+		this.setPressed(this.cornerModeButton, cornerMode !== '45');
+		this.cornerModeButton?.setAttribute('title', `Route Corner Mode: ${ CORNER_MODE_LABELS[cornerMode] }`);
+		this.cornerModeButton?.setAttribute('aria-label', `Route Corner Mode: ${ CORNER_MODE_LABELS[cornerMode] }`);
 	}
 
 	protected setPressed(button: HTMLButtonElement | null, pressed: boolean): void {

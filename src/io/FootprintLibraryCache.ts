@@ -1,16 +1,18 @@
-import { KicadParser } from '@kicad-io/KicadParser';
+import { KicadParser }           from '@kicad-io/KicadParser';
 import { KicadElementFootprint } from '@kicad-io/KicadElementFootprint';
-import { KicadElementPad } from '@kicad-io/KicadElementPad';
+import { KicadElementPad }       from '@kicad-io/KicadElementPad';
 
 export interface FootprintFileHandle {
 	kind: 'file';
 	name: string;
+
 	getFile(): Promise<File>;
 }
 
 export interface FootprintDirectoryHandle {
 	kind: 'directory';
 	name: string;
+
 	values(): AsyncIterable<FootprintFileHandle | FootprintDirectoryHandle>;
 }
 
@@ -67,7 +69,9 @@ export class FootprintLibraryCache {
 	protected dbPromise: Promise<IDBDatabase> | null = null;
 
 	protected openDb(): Promise<IDBDatabase> {
-		if (this.dbPromise) return this.dbPromise;
+		if (this.dbPromise) {
+			return this.dbPromise;
+		}
 		if (typeof indexedDB === 'undefined') {
 			return Promise.reject(new Error('IndexedDB is unavailable in this browser.'));
 		}
@@ -75,8 +79,12 @@ export class FootprintLibraryCache {
 			const request = indexedDB.open(DB_NAME, DB_VERSION);
 			request.onupgradeneeded = () => {
 				const db = request.result;
-				if (!db.objectStoreNames.contains(META_STORE)) db.createObjectStore(META_STORE, { keyPath: 'key' });
-				if (!db.objectStoreNames.contains(FILE_STORE)) db.createObjectStore(FILE_STORE, { keyPath: 'id' });
+				if (!db.objectStoreNames.contains(META_STORE)) {
+					db.createObjectStore(META_STORE, { keyPath: 'key' });
+				}
+				if (!db.objectStoreNames.contains(FILE_STORE)) {
+					db.createObjectStore(FILE_STORE, { keyPath: 'id' });
+				}
 			};
 			request.onsuccess = () => resolve(request.result);
 			request.onerror = () => reject(request.error ?? new Error('Could not open footprint cache.'));
@@ -186,7 +194,9 @@ export class FootprintLibraryCache {
 			await this.putFileRecord(file);
 		}
 		catch (error) {
-			if (!file.handle) throw error;
+			if (!file.handle) {
+				throw error;
+			}
 			await this.putFileRecord({ ...file, handle: undefined });
 		}
 	}
@@ -245,7 +255,9 @@ export class FootprintLibraryCache {
 	): Promise<FootprintLibrarySummary> {
 		await this.clearIndex();
 		const entries: { handle: FootprintFileHandle; relativePath: string }[] = [];
-		for await (const entry of this.walkDirectory(directory)) entries.push(entry);
+		for await (const entry of this.walkDirectory(directory)) {
+			entries.push(entry);
+		}
 		let processedFiles = 0;
 		let errorCount = 0;
 		for (const entry of entries) {

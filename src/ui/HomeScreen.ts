@@ -54,20 +54,31 @@ export class HomeScreen {
 	) {
 		this.root.replaceChildren();
 
-		const header = document.createElement('div');
+		const shell = document.createElement('div');
+		shell.className = 'home-shell';
+
+		const header = document.createElement('header');
 		header.className = 'home-header';
 
+		const brand = document.createElement('div');
+		brand.className = 'home-brand';
 		const title = document.createElement('div');
 		title.className = 'home-title';
 		title.textContent = 'KiOnline';
+		const subtitle = document.createElement('p');
+		subtitle.className = 'home-subtitle';
+		subtitle.textContent = `v${ __APP_VERSION__ }`;
+		brand.append(title, subtitle);
 
 		const actions = document.createElement('div');
 		actions.className = 'home-actions';
 		const openFolderBtn = this.makeButton('Open Project Folder', () => this.callbacks.openFolder());
+		openFolderBtn.classList.add('primary');
 		const newProjectBtn = this.makeButton('New Project', () => this.callbacks.newProject());
+		newProjectBtn.classList.add('secondary');
 
 		const openZipLabel = document.createElement('label');
-		openZipLabel.className = 'file-btn';
+		openZipLabel.className = 'file-btn home-file-btn';
 		openZipLabel.textContent = 'Open Project (.zip)';
 		this.zipInput = document.createElement('input');
 		this.zipInput.type = 'file';
@@ -83,14 +94,38 @@ export class HomeScreen {
 		openZipLabel.appendChild(this.zipInput);
 
 		const scratchBtn = this.makeButton('Open a Single File', () => this.callbacks.openScratchEditor());
+		scratchBtn.classList.add('secondary');
 		scratchBtn.title = 'Open one .kicad_sch / .kicad_pcb with no project behind it';
 
 		actions.append(openFolderBtn, newProjectBtn, openZipLabel, scratchBtn);
-		header.append(title, actions);
+		header.append(brand, actions);
 
+		const layout = document.createElement('div');
+		layout.className = 'home-layout';
+
+		const side = document.createElement('aside');
+		side.className = 'home-side';
 		this.libraryPanelEl = document.createElement('div');
 		this.libraryPanelEl.className = 'home-library-panel';
 		this.libraryPanelEl.setAttribute('aria-label', 'Library status');
+		side.appendChild(this.libraryPanelEl);
+
+		const projectsSection = document.createElement('section');
+		projectsSection.className = 'home-projects';
+		const projectsHeader = document.createElement('div');
+		projectsHeader.className = 'home-section-header';
+		const projectsTitle = document.createElement('div');
+		projectsTitle.className = 'home-section-title';
+		projectsTitle.textContent = 'Recent projects';
+		projectsHeader.appendChild(projectsTitle);
+		this.listEl = document.createElement('div');
+		this.listEl.className = 'home-project-list';
+		projectsSection.append(projectsHeader, this.listEl);
+
+		layout.append(side, projectsSection);
+		shell.append(header, layout);
+
+		this.root.appendChild(shell);
 
 		this.libraryModalEl = document.createElement('div');
 		this.libraryModalEl.className = 'home-library-modal hidden';
@@ -108,10 +143,7 @@ export class HomeScreen {
 		this.libraryProgressLabelEl.textContent = 'Starting…';
 		this.libraryModalEl.append(modalTitle, track, this.libraryProgressLabelEl);
 
-		this.listEl = document.createElement('div');
-		this.listEl.className = 'home-project-list';
-
-		this.root.append(header, this.libraryPanelEl, this.listEl, this.libraryModalEl);
+		this.root.appendChild(this.libraryModalEl);
 	}
 
 	showImportProgress(kind: 'Symbols' | 'Footprints', processed = 0, total = 0, fileName?: string): void {
@@ -142,7 +174,7 @@ export class HomeScreen {
 		const [projects, symbolSummary, footprintSummary] = await Promise.all([
 			this.registry.listProjects(),
 			this.callbacks.getSymbolLibrarySummary(),
-			this.callbacks.getFootprintLibrarySummary(),
+			this.callbacks.getFootprintLibrarySummary()
 		]);
 		this.renderLibraryStatus(symbolSummary, footprintSummary);
 		this.listEl.replaceChildren();
@@ -213,7 +245,8 @@ export class HomeScreen {
 			text.className = 'home-library-copy';
 			text.textContent = countText(count);
 			body.appendChild(text);
-		} else {
+		}
+		else {
 			const warn = document.createElement('div');
 			warn.className = 'home-library-warning';
 			warn.textContent = emptyText;

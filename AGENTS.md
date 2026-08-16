@@ -33,6 +33,20 @@ state machines, defaults, serialization, geometry, and UI semantics. Treat
 existing code in this app as an implementation-in-progress, not as authority
 over real KiCad.
 
+**Direct porting of real KiCad's GPLv3+ source is authorized, not just
+reading it as a reference.** This project is going fully open-source, so a
+ported file being a GPL derivative work is an accepted, deliberate choice —
+raised and confirmed explicitly with the project owner, not something to
+ask about again per-feature. Default to writing original code for small or
+simple pieces (porting isn't automatically the right call just because it's
+allowed), but when a hand-derived/approximated algorithm keeps producing
+behavior that visibly diverges from real KiCad — geometry-heavy routing/DRC/
+zone-fill edge cases are the recurring case — porting the real algorithm
+directly is the preferred path. When porting: keep a clear attribution
+comment in the ported file (source file path, copyright holders, GPLv3+
+notice, and a note on what was adapted vs. translated verbatim) — see
+`shared/kicad-render/router/PnsWalkaround.ts` for the established pattern.
+
 ## Repo topology — read this before touching paths or `git`
 
 - **This directory is its own git repository**, nested inside the BOMManager2

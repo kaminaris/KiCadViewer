@@ -1,6 +1,7 @@
 import type { KicadRenderSession }                                       from '@kicad-render/KicadRenderSession';
 import { Vec2 }                                                          from '@kicad-render/math/Vec2';
 import { isEditablePowerPlacement }                                      from '@kicad-layout/index';
+import type { NetClassRules }                                            from '@kicad-layout/NetClassResolver';
 import type { AppMode }                                                  from './AppState';
 import type { AppState }                                                 from './AppState';
 import type { PendingShapeTracker }                                      from '../editor/PendingShape';
@@ -28,6 +29,7 @@ import type { MainDomRefs }                                              from '.
 import { runMainBootstrap }                                              from './bootstrap';
 import type { SessionController }                                        from './SessionController';
 import type { ActiveDocument }                                           from './ActiveDocument';
+import type { RouterSettings }                                          from './ActiveDocument';
 
 export interface WireMainAppInteractionsOptions {
 	dom: MainDomRefs;
@@ -109,7 +111,17 @@ export interface WireMainAppInteractionsOptions {
 
 	setBoardAppearanceVisible(visible: boolean): void;
 
-	getBoardRoutingSizes(): { trackWidth: number; viaSize: number; viaDrill: number };
+	getBoardRoutingSizes(netName: string | null): { trackWidth: number; viaSize: number; viaDrill: number };
+
+	getBoardNetClassRules(): NetClassRules;
+
+	getBoardRouteCornerMode(): '45' | '90' | 'free';
+
+	setBoardRouteCornerMode(mode: '45' | '90' | 'free'): void;
+
+	getBoardRouterSettings(): RouterSettings;
+
+	setBoardRouterSettings(settings: RouterSettings): void;
 
 	ensurePlacement(ref: string): any | null;
 
@@ -420,7 +432,11 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		showTextInput: (anchor, event) => options.textInputFlow.showText(anchor, event, TEXT_INPUT_PLACEHOLDERS),
 		showTextBoxInput: (first, second, event) => options.textInputFlow.showTextBox(first, second, event),
 		getHighlightNetEnabled: options.getHighlightNetEnabled,
-		getRoutingSizes: options.getBoardRoutingSizes
+		getRoutingSizes: options.getBoardRoutingSizes,
+		getNetClassRules: options.getBoardNetClassRules,
+		getCornerMode: options.getBoardRouteCornerMode,
+		getRouterSettings: options.getBoardRouterSettings,
+		dbg: options.dbg
 	});
 	boardToolbar = new BoardToolbar({
 		getActiveTool: () => options.doc.boardTool,
@@ -454,7 +470,13 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		getTrackDisplayMode: options.getBoardTrackDisplayMode,
 		cycleTrackDisplayMode: options.cycleBoardTrackDisplayMode,
 		getAppearanceVisible: options.getBoardAppearanceVisible,
-		setAppearanceVisible: options.setBoardAppearanceVisible
+		setAppearanceVisible: options.setBoardAppearanceVisible,
+		getRouteCornerMode: options.getBoardRouteCornerMode,
+		cycleRouteCornerMode: () => {
+			const order: Array<'45' | '90' | 'free'> = ['45', '90', 'free'];
+			const next = order[(order.indexOf(options.getBoardRouteCornerMode()) + 1) % order.length]!;
+			options.setBoardRouteCornerMode(next);
+		}
 	});
 
 	new KeyboardController(() => options.settings.current.shortcuts, {

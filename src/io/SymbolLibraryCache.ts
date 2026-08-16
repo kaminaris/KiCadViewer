@@ -307,7 +307,10 @@ export class SymbolLibraryCache {
 					file, entry.relativePath, entry.handle.name, entry.relativePath, entry.handle);
 				await this.putFile(record);
 				onProgress?.({
-					processedFiles, totalFiles: entries.length, fileName: entry.relativePath, symbolCount: record.symbols.length
+					processedFiles,
+					totalFiles: entries.length,
+					fileName: entry.relativePath,
+					symbolCount: record.symbols.length
 				});
 			}
 			catch (error) {
@@ -424,8 +427,31 @@ export class SymbolLibraryCache {
 		return records.map(({ sourceText: _sourceText, ...metadata }) => metadata);
 	}
 
+	async updateFileText(id: string, text: string): Promise<void> {
+		const db = await this.openDb();
+		const file = await new Promise<CachedSymbolFile | undefined>((resolve, reject) => {
+			const request = db.transaction(FILE_STORE, 'readonly').objectStore(FILE_STORE).get(id);
+			request.onsuccess = () => resolve(request.result as CachedSymbolFile | undefined);
+			request.onerror = () => reject(request.error ?? new Error('Could not read cached symbol file.'));
+		});
+		if (!file) {
+			throw new Error('Cached symbol file was not found. Re-index the symbol directory.');
+		}
+		const nextFile: CachedSymbolFile = {
+			...file,
+			sourceText: text,
+			size: text.length,
+			lastModified: Date.now(),
+			symbols: await this.extractSymbols(text)
+		};
+		const transaction = db.transaction(FILE_STORE, 'readwrite');
+		transaction.objectStore(FILE_STORE).put(nextFile);
+		await this.transactionDone(transaction);
+		await this.recomputeSummary((await this.getSummary())?.rootName ?? 'Symbol library', 0);
+	}
+
 	/** Future symbol-placement code can opt into loading one cached library
-	 * file on demand. Indexing itself never calls this method. */
+	 *  file on demand. Indexing itself never calls this method. */
 	async readCachedFile(id: string): Promise<string> {
 		const db = await this.openDb();
 		const file = await new Promise<CachedSymbolFile | undefined>((resolve, reject) => {

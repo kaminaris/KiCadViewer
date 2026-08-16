@@ -1,21 +1,26 @@
-import { KicadRenderSession }                                    from '@kicad-render/KicadRenderSession';
-import { KicadSchematic }                                        from '@kicad-io/Project/KicadSchematic';
-import { KicadBoard }                                            from '@kicad-io/Project/KicadBoard';
-import { KicadElementFootprint }                                 from '@kicad-io/KicadElementFootprint';
-import { KicadElementPad }                                       from '@kicad-io/KicadElementPad';
-import { KicadElementNet }                                       from '@kicad-io/KicadElementNet';
-import { KicadParser }                                           from '@kicad-io/KicadParser';
+import { KicadRenderSession }                                     from '@kicad-render/KicadRenderSession';
+import { KicadSchematic }                                         from '@kicad-io/Project/KicadSchematic';
+import { KicadBoard }                                             from '@kicad-io/Project/KicadBoard';
+import { KicadElementFootprint }                                  from '@kicad-io/KicadElementFootprint';
+import { KicadElementPad }                                        from '@kicad-io/KicadElementPad';
+import { KicadElementNet }                                        from '@kicad-io/KicadElementNet';
+import { KicadParser }                                            from '@kicad-io/KicadParser';
 import { SchematicConnectivityService, type LoadedSchematicNode } from '@kicad-layout/Connectivity';
-import type { ProjectContext }                                   from '../app/ProjectContext';
-import { FootprintLibraryCache }                                 from '../io/FootprintLibraryCache';
-import { makeDraggableResizable }                                from './DraggableResizable';
+import type { ProjectContext }                                    from '../app/ProjectContext';
+import { FootprintLibraryCache }                                  from '../io/FootprintLibraryCache';
+import { makeDraggableResizable }                                 from './DraggableResizable';
 
 export interface UpdatePcbFromSchematicCallbacks {
 	setStatus(message: string): void;
+
 	getSession(): KicadRenderSession | null;
+
 	getProjectContext(): ProjectContext | null;
+
 	getCurrentSheetNode(): KicadSchematic | null;
+
 	saveProject(): Promise<void>;
+
 	refreshSidebar(): void;
 }
 
@@ -28,7 +33,11 @@ interface UpdatePcbOptions {
 }
 
 type ReportSeverity = 'error' | 'warning' | 'action' | 'info';
-interface ReportLine { severity: ReportSeverity; message: string }
+
+interface ReportLine {
+	severity: ReportSeverity;
+	message: string;
+}
 
 /** One resolved schematic component — real symbol fields joined onto the
  *  connectivity engine's per-pin net resolution. */
@@ -43,13 +52,22 @@ interface JoinedComponent {
 
 type PlannedAction =
 	| { kind: 'add-net'; name: string; id: number }
-	| { kind: 'add-footprint'; ref: string; fpid: string; value: string; pins: { number: string; net: string; netId: number }[] }
+	| {
+	kind: 'add-footprint';
+	ref: string;
+	fpid: string;
+	value: string;
+	pins: { number: string; net: string; netId: number }[]
+}
 	| { kind: 'replace-footprint'; footprint: KicadElementFootprint; ref: string; fromFpid: string; toFpid: string }
 	| { kind: 'delete-footprint'; footprint: KicadElementFootprint; ref: string }
 	| { kind: 'update-fields'; ref: string; fields: Record<string, string>; removeFields: string[] }
 	| { kind: 'set-pad-net'; ref: string; padNumber: string; netId: number; netName: string };
 
-interface DiffResult { actions: PlannedAction[]; report: ReportLine[] }
+interface DiffResult {
+	actions: PlannedAction[];
+	report: ReportLine[];
+}
 
 const MANDATORY_FOOTPRINT_FIELDS = new Set(['Reference', 'Value', 'Footprint', 'Datasheet', 'Description']);
 
@@ -91,13 +109,18 @@ export class UpdatePcbFromSchematic {
 	protected boardFootprints = new Map<string, KicadElementFootprint>();
 	protected diff: DiffResult = { actions: [], report: [] };
 
-	constructor(protected readonly cache: FootprintLibraryCache, protected readonly callbacks: UpdatePcbFromSchematicCallbacks) {
+	constructor(
+		protected readonly cache: FootprintLibraryCache,
+		protected readonly callbacks: UpdatePcbFromSchematicCallbacks
+	) {
 		for (const eventName of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick']) {
 			this.el.addEventListener(eventName, event => event.stopPropagation());
 		}
 		this.closeEl.addEventListener('click', () => this.close());
 		this.closeBtnEl.addEventListener('click', () => this.close());
-		for (const el of [this.optReplaceEl, this.optDeleteEl, this.optOverrideLocksEl, this.optUpdateFieldsEl, this.optRemoveFieldsEl]) {
+		for (const el of [
+			this.optReplaceEl, this.optDeleteEl, this.optOverrideLocksEl, this.optUpdateFieldsEl, this.optRemoveFieldsEl
+		]) {
 			el.addEventListener('change', () => this.recompute());
 		}
 		for (const el of [this.filterErrorsEl, this.filterWarningsEl, this.filterActionsEl, this.filterInfosEl]) {
@@ -171,7 +194,8 @@ export class UpdatePcbFromSchematic {
 		}
 		const children: LoadedSchematicNode[] = [];
 		for (const child of sheet.sheets) {
-			const node = this.buildSchematicNode(child, hierarchyPath ? `${ hierarchyPath }/${ child.name }` : child.name);
+			const node = this.buildSchematicNode(
+				child, hierarchyPath ? `${ hierarchyPath }/${ child.name }` : child.name);
 			if (node) {
 				children.push(node);
 			}
@@ -307,8 +331,17 @@ export class UpdatePcbFromSchematic {
 					}
 					pins.push({ number: pin.number, net: pin.net, netId: ensureNet(pin.net) });
 				}
-				actions.push({ kind: 'add-footprint', ref: component.ref, fpid: component.footprintFpid, value: component.value, pins });
-				report.push({ severity: 'action', message: `Add ${ component.ref } (footprint '${ component.footprintFpid }').` });
+				actions.push({
+					kind: 'add-footprint',
+					ref: component.ref,
+					fpid: component.footprintFpid,
+					value: component.value,
+					pins
+				});
+				report.push({
+					severity: 'action',
+					message: `Add ${ component.ref } (footprint '${ component.footprintFpid }').`
+				});
 				continue;
 			}
 			matchedRefs.add(component.ref);
@@ -318,10 +351,19 @@ export class UpdatePcbFromSchematic {
 			if (existingFpid !== component.footprintFpid) {
 				if (options.replaceFootprints) {
 					if (footprint.isLocked() && !options.overrideLocks) {
-						report.push({ severity: 'warning', message: `${ component.ref } footprint is locked — skipping replacement.` });
+						report.push({
+							severity: 'warning',
+							message: `${ component.ref } footprint is locked — skipping replacement.`
+						});
 					}
 					else {
-						actions.push({ kind: 'replace-footprint', footprint, ref: component.ref, fromFpid: existingFpid, toFpid: component.footprintFpid });
+						actions.push({
+							kind: 'replace-footprint',
+							footprint,
+							ref: component.ref,
+							fromFpid: existingFpid,
+							toFpid: component.footprintFpid
+						});
 						report.push({
 							severity: 'action',
 							message: `Changed ${ component.ref } footprint from '${ existingFpid }' to '${ component.footprintFpid }'.`
@@ -336,7 +378,11 @@ export class UpdatePcbFromSchematic {
 			const fieldChanges: Record<string, string> = {};
 			if (props['Value'] !== component.value) {
 				fieldChanges['Value'] = component.value;
-				report.push({ severity: 'action', message: `Changed ${ component.ref } value from '${ props['Value'] ?? '' }' to '${ component.value }'.` });
+				report.push({
+					severity: 'action',
+					message: `Changed ${ component.ref } value from '${ props['Value']
+					?? '' }' to '${ component.value }'.`
+				});
 			}
 			if (options.updateFields) {
 				for (const [name, value] of Object.entries(component.fields)) {
@@ -359,7 +405,8 @@ export class UpdatePcbFromSchematic {
 					}
 				}
 			}
-			const hasNonValueFieldChange = Object.keys(fieldChanges).some(name => name !== 'Value') || removeFields.length > 0;
+			const hasNonValueFieldChange = Object.keys(fieldChanges).some(name => name !== 'Value')
+				|| removeFields.length > 0;
 			if (hasNonValueFieldChange) {
 				report.push({ severity: 'action', message: `Updated ${ component.ref } fields.` });
 			}
@@ -367,24 +414,48 @@ export class UpdatePcbFromSchematic {
 				actions.push({ kind: 'update-fields', ref: component.ref, fields: fieldChanges, removeFields });
 			}
 
+			// Grouped by pad NUMBER, not iterated pad-by-pad — a footprint can
+			// legitimately have several physical pads sharing one number (e.g.
+			// SOT-223/TO-220-style parts, where a tab/heatsink pad carries the
+			// same number as the leg pin it's tied to). All pads in a group
+			// resolve to the same schematic pin and must all receive the same
+			// net; grouping first means exactly one action/report line per
+			// number instead of duplicated ones, and — critically — means
+			// applyDiff (below) can mutate every physical pad in the group
+			// instead of silently updating only whichever one a plain `.find()`
+			// happened to hit first (the actual SOT-223 bug: one pad numbered
+			// "2" got reconnected, its sibling pad also numbered "2" didn't).
+			const padsByNumber = new Map<string, KicadElementPad[]>();
 			for (const pad of activeFootprint.findChildrenByClass(KicadElementPad)) {
 				const onCopper = pad.getLayers(globalLayers).some(l => l.endsWith('.Cu'));
 				if (!onCopper || !pad.padNumber) {
 					continue;
 				}
-				const pin = component.pins.find(p => p.number === pad.padNumber);
+				const group = padsByNumber.get(pad.padNumber);
+				if (group) {
+					group.push(pad);
+				}
+				else {
+					padsByNumber.set(pad.padNumber, [pad]);
+				}
+			}
+			for (const [padNumber, pads] of padsByNumber) {
+				const pin = component.pins.find(p => p.number === padNumber);
 				const netName = pin?.net ?? '';
 				if (!netName) {
 					report.push({
 						severity: 'warning',
-						message: `No net found for component ${ component.ref } pad ${ pad.padNumber } (no pin ${ pad.padNumber } in symbol).`
+						message: `No net found for component ${ component.ref } pad ${ padNumber } (no pin ${ padNumber } in symbol).`
 					});
 					continue;
 				}
 				const targetNetId = ensureNet(netName);
-				if (pad.getNetName() !== netName) {
-					actions.push({ kind: 'set-pad-net', ref: component.ref, padNumber: pad.padNumber, netId: targetNetId, netName });
-					report.push({ severity: 'action', message: `Reconnected ${ component.ref } pad ${ pad.padNumber } to net "${ netName }".` });
+				if (pads.some(pad => pad.getNetName() !== netName)) {
+					actions.push({ kind: 'set-pad-net', ref: component.ref, padNumber, netId: targetNetId, netName });
+					report.push({
+						severity: 'action',
+						message: `Reconnected ${ component.ref } pad ${ padNumber } to net "${ netName }".`
+					});
 				}
 			}
 		}
@@ -478,7 +549,10 @@ export class UpdatePcbFromSchematic {
 				case 'add-footprint': {
 					const parsed = await this.resolveLibraryFootprint(action.fpid);
 					if (!parsed) {
-						applied.push({ severity: 'error', message: `Cannot add ${ action.ref } (footprint '${ action.fpid }' not found).` });
+						applied.push({
+							severity: 'error',
+							message: `Cannot add ${ action.ref } (footprint '${ action.fpid }' not found).`
+						});
 						break;
 					}
 					parsed.setUuid();
@@ -488,12 +562,21 @@ export class UpdatePcbFromSchematic {
 					parsed.setOrigin(pos.x, pos.y, 0);
 					board.rootElement.children.push(parsed);
 					this.boardFootprints.set(action.ref, parsed);
-					applied.push({ severity: 'action', message: `Added ${ action.ref } (footprint '${ action.fpid }').` });
+					applied.push(
+						{ severity: 'action', message: `Added ${ action.ref } (footprint '${ action.fpid }').` });
 					for (const pin of action.pins) {
-						const pad = parsed.findChildrenByClass(KicadElementPad).find(p => p.padNumber === pin.number);
-						if (pad) {
-							pad.setNet(pin.netId, pin.net);
-							applied.push({ severity: 'action', message: `Connected ${ action.ref } pad ${ pin.number } to net "${ pin.net }".` });
+						// Every physical pad sharing this number (see computeDiff's
+						// padsByNumber grouping) — not just the first match.
+						const pads = parsed.findChildrenByClass(KicadElementPad)
+							.filter(p => p.padNumber === pin.number);
+						if (pads.length) {
+							for (const pad of pads) {
+								pad.setNet(pin.netId, pin.net);
+							}
+							applied.push({
+								severity: 'action',
+								message: `Connected ${ action.ref } pad ${ pin.number } to net "${ pin.net }".`
+							});
 						}
 					}
 					break;
@@ -501,7 +584,10 @@ export class UpdatePcbFromSchematic {
 				case 'replace-footprint': {
 					const parsed = await this.resolveLibraryFootprint(action.toFpid);
 					if (!parsed) {
-						applied.push({ severity: 'error', message: `Cannot change ${ action.ref } footprint (footprint '${ action.toFpid }' not found).` });
+						applied.push({
+							severity: 'error',
+							message: `Cannot change ${ action.ref } footprint (footprint '${ action.toFpid }' not found).`
+						});
 						break;
 					}
 					const origin = action.footprint.getOrigin();
@@ -518,7 +604,10 @@ export class UpdatePcbFromSchematic {
 						board.rootElement.children.splice(idx, 1, parsed);
 					}
 					this.boardFootprints.set(action.ref, parsed);
-					applied.push({ severity: 'action', message: `Changed ${ action.ref } footprint from '${ action.fromFpid }' to '${ action.toFpid }'.` });
+					applied.push({
+						severity: 'action',
+						message: `Changed ${ action.ref } footprint from '${ action.fromFpid }' to '${ action.toFpid }'.`
+					});
 					break;
 				}
 				case 'delete-footprint': {
@@ -540,7 +629,10 @@ export class UpdatePcbFromSchematic {
 					// edit. Same reasoning applies to 'set-pad-net' below.
 					const footprint = this.boardFootprints.get(action.ref);
 					if (!footprint) {
-						applied.push({ severity: 'error', message: `Cannot update ${ action.ref } fields (footprint not found).` });
+						applied.push({
+							severity: 'error',
+							message: `Cannot update ${ action.ref } fields (footprint not found).`
+						});
 						break;
 					}
 					const previousValue = footprint.getAllProperties()['Value'] ?? '';
@@ -557,9 +649,13 @@ export class UpdatePcbFromSchematic {
 					// applyDiff only sees the bundled action, not computeDiff's
 					// per-line report.
 					if ('Value' in action.fields) {
-						applied.push({ severity: 'action', message: `Changed ${ action.ref } value from '${ previousValue }' to '${ action.fields['Value'] }'.` });
+						applied.push({
+							severity: 'action',
+							message: `Changed ${ action.ref } value from '${ previousValue }' to '${ action.fields['Value'] }'.`
+						});
 					}
-					const hasNonValueFieldChange = Object.keys(action.fields).some(name => name !== 'Value') || action.removeFields.length > 0;
+					const hasNonValueFieldChange = Object.keys(action.fields).some(name => name !== 'Value')
+						|| action.removeFields.length > 0;
 					if (hasNonValueFieldChange) {
 						applied.push({ severity: 'action', message: `Updated ${ action.ref } fields.` });
 					}
@@ -567,13 +663,26 @@ export class UpdatePcbFromSchematic {
 				}
 				case 'set-pad-net': {
 					const footprint = this.boardFootprints.get(action.ref);
-					const pad = footprint?.findChildrenByClass(KicadElementPad).find(p => p.padNumber === action.padNumber);
-					if (!pad) {
-						applied.push({ severity: 'error', message: `Cannot reconnect ${ action.ref } pad ${ action.padNumber } (footprint or pad not found).` });
+					// Every physical pad sharing this number (see computeDiff's
+					// padsByNumber grouping) — a plain `.find()` here silently left
+					// a footprint's second same-numbered pad (e.g. a SOT-223 tab
+					// pad numbered the same as its adjacent leg pin) on its old net.
+					const pads = footprint?.findChildrenByClass(KicadElementPad)
+						.filter(p => p.padNumber === action.padNumber) ?? [];
+					if (!pads.length) {
+						applied.push({
+							severity: 'error',
+							message: `Cannot reconnect ${ action.ref } pad ${ action.padNumber } (footprint or pad not found).`
+						});
 						break;
 					}
-					pad.setNet(action.netId, action.netName);
-					applied.push({ severity: 'action', message: `Reconnected ${ action.ref } pad ${ action.padNumber } to net "${ action.netName }".` });
+					for (const pad of pads) {
+						pad.setNet(action.netId, action.netName);
+					}
+					applied.push({
+						severity: 'action',
+						message: `Reconnected ${ action.ref } pad ${ action.padNumber } to net "${ action.netName }".`
+					});
 					break;
 				}
 			}

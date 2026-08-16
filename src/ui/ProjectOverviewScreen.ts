@@ -6,13 +6,14 @@ export interface ProjectOverviewScreenCallbacks {
 
 	openViewNewTab(projectId: string, view: DocumentKind): void;
 
+	openSymbolEditor(projectId: string): void;
+
 	back(): void;
 }
 
-/** Project metadata + view tiles (Schematic/PCB live; Symbol/Footprint
- *  editor tiles are placeholders — the slot Circuit Layout re-enters into
- *  later, per the harmonic-munching-trinket plan). Shown for `?project=<id>`
- *  with no `view` param. */
+/** Project metadata + view tiles. Symbol editor is now a live route for the
+ *  first milestone; footprint editing remains a placeholder. Shown for
+ *  `?project=<id>` with no `view` param. */
 export class ProjectOverviewScreen {
 	constructor(
 		protected readonly root: HTMLElement,
@@ -50,27 +51,76 @@ export class ProjectOverviewScreen {
 		const back = this.makeButton('← Back to Home', () => this.callbacks.back());
 		back.className = 'project-overview-back';
 
-		const header = document.createElement('div');
+		const shell = document.createElement('div');
+		shell.className = 'project-overview-shell';
+
+		const header = document.createElement('header');
 		header.className = 'project-overview-header';
+		const titleRow = document.createElement('div');
+		titleRow.className = 'project-overview-title-row';
 		const title = document.createElement('h1');
 		title.textContent = project.name;
+		const kindLabel = project.kind === 'folder' ? 'Folder project' :
+			project.kind === 'imported' ? 'Imported project' : 'Browser-only project';
+		const badge = document.createElement('span');
+		badge.className = 'project-overview-badge';
+		badge.textContent = kindLabel;
+		titleRow.append(title, badge);
+
 		const meta = document.createElement('div');
 		meta.className = 'project-overview-meta';
-		const kindLabel = project.kind === 'folder' ? 'Folder project' : project.kind === 'imported' ? 'Imported project' : 'Browser-only project';
-		const sheetLabel = project.sheetCount ? `${ project.sheetCount } sheet(s)` : '';
-		meta.textContent = [kindLabel, sheetLabel].filter(Boolean).join(' · ');
-		header.append(title, meta);
+		const sheetLabel = project.sheetCount ?
+			`${ project.sheetCount } sheet${ project.sheetCount === 1 ? '' : 's' }` : 'No sheets yet';
+		const openedLabel = new Date(project.lastOpenedAt).toLocaleString([], {
+			dateStyle: 'medium',
+			timeStyle: 'short'
+		});
+		meta.textContent = `${ sheetLabel } • Last opened ${ openedLabel }`;
+		header.append(titleRow, meta);
+
+		const summary = document.createElement('div');
+		summary.className = 'project-overview-summary';
+		const stats = [
+			{ label: 'Sheets', value: String(project.sheetCount ?? 0) },
+			{
+				label: 'Type',
+				value: project.kind === 'folder' ? 'Folder' : project.kind === 'imported' ? 'Imported' : 'Browser'
+			},
+			{
+				label: 'Opened',
+				value: new Date(project.lastOpenedAt).toLocaleDateString(
+					[],
+					{ month: 'short', day: 'numeric', year: 'numeric' }
+				)
+			}
+		];
+		for (const stat of stats) {
+			const statEl = document.createElement('div');
+			statEl.className = 'project-overview-stat';
+			const label = document.createElement('div');
+			label.className = 'project-overview-stat-label';
+			label.textContent = stat.label;
+			const value = document.createElement('div');
+			value.className = 'project-overview-stat-value';
+			value.textContent = stat.value;
+			statEl.append(label, value);
+			summary.appendChild(statEl);
+		}
 
 		const tiles = document.createElement('div');
 		tiles.className = 'project-overview-tiles';
 		tiles.append(
-			this.buildTile(project.id, 'Schematic', 'schematic'),
-			this.buildTile(project.id, 'PCB', 'board'),
-			this.buildDisabledTile('Symbol Editor'),
-			this.buildDisabledTile('Footprint Editor')
+			this.buildTile(project.id, 'Schematic', 'schematic', 'Edit sheets, symbols, and project logic.'),
+			this.buildTile(project.id, 'PCB', 'board', 'Review board layout and manufacturing data.'),
+			this.buildCustomTile(
+				project.id, 'Symbol Editor', 'Edit or inspect a cached library symbol.',
+				() => this.callbacks.openSymbolEditor(project.id)
+			),
+			this.buildDisabledTile('Footprint Editor', 'Footprint library authoring and management.')
 		);
 
-		wrap.append(back, header, tiles);
+		shell.append(header, summary, tiles);
+		wrap.append(back, shell);
 		return wrap;
 	}
 
@@ -80,7 +130,7 @@ export class ProjectOverviewScreen {
 	 *  silently reparent it out, breaking both the layout and its click
 	 *  handler). Keyboard activation (Enter/Space) is wired manually to
 	 *  keep it as accessible as a real button. */
-	protected buildTile(projectId: string, label: string, view: DocumentKind): HTMLElement {
+	protected buildTile(projectId: string, label: string, view: DocumentKind, description: string): HTMLElement {
 		const tile = document.createElement('div');
 		tile.className = 'project-tile';
 		tile.setAttribute('role', 'button');
@@ -94,9 +144,15 @@ export class ProjectOverviewScreen {
 			}
 		});
 
+		const textEl = document.createElement('div');
+		textEl.className = 'project-tile-copy';
 		const titleEl = document.createElement('div');
 		titleEl.className = 'project-tile-title';
 		titleEl.textContent = label;
+		const subEl = document.createElement('div');
+		subEl.className = 'project-tile-subtitle';
+		subEl.textContent = description;
+		textEl.append(titleEl, subEl);
 
 		const newTabBtn = document.createElement('button');
 		newTabBtn.type = 'button';
@@ -108,21 +164,59 @@ export class ProjectOverviewScreen {
 			this.callbacks.openViewNewTab(projectId, view);
 		});
 
-		tile.append(titleEl, newTabBtn);
+		tile.append(textEl, newTabBtn);
 		return tile;
 	}
 
-	protected buildDisabledTile(label: string): HTMLElement {
+	protected buildCustomTile(
+		projectId: string, label: string, description: string, onActivate: () => void): HTMLElement {
 		const tile = document.createElement('div');
-		tile.className = 'project-tile project-tile-disabled';
-		tile.setAttribute('aria-disabled', 'true');
+		tile.className = 'project-tile';
+		tile.setAttribute('role', 'button');
+		tile.tabIndex = 0;
+		const activate = () => onActivate();
+		tile.addEventListener('click', activate);
+		tile.addEventListener('keydown', event => {
+			if (event.key === 'Enter' || event.key === ' ') {
+				event.preventDefault();
+				activate();
+			}
+		});
+
+		const textEl = document.createElement('div');
+		textEl.className = 'project-tile-copy';
 		const titleEl = document.createElement('div');
 		titleEl.className = 'project-tile-title';
 		titleEl.textContent = label;
+		const subEl = document.createElement('div');
+		subEl.className = 'project-tile-subtitle';
+		subEl.textContent = description;
+		textEl.append(titleEl, subEl);
+
+		const badge = document.createElement('div');
+		badge.className = 'project-tile-soon';
+		badge.textContent = 'Open';
+		tile.append(textEl, badge);
+		return tile;
+	}
+
+	protected buildDisabledTile(label: string, description: string): HTMLElement {
+		const tile = document.createElement('div');
+		tile.className = 'project-tile project-tile-disabled';
+		tile.setAttribute('aria-disabled', 'true');
+		const textEl = document.createElement('div');
+		textEl.className = 'project-tile-copy';
+		const titleEl = document.createElement('div');
+		titleEl.className = 'project-tile-title';
+		titleEl.textContent = label;
+		const subtitle = document.createElement('div');
+		subtitle.className = 'project-tile-subtitle';
+		subtitle.textContent = description;
 		const soon = document.createElement('div');
 		soon.className = 'project-tile-soon';
 		soon.textContent = 'Coming soon';
-		tile.append(titleEl, soon);
+		textEl.append(titleEl, subtitle);
+		tile.append(textEl, soon);
 		return tile;
 	}
 }

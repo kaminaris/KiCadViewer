@@ -9,14 +9,23 @@ export interface EmbeddedImagePayload {
 
 export interface FileActionsCallbacks {
 	getMode(): AppMode;
+
 	getSession(): KicadRenderSession | null;
+
 	getLastPointerWorld(): Vec2 | null;
+
 	snap(n: number): number;
+
 	setEditTool(tool: 'image' | 'select'): void;
+
 	setStatus(message: string): void;
+
 	refreshSchematicText(session: KicadRenderSession): void;
+
 	setImageSelection(id: string): void;
+
 	refreshSidebar(): void;
+
 	openKiCadFile(file: File): Promise<void>;
 }
 
@@ -82,7 +91,8 @@ export class FileActions {
 		event.preventDefault();
 		void this.readEmbeddedImage(file)
 			.then(payload => {
-				const center = this.cb.getLastPointerWorld() ?? new Vec2(session.camera.center.x, session.camera.center.y);
+				const center = this.cb.getLastPointerWorld() ?? new Vec2(
+					session.camera.center.x, session.camera.center.y);
 				this.insertImageAt(payload, new Vec2(this.cb.snap(center.x), this.cb.snap(center.y)));
 			})
 			.catch(error => this.cb.setStatus(error instanceof Error ? error.message : String(error)));

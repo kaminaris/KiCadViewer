@@ -22,12 +22,21 @@ export interface RouteEditor {
 	sheet: string | null;
 }
 
-export type Route = RouteHome | RouteProject | RouteEditor;
+export interface RouteSymbolEditor {
+	screen: 'symbol';
+	projectId: string | null;
+	fileId: string | null;
+}
+
+export type Route = RouteHome | RouteProject | RouteEditor | RouteSymbolEditor;
 
 function parseRoute(search: string): Route {
 	const params = new URLSearchParams(search);
 	const projectId = params.get('project');
 	const view = params.get('view');
+	if (view === 'symbol') {
+		return { screen: 'symbol', projectId: projectId ?? null, fileId: params.get('symbol') ?? null };
+	}
 	if (!projectId) {
 		if (view === 'schematic' || view === 'board') {
 			return { screen: 'editor', projectId: null, view, sheet: null };
@@ -54,16 +63,23 @@ function routeToUrl(route: Route): string {
 			params.set('sheet', route.sheet);
 		}
 	}
+	if (route.screen === 'symbol') {
+		params.set('view', 'symbol');
+		if (route.fileId) {
+			params.set('symbol', route.fileId);
+		}
+	}
 	return `${ window.location.pathname }?${ params.toString() }`;
 }
 
 /**
- * No framework — parses `location.search` into one of three screens (home /
- * project / editor) and drives `history.pushState`/`popstate`. This is the
- * unit MainApp.ts hangs SessionController calls and screen visibility off
- * of; see the harmonic-munching-trinket plan's Phase 2. `view` reuses
- * ActiveDocument's own DocumentKind ('schematic' | 'board') rather than
- * inventing separate URL vocabulary (e.g. 'pcb') for the same concept.
+ * No framework — parses `location.search` into one of four screens (home /
+ * project / editor / symbol) and drives `history.pushState`/`popstate`.
+ * This is the unit MainApp.ts hangs SessionController calls and screen
+ * visibility off of; see the harmonic-munching-trinket plan's Phase 2.
+ * `view` reuses ActiveDocument's own DocumentKind ('schematic' | 'board')
+ * rather than inventing separate URL vocabulary (e.g. 'pcb') for the same
+ * concept.
  */
 export class Router {
 	protected current: Route;
