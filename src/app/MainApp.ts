@@ -57,6 +57,7 @@ import { UpdatePcbFromSchematic }                                            fro
 import { RouterSettingsDialog }                                              from '../ui/RouterSettingsDialog';
 import { BoardAuxToolbar }                                                   from '../ui/BoardAuxToolbar';
 import { LayerPairDialog }                                                   from '../ui/LayerPairDialog';
+import { ZonePropertiesDialog }                                              from '../ui/ZonePropertiesDialog';
 import { KicadBoard }                                                        from '@kicad-io/Project/KicadBoard';
 import { resolveNetClass, buildNetClassRules, type NetClassRules }          from '@kicad-layout/NetClassResolver';
 import { wireMainAppInteractions }                                          from './wireMainAppInteractions';
@@ -150,7 +151,8 @@ const boardProperties = new BoardPropertiesController({
 	panel: propertyPanel,
 	dialog: propertiesDialog,
 	refreshBoardText: activeSession => appState.refreshBoardText(activeSession),
-	refreshUndo: updateUndoStackPane
+	refreshUndo: updateUndoStackPane,
+	openZoneEditDialog: paintId => openZoneEditDialog(paintId)
 });
 
 const pendingShapeTracker = new PendingShapeTracker();
@@ -460,6 +462,33 @@ boardAppearance = new BoardAppearancePanel(dom.boardAppearanceEl, {
 		catch (err) {
 			setStatus('Could not persist layer visibility.');
 		}
+	},
+	onObjectsStateChange: state => {
+		const project = doc.projectContext?.project;
+		if (!project || !project.localSettings) return;
+		try {
+			if (state.visible_items) {
+				project.localSettings.setBoardVisibleItems(state.visible_items);
+			}
+			if (state.opacity) {
+				if (project.localSettings.parsed === null) project.localSettings.parsed = {};
+				if (!project.localSettings.parsed.board) project.localSettings.parsed.board = {};
+				if (!project.localSettings.parsed.board.opacity) project.localSettings.parsed.board.opacity = {};
+				for (const [k, v] of Object.entries(state.opacity)) {
+					(project.localSettings.parsed.board.opacity as Record<string, any>)[k] = v;
+				}
+			}
+			if (state.displayModes) {
+				const dm = state.displayModes as Record<string, string>;
+				if (dm.tracks) project.localSettings.setTrackDisplayMode(dm.tracks as any);
+				if (dm.vias) project.localSettings.setViaDisplayMode(dm.vias as any);
+				if (dm.pads) project.localSettings.setPadDisplayMode(dm.pads as any);
+				if (dm.zones) project.localSettings.setZoneDisplayMode(dm.zones as any);
+			}
+			void sessionController.saveProject();
+			setStatus('Saved appearance settings.');
+		}
+		catch (err) { setStatus('Could not persist appearance settings.'); }
 	}
 });
 
@@ -475,6 +504,58 @@ const layerPairDialog = new LayerPairDialog({
 		setStatus(`New vias will span ${ pair[0] } ↔ ${ pair[1] }.`);
 	}
 });
+
+const zonePropertiesDialog = new ZonePropertiesDialog({
+	getCopperLayers: getBoardCopperLayers,
+	getNets: () => doc.session?.getBoardNets() ?? []
+});
+
+/** Zone AST create/update and the actual copper fill (real Clipper2 work,
+ *  off-thread) are deliberately separate calls — see fillZone's own doc
+ *  comment. Re-filling EVERY zone after touching just one (rather than a
+ *  single-zone fillZone) matches real KiCad's own behavior: zone priority
+ *  means one zone's outline/clearance change can shrink or grow a
+ *  DIFFERENT zone's territory, so a full re-fill is the correct result here,
+ *  not a shortcut — and it lets this reuse the exact same progress-modal +
+ *  runZoneFillJobs flow the Fill All Zones menu command already owns
+ *  (wireMainAppInteractions.ts's 'kionline:board-command' handler) instead
+ *  of duplicating that plumbing. */
+function commitZoneDraftAndRefill(action: () => string | null): void {
+	const session = doc.session;
+	if (!session || !action()) {
+		return;
+	}
+	appState.refreshBoardText(session);
+	updateUndoStackPane();
+	updateEditSidebar();
+	window.dispatchEvent(new CustomEvent<string>('kionline:board-command', { detail: 'fill-all-zones' }));
+}
+
+function openZoneDialogForOutline(points: Vec2[]): void {
+	const session = doc.session;
+	if (!session) {
+		return;
+	}
+	const copperLayers = getBoardCopperLayers();
+	const draft = {
+		...ZonePropertiesDialog.blankDraft(),
+		layers: copperLayers.includes(doc.activeBoardLayer) ? [doc.activeBoardLayer] : copperLayers.slice(0, 1)
+	};
+	zonePropertiesDialog.open(draft, committed => {
+		commitZoneDraftAndRefill(() => session.createZoneFromOutline(points, committed));
+	});
+}
+
+function openZoneEditDialog(paintId: string): void {
+	const session = doc.session;
+	const draft = session?.getZoneDraft(paintId);
+	if (!session || !draft) {
+		return;
+	}
+	zonePropertiesDialog.open(draft, committed => {
+		commitZoneDraftAndRefill(() => (session.updateZoneProperties(paintId, committed) ? paintId : null));
+	});
+}
 
 boardAuxToolbar = new BoardAuxToolbar({
 	getProjectRaw: () => doc.projectContext?.project.projectFile?.raw,
@@ -494,11 +575,11 @@ boardAuxToolbar = new BoardAuxToolbar({
 	getOverrideLocks: () => doc.overrideLocks,
 	setOverrideLocks: value => { doc.overrideLocks = value; },
 	openLayerPairDialog: () => layerPairDialog.open(),
-	openProjectSetup: () => {
+	openProjectSetup: (category?: string) => {
 		if (!doc.projectContext) {
 			return;
 		}
-		void navigateWithGuards({ screen: 'editor', projectId: doc.projectContext.key, view: 'project-settings', sheet: null });
+		void navigateWithGuards({ screen: 'editor', projectId: doc.projectContext.key, view: 'project-settings', sheet: null, category: category ?? null });
 	}
 });
 
@@ -826,6 +907,7 @@ wireMainAppInteractions({
 	getCenterAndWarpCursorOnZoom: () => settings.current.centerAndWarpCursorOnZoom,
 	getCurrentPowerKind: () => currentPowerKind,
 	getGridSpacingMm: () => settings.gridSpacingFor(doc.kind),
+	openZoneDialogForOutline,
 	getBoardPolarCoordinates: () => doc.boardPolarCoordinates,
 	setBoardPolarCoordinates,
 	getBoardDisplayUnit: () => settings.current.displayUnit,

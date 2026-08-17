@@ -1,4 +1,4 @@
-import type { KicadRenderSession, HitResult } from '@kicad-render/KicadRenderSession';
+import type { KicadRenderSession, HitResult, ViaDragFix } from '@kicad-render/KicadRenderSession';
 import { Vec2 }                    from '@kicad-render/math/Vec2';
 import type { AppMode }            from '../app/AppState';
 import { PendingShapeTracker, type PendingShape } from './PendingShape';
@@ -8,18 +8,56 @@ import { shoveTrackPath } from '@kicad-render/router/RouterGeometry';
 import { buildClearanceHull } from '@kicad-render/router/PnsHull';
 import { walkaroundHull, pathLength } from '@kicad-render/router/PnsWalkaround';
 import { simplifyWalkedPath } from '@kicad-render/router/PnsOptimizer';
+import { dragSegment45, mergeCollinear, dragViaChain } from '@kicad-render/router/PnsDragger';
 import { resolveNetClass, resolveClearanceMm, type NetClassRules } from '@kicad-layout/NetClassResolver';
 import type { RouterSettings } from '../app/ActiveDocument';
 
 const RECT_SELECT_MOVE_THRESHOLD_PX = 4;
+
+/** What assembleTrackLine returns — the whole connected straight-track line
+ *  a mid-segment drag operates on, not just the one segment clicked. See
+ *  KicadRenderSession.assembleTrackLine's doc comment. */
+interface AssembledTrackLine {
+	segmentIds: string[];
+	points: Vec2[];
+	width: number;
+	layer: string;
+	netId: number | null;
+}
+
+/** A via-drag gesture's per-frame live preview: viaDragFanout's fixed
+ *  anchor/startDiagonal carried alongside the chain freshly rebuilt from it
+ *  toward the current cursor — see KicadRenderSession.viaDragFanout's doc
+ *  comment for why the anchor must stay fixed for the whole gesture. */
+interface ViaDragPreviewFix extends ViaDragFix {
+	chain: Vec2[];
+}
 
 type BoardGesture =
 	| { kind: 'none' }
 	| { kind: 'pan'; lastScreen: Vec2; moved: boolean }
 	| { kind: 'single'; paintId: string; lastSnapped: Vec2 }
 	| { kind: 'group'; lastSnapped: Vec2 }
-	| { kind: 'via'; paintId: string }
-	| { kind: 'track-endpoint'; paintId: string; endpoint: 'start' | 'end' }
+	| {
+	kind: 'via'; paintId: string; viaSize: number; fixes: ViaDragFix[];
+	lastPreview: { fixes: ViaDragPreviewFix[]; viaPos: Vec2 } | null
+}
+	| {
+	kind: 'track-endpoint'; paintId: string; endpoint: 'start' | 'end'; fixes: ViaDragFix[];
+	lastPreview: { fixes: ViaDragPreviewFix[]; dragPoint: Vec2 } | null
+}
+	| { kind: 'track-body'; line: AssembledTrackLine; dragIndex: number; lastPreview: Vec2[] | null }
+	/** Dragging one of a selected zone's CORNER handles — see
+	 *  zoneOutlineAnchorAtScreen's doc comment. Plain 1:1 vertex move via
+	 *  moveZoneOutlinePoint each mousemove. */
+	| { kind: 'zone-point'; paintId: string; index: number }
+	/** Dragging one of a selected zone's EDGE-MIDPOINT handles — shifts the
+	 *  whole edge sideways in parallel (moveZoneOutlineEdge), never inserts
+	 *  a corner (that's the separate "Create Corner" context-menu action).
+	 *  `lastSnapped` is this frame's own delta-tracking anchor, exactly like
+	 *  the 'single'/'group' footprint-drag gestures below — moveZoneOutlineEdge
+	 *  takes a delta, not an absolute position. */
+	| { kind: 'zone-edge'; paintId: string; edgeIndex: number; lastSnapped: Vec2 }
 	| { kind: 'rect'; originWorld: Vec2; originScreen: Vec2; moved: boolean };
 
 export interface BoardPointerControllerDeps {
@@ -42,6 +80,10 @@ export interface BoardPointerControllerDeps {
 	showPropertiesModal(id: string): void;
 	showTextInput(anchor: Vec2, event: MouseEvent): void;
 	showTextBoxInput(first: Vec2, second: Vec2, event: MouseEvent): void;
+	/** A finished zone-outline gesture hands off to the Copper Zone
+	 *  Properties dialog instead of committing directly — see the 'zone'
+	 *  case in graphicClick's doc comment. */
+	openZoneDialogForOutline(points: Vec2[]): void;
 	getHighlightNetEnabled(): boolean;
 	/** `netName` is the net actually being routed (null when starting a
 	 *  route on an unassigned/no-net point) — real KiCad sizes a route from
@@ -147,6 +189,7 @@ export class BoardPointerController {
 			else if (command === 'draw-rectangle') this.setTool('rect');
 			else if (command === 'draw-circle') this.setTool('circle');
 			else if (command === 'draw-polygon') this.setTool('polygon');
+			else if (command === 'draw-zone') this.setTool('zone');
 			else if (command === 'draw-bezier') this.setTool('bezier');
 			else if (command === 'place-text') this.setTool('text');
 			else if (command === 'draw-text-box') this.setTool('text-box');
@@ -175,8 +218,9 @@ export class BoardPointerController {
 					: tool === 'arc' ? `Draw Arc on ${ this.deps.getActiveLayer() } — click start, end, then the arc mid-point.`
 						: tool === 'rect' ? `Draw Rectangle on ${ this.deps.getActiveLayer() } — click opposite corners.`
 							: tool === 'circle' ? `Draw Circle on ${ this.deps.getActiveLayer() } — click center then radius.`
-								: tool === 'polygon' ? `Draw Polygon on ${ this.deps.getActiveLayer() } — click vertices; click the first point or press Enter to finish.`
+								: tool === 'polygon' ? `Draw Polygon on ${ this.deps.getActiveLayer() } — click vertices; click the first point, press Enter, or right-click to finish.`
 									: tool === 'bezier' ? `Draw Bezier on ${ this.deps.getActiveLayer() } — click start, two control points, then end.`
+											: tool === 'zone' ? 'Draw Zone — click vertices; click the first point, press Enter, or right-click to finish and open Zone Properties.'
 										: tool === 'text' ? `Place Text on ${ this.deps.getActiveLayer() } — click to enter text.`
 											: tool === 'text-box' ? `Draw Text Box on ${ this.deps.getActiveLayer() } — click opposite corners, then enter text.`
 				: tool === 'grid-origin' ? 'Set Grid Origin — click a grid point.'
@@ -206,8 +250,14 @@ export class BoardPointerController {
 	finishDrawing(): boolean {
 		const session = this.deps.getSession();
 		const pending = this.pending.current;
-		if (!session || pending.kind !== 'polygon' || pending.points.length < 3) {
+		if (!session || (pending.kind !== 'polygon' && pending.kind !== 'zone') || pending.points.length < 3) {
 			return false;
+		}
+		if (pending.kind === 'zone') {
+			this.pending.clear();
+			session.setEditPreview(null);
+			this.deps.openZoneDialogForOutline(pending.points);
+			return true;
 		}
 		this.commitGraphic(session, session.addBoardGraphicPolygon(
 			pending.points, this.deps.getActiveLayer(), BoardPointerController.graphicStrokeWidth));
@@ -326,17 +376,17 @@ export class BoardPointerController {
 		this.pointerDownOnCanvas = true;
 		const screenPos = this.deps.screenPosFromEvent(e);
 		this.lastPointerScreen = screenPos;
-		// Pcbnew completes a graphic polygon with a right click.  This needs to
-		// precede board navigation, which otherwise treats every right click as
-		// the start of a pan gesture.
-		if (this.deps.getMode() === 'edit' && this.deps.getTool() === 'polygon' && e.button === 2
-			&& this.pending.current.kind === 'polygon') {
+		// Pcbnew completes a graphic polygon (or, here, a zone outline) with a
+		// right click.  This needs to precede board navigation, which
+		// otherwise treats every right click as the start of a pan gesture.
+		if (this.deps.getMode() === 'edit' && (this.deps.getTool() === 'polygon' || this.deps.getTool() === 'zone')
+			&& e.button === 2 && (this.pending.current.kind === 'polygon' || this.pending.current.kind === 'zone')) {
 			if (this.finishDrawing()) {
 				this.suppressNextContextMenu = true;
 				e.preventDefault();
 				return;
 			}
-			this.deps.setStatus('A polygon needs at least three vertices before it can be finished.');
+			this.deps.setStatus(`A ${ this.deps.getTool() === 'zone' ? 'zone' : 'polygon' } needs at least three vertices before it can be finished.`);
 			this.suppressNextContextMenu = true;
 			e.preventDefault();
 			return;
@@ -365,6 +415,24 @@ export class BoardPointerController {
 		}
 		if (this.deps.getMode() !== 'edit' || e.button !== 0) {
 			return;
+		}
+		if (this.deps.getTool() === 'select') {
+			const handle = this.zoneOutlineAnchorAtScreen(session, screenPos);
+			if (handle) {
+				if ('corner' in handle) {
+					session.pushUndoSnapshot('Edit zone outline');
+					this.gesture = { kind: 'zone-point', paintId: handle.paintId, index: handle.corner };
+				}
+				else {
+					session.pushUndoSnapshot('Edit zone outline');
+					this.gesture = {
+						kind: 'zone-edge', paintId: handle.paintId, edgeIndex: handle.edge,
+						lastSnapped: this.snappedWorld(session, screenPos)
+					};
+				}
+				e.preventDefault();
+				return;
+			}
 		}
 		if (this.deps.getTool() === 'route') {
 			this.routeClick(session, screenPos, e.detail >= 2);
@@ -416,6 +484,20 @@ export class BoardPointerController {
 			this.resolveHit(session, reduced[0]!, screenPos, true, e);
 			return;
 		}
+		// If one of the ambiguous candidates is already selected, use it
+		// directly instead of disambiguating — mirrors real KiCad's own
+		// drag-start check (pcb_selection_tool.cpp's Main() IsDrag handler:
+		// "Check if dragging has started within any of selected items
+		// bounding box" -> doDrag = true WITHOUT calling selectPoint/
+		// disambiguation again). Without this, clicking on an
+		// already-selected wire that also happens to overlap something else
+		// (a pad, another track) would re-disambiguate on every single
+		// press, making it impossible to ever start dragging it.
+		const alreadySelected = reduced.find(candidate => session.selectionIds.has(candidate.id));
+		if (alreadySelected) {
+			this.resolveHit(session, alreadySelected, screenPos, true, e);
+			return;
+		}
 		// Genuinely ambiguous — real KiCad's own disambiguation popup
 		// (pcb_selection_tool.cpp GuessSelectionCandidates/doSelectionMenu).
 		// The mouse button is already back up by the time the user picks a
@@ -423,6 +505,12 @@ export class BoardPointerController {
 		// false) — a deliberate, called-out simplification vs. real KiCad,
 		// which lets you disambiguate mid-drag.
 		e.preventDefault();
+		// Stops THIS mousedown from reaching ContextMenu's own window-level
+		// 'mousedown' listener (see its outsideClickArmed doc comment) -
+		// without this, the popup show() call below would close itself
+		// before the user could pick a row, since the same event is still
+		// bubbling toward window at this point.
+		e.stopPropagation();
 		this.deps.showDisambiguation(reduced, all, {
 			pick: candidate => this.resolveHit(session, candidate, screenPos, false),
 			selectAll: candidates => {
@@ -450,7 +538,18 @@ export class BoardPointerController {
 				e?.preventDefault();
 				return;
 			}
-			this.gesture = allowGesture ? { kind: 'via', paintId: hit.id } : { kind: 'none' };
+			if (allowGesture) {
+				// Computed once, up front — see viaDragFanout's doc comment for
+				// why re-deriving this every mousemove (the original approach)
+				// caused the reported "trail of stray segments" mess.
+				const fanout = session.viaDragFanout(hit.id);
+				this.gesture = fanout
+					? { kind: 'via', paintId: hit.id, viaSize: fanout.viaSize, fixes: fanout.fixes, lastPreview: null }
+					: { kind: 'none' };
+			}
+			else {
+				this.gesture = { kind: 'none' };
+			}
 			e?.preventDefault();
 			return;
 		}
@@ -464,7 +563,47 @@ export class BoardPointerController {
 				e?.preventDefault();
 				return;
 			}
-			this.gesture = endpoint ? { kind: 'track-endpoint', paintId: hit.id, endpoint } : { kind: 'none' };
+			// A click that landed mid-track (not near either endpoint) starts a
+			// real KiCad-style body drag: the WHOLE connected line reflows, not
+			// just the one segment clicked — see assembleTrackLine's doc
+			// comment. Locked check covers every segment in the assembled
+			// line, not just the clicked one.
+			if (!endpoint && allowGesture) {
+				const line = session.assembleTrackLine(hit.id);
+				if (line) {
+					if (line.segmentIds.some(id => session.isBoardElementLocked(id)) && !this.deps.getOverrideLocks()) {
+						this.deps.setStatus('Item locked — enable "Override locks" to move it.');
+						this.gesture = { kind: 'none' };
+						e?.preventDefault();
+						return;
+					}
+					const dragIndex = line.segmentIds.indexOf(hit.id);
+					this.gesture = { kind: 'track-body', line, dragIndex, lastPreview: null };
+					// beginTrackDragPreview (hiding the assembled line's own
+					// segments for the live-preview overlay's sake) is deferred
+					// to onMouseMove's first real frame, NOT called here — a
+					// plain click with no movement never reaches onMouseMove at
+					// all, so hiding right away made every click on a track
+					// blink it invisible for the whole mousedown-to-mouseup
+					// span, even when the user never dragged anything.
+					e?.preventDefault();
+					return;
+				}
+			}
+			if (endpoint) {
+				// Computed once, up front — same reasoning as viaDragFanout's
+				// own doc comment: re-deriving this every mousemove would let
+				// the anchor slide forward onto the previous frame's own
+				// throwaway corner instead of staying at the line's real far
+				// point.
+				const fanout = session.trackCornerDragFanout(hit.id, endpoint);
+				this.gesture = fanout
+					? { kind: 'track-endpoint', paintId: hit.id, endpoint, fixes: fanout.fixes, lastPreview: null }
+					: { kind: 'none' };
+			}
+			else {
+				this.gesture = { kind: 'none' };
+			}
 			e?.preventDefault();
 			return;
 		}
@@ -588,6 +727,23 @@ export class BoardPointerController {
 			this.deps.updateStatusBar(screenPos);
 			return;
 		}
+		if (this.gesture.kind === 'zone-point') {
+			const snapped = this.snappedWorld(session, screenPos);
+			session.moveZoneOutlinePoint(this.gesture.paintId, this.gesture.index, snapped.x, snapped.y);
+			this.deps.updateStatusBar(screenPos);
+			return;
+		}
+		if (this.gesture.kind === 'zone-edge') {
+			const snapped = this.snappedWorld(session, screenPos);
+			const dx = snapped.x - this.gesture.lastSnapped.x;
+			const dy = snapped.y - this.gesture.lastSnapped.y;
+			if (dx !== 0 || dy !== 0) {
+				session.moveZoneOutlineEdge(this.gesture.paintId, this.gesture.edgeIndex, dx, dy);
+				this.gesture = { kind: 'zone-edge', paintId: this.gesture.paintId, edgeIndex: this.gesture.edgeIndex, lastSnapped: snapped };
+			}
+			this.deps.updateStatusBar(screenPos);
+			return;
+		}
 		if (this.gesture.kind === 'group') {
 			const snapped = this.snappedWorld(session, screenPos);
 			const dx = snapped.x - this.gesture.lastSnapped.x;
@@ -606,16 +762,105 @@ export class BoardPointerController {
 			return;
 		}
 		if (this.gesture.kind === 'via') {
-			const snapped = this.snappedWorld(session, screenPos);
-			this.captureUndoOnce(session, 'Move via');
-			session.moveViaByPaintId(this.gesture.paintId, snapped.x, snapped.y);
+			const { paintId, viaSize, fixes } = this.gesture;
+			if (!this.gesture.lastPreview) {
+				// First real move of the gesture — only now hide the fanout's
+				// original near-via segments, matching track-body drag's
+				// identical "defer the hide past a plain click" reasoning (see
+				// beginTrackDragPreview's doc comment).
+				session.beginTrackDragPreview([paintId, ...fixes.flatMap(f => f.segmentIds)]);
+			}
+			const target = this.snappedWorld(session, screenPos);
+			const cornerMode = this.deps.getCornerMode() === '90' ? '90' : '45';
+			const previewFixes: ViaDragPreviewFix[] = fixes.map(fix => ({
+				...fix,
+				chain: mergeCollinear(dragViaChain(fix.originPoints, target, cornerMode))
+			}));
+			this.gesture = { ...this.gesture, lastPreview: { fixes: previewFixes, viaPos: target } };
+			session.setEditPreview({
+				kind: 'via-drag',
+				tracks: previewFixes.map(fix => ({ points: fix.chain.slice(0, -1), width: fix.width })),
+				cursor: target,
+				viaSize
+			});
 			this.deps.updateStatusBar(screenPos);
 			return;
 		}
 		if (this.gesture.kind === 'track-endpoint') {
-			const snapped = this.snappedWorld(session, screenPos);
-			this.captureUndoOnce(session, 'Move track');
-			session.moveTrackEndpointByPaintId(this.gesture.paintId, this.gesture.endpoint, snapped.x, snapped.y);
+			const { fixes } = this.gesture;
+			if (!this.gesture.lastPreview) {
+				// First real move — only now hide every fanout line's whole
+				// segment chain (see beginTrackDragPreview's doc comment; same
+				// "defer past a plain click" reasoning as via-drag/track-body).
+				session.beginTrackDragPreview(fixes.flatMap(f => f.segmentIds));
+			}
+			// Reuses the route tool's own magnetic-anchor snap (routeAnchorSnap)
+			// so dragging a dangling end onto a same-net pad/via/other track
+			// endpoint reconnects exactly onto it, the same "lands on the exact
+			// center, not wherever the cursor happened to be" behavior real
+			// KiCad's DRAGGER gets for free by sharing GRID_HELPER with the
+			// router — grid-snap otherwise, same as before this existed.
+			const netFilter = fixes[0]?.netId ?? null;
+			const target = this.routeAnchorSnap(session, screenPos, netFilter).point;
+			const cornerMode = this.deps.getCornerMode() === '90' ? '90' : '45';
+			const previewFixes: ViaDragPreviewFix[] = fixes.map(fix => ({
+				...fix,
+				chain: mergeCollinear(dragViaChain(fix.originPoints, target, cornerMode))
+			}));
+			this.gesture = { ...this.gesture, lastPreview: { fixes: previewFixes, dragPoint: target } };
+			session.setEditPreview({
+				kind: 'via-drag',
+				tracks: previewFixes.map(fix => ({ points: fix.chain.slice(0, -1), width: fix.width })),
+				cursor: target
+			});
+			this.deps.updateStatusBar(screenPos);
+			return;
+		}
+		if (this.gesture.kind === 'track-body') {
+			const { line, dragIndex } = this.gesture;
+			if (!this.gesture.lastPreview) {
+				// First real move of the gesture — only now hide the assembled
+				// line's own segments (see beginTrackDragPreview's doc comment).
+				// Deferred from onMouseDown so a plain click that never moves
+				// never hides anything at all.
+				session.beginTrackDragPreview(line.segmentIds);
+			}
+			const target = this.snappedWorld(session, screenPos);
+			const cornerMode = this.deps.getCornerMode() === '90' ? '90' : '45';
+			const dragged = dragSegment45(line.points, dragIndex, target, cornerMode);
+			const settings = this.deps.getRouterSettings();
+			const clearanceFn = this.clearanceResolver(session);
+			const rawCollides = this.pathCollides(dragged, line.width, line.layer, line.netId, clearanceFn);
+			// Shove/walkaround never mutate during the live preview — matches
+			// updateRoutePreview's identical "dry run, don't flash red for
+			// something about to be resolved on commit" reasoning.
+			let previewPoints = dragged;
+			let previewCollides = rawCollides;
+			if (rawCollides && settings.mode === 'shove') {
+				previewCollides = this.planShoveForPath(session, dragged, line.layer, line.netId, line.width) === null;
+			}
+			else if (rawCollides && settings.mode === 'walkaround') {
+				const walked = this.walkAroundObstacles(
+					session, dragged[0]!, dragged[dragged.length - 1]!, dragged,
+					{ layer: line.layer, netId: line.netId }, line.width);
+				if (walked) {
+					previewPoints = walked;
+					previewCollides = false;
+				}
+			}
+			this.gesture = { ...this.gesture, lastPreview: previewPoints };
+			session.setEditPreview({
+				kind: 'route',
+				points: previewPoints.slice(0, -1),
+				cursor: previewPoints[previewPoints.length - 1]!,
+				width: line.width,
+				collides: previewCollides
+			});
+			if (previewCollides) {
+				this.deps.setStatus(settings.allowDrcViolations
+					? `Dragging track on ${ line.layer } — clearance violation, still placeable (DRC violations allowed).`
+					: `Dragging track on ${ line.layer } — clearance violation, can't place here.`);
+			}
 			this.deps.updateStatusBar(screenPos);
 			return;
 		}
@@ -674,10 +919,113 @@ export class BoardPointerController {
 			}
 			return;
 		}
-		if (gesture.kind === 'via' || gesture.kind === 'track-endpoint') {
+		if (gesture.kind === 'zone-point' || gesture.kind === 'zone-edge') {
 			const session = this.deps.getSession();
-			if (session && wasDragging) {
+			if (session) {
 				this.deps.refreshBoardText(session);
+				this.deps.refreshAppearance();
+				this.deps.setStatus('Zone outline edited.');
+				// Re-fills every zone (not just this one — matches the Copper
+				// Zone Properties dialog's own commit path) via the same
+				// progress-modal-backed handler MainApp already wires up for
+				// 'fill-all-zones', so an edited outline's copper pour stays in
+				// sync with its new shape without duplicating that plumbing here.
+				window.dispatchEvent(new CustomEvent<string>('kionline:board-command', { detail: 'fill-all-zones' }));
+			}
+			return;
+		}
+		if (gesture.kind === 'track-endpoint') {
+			const session = this.deps.getSession();
+			session?.setEditPreview(null);
+			// Unconditional, like via-drag/track-body's own identical contract
+			// — the hide from beginTrackDragPreview must come back whether
+			// this drag commits, gets refused, or never moved at all.
+			session?.endTrackDragPreview();
+			if (!session || !gesture.lastPreview) {
+				// Never moved (a plain click on a track endpoint) — nothing to commit.
+				return;
+			}
+			const committed = session.commitTrackCornerDrag(gesture.lastPreview.fixes);
+			if (committed) {
+				this.deps.refreshBoardText(session);
+				this.deps.refreshAppearance();
+				this.deps.setStatus('Track dragged.');
+			}
+			return;
+		}
+		if (gesture.kind === 'via') {
+			const session = this.deps.getSession();
+			session?.setEditPreview(null);
+			// Unconditional, like track-body drag's own identical contract —
+			// the hide from beginTrackDragPreview must come back whether this
+			// drag commits, gets refused, or never moved at all.
+			session?.endTrackDragPreview();
+			if (!session || !gesture.lastPreview) {
+				// Never moved (a plain click on a via) — nothing to commit.
+				return;
+			}
+			const { fixes, viaPos } = gesture.lastPreview;
+			const committed = session.commitViaDrag(gesture.paintId, fixes, viaPos.x, viaPos.y);
+			if (committed) {
+				this.deps.refreshBoardText(session);
+				this.deps.refreshAppearance();
+				this.deps.setStatus('Via dragged.');
+			}
+			return;
+		}
+		if (gesture.kind === 'track-body') {
+			const session = this.deps.getSession();
+			session?.setEditPreview(null);
+			// Unconditional, like endBoardDragPreview's own contract - the
+			// hide from beginTrackDragPreview must come back whether this
+			// drag commits, gets refused below, or never moved at all.
+			session?.endTrackDragPreview();
+			if (!session || !gesture.lastPreview) {
+				// Never moved (a plain click on a track body) — nothing to commit.
+				return;
+			}
+			const { line } = gesture;
+			const clearanceFn = this.clearanceResolver(session);
+			// Recheck against the FINAL preview rather than trusting whatever
+			// collides flag the last onMouseMove frame computed — cheap, and
+			// guards against acting on a stale value if settings changed
+			// mid-drag (e.g. toggling "Allow DRC violations").
+			const collides = this.pathCollides(gesture.lastPreview, line.width, line.layer, line.netId, clearanceFn);
+			const settings = this.deps.getRouterSettings();
+			if (collides && !settings.allowDrcViolations) {
+				// Matches real KiCad refusing to fix a colliding drag — leaves
+				// the track at its pre-drag shape (see commitRouteTo's
+				// identical "stay put" behavior on a blocked commit).
+				this.deps.setStatus(`Can't drop track here on ${ line.layer } — clearance violation (enable "Allow DRC violations" in Router Settings to override).`);
+				return;
+			}
+			// NOT calling simplifyWalkedPath here (stated simplification,
+			// corrected after real-world testing): that pass's mergeStep
+			// always tries the LARGEST possible bypass span first — for a
+			// drag's short [prevA, ...bend..., nextB] chain, that means "try
+			// a direct shortcut between the line's own two fixed ends"
+			// before anything smaller. Real KiCad's own post-drag optimizer
+			// avoids collapsing the user's intentional bend via
+			// RESTRICT_AREA/KEEP_TOPOLOGY/SetPreserveVertex constraints
+			// (pns_dragger.cpp:569-618) that simplifyWalkedPath — built for
+			// walkaround-detour cleanup, where a big simplification IS
+			// desired — doesn't have. Committing the raw dragSegment45
+			// result directly is correct on its own. What real KiCad DOES
+			// run unconditionally-safe post-drag is MERGE_COLINEAR
+			// (adjacent-segments-only, no bypass search — see
+			// mergeCollinear's doc comment), gated by SmoothDraggedSegments
+			// exactly like here; optimizeEntireDraggedTrack (the
+			// MERGE_SEGMENTS/mergeFull pass) stays unwired for the reason
+			// above.
+			const commitPoints: Vec2[] = settings.smoothDraggedSegments
+				? mergeCollinear(gesture.lastPreview)
+				: gesture.lastPreview;
+			const committed = session.dragTrackLine(line.segmentIds, commitPoints, line.width, line.layer, line.netId);
+			if (committed) {
+				this.deps.refreshBoardText(session);
+				this.deps.refreshAppearance();
+				this.rebuildRouterNode(session);
+				this.deps.setStatus('Track dragged.');
 			}
 			return;
 		}
@@ -723,6 +1071,44 @@ export class BoardPointerController {
 	protected snappedWorld(session: KicadRenderSession, screenPos: Vec2): Vec2 {
 		const world = session.screenToWorld(screenPos);
 		return new Vec2(this.deps.snap(world.x), this.deps.snap(world.y));
+	}
+
+	/** Hit-tests the selected zone's outline handles (see
+	 *  KicadRenderSession.getZoneOutlineAnchors/drawZoneEditHandles) — the
+	 *  board counterpart of the schematic PointerController's
+	 *  curveAnchorAtScreen. A corner within range always wins over a
+	 *  midpoint at the same screen position, so an existing vertex is never
+	 *  shadowed by its own adjacent edge's midpoint handle. */
+	protected zoneOutlineAnchorAtScreen(session: KicadRenderSession, screenPos: Vec2):
+		{ paintId: string; corner: number } | { paintId: string; edge: number } | null {
+		if (session.selectionIds.size !== 1) {
+			return null;
+		}
+		const paintId = [...session.selectionIds][0]!;
+		const anchors = session.getZoneOutlineAnchors(paintId);
+		if (!anchors) {
+			return null;
+		}
+		const hitRadius = 9 * (window.devicePixelRatio || 1);
+		const closest = (points: Vec2[]): number | null => {
+			let bestIndex: number | null = null;
+			let bestDistance = Infinity;
+			points.forEach((point, index) => {
+				const screen = session.camera.worldToScreen(point);
+				const distance = Math.hypot(screen.x - screenPos.x, screen.y - screenPos.y);
+				if (distance <= hitRadius && distance < bestDistance) {
+					bestIndex = index;
+					bestDistance = distance;
+				}
+			});
+			return bestIndex;
+		};
+		const corner = closest(anchors.corners);
+		if (corner !== null) {
+			return { paintId, corner };
+		}
+		const edge = closest(anchors.midpoints);
+		return edge !== null ? { paintId, edge } : null;
 	}
 
 	protected resetOrigin(kind: 'grid' | 'drill-place'): void {
@@ -783,12 +1169,12 @@ export class BoardPointerController {
 		return 'replace';
 	}
 
-	protected isGraphicTool(tool: BoardTool): tool is 'line' | 'arc' | 'rect' | 'circle' | 'polygon' | 'bezier' {
-		return tool === 'line' || tool === 'arc' || tool === 'rect' || tool === 'circle' || tool === 'polygon' || tool === 'bezier';
+	protected isGraphicTool(tool: BoardTool): tool is 'line' | 'arc' | 'rect' | 'circle' | 'polygon' | 'bezier' | 'zone' {
+		return tool === 'line' || tool === 'arc' || tool === 'rect' || tool === 'circle' || tool === 'polygon' || tool === 'bezier' || tool === 'zone';
 	}
 
 	protected isGraphicPending(pending: PendingShape): boolean {
-		return pending.kind === 'anchor' || pending.kind === 'arc' || pending.kind === 'polygon' || pending.kind === 'bezier';
+		return pending.kind === 'anchor' || pending.kind === 'arc' || pending.kind === 'polygon' || pending.kind === 'bezier' || pending.kind === 'zone';
 	}
 
 	protected graphicClick(session: KicadRenderSession, screenPos: Vec2, doubleClick: boolean): void {
@@ -870,6 +1256,25 @@ export class BoardPointerController {
 				}
 				return;
 			}
+			// A zone outline never commits an AST element directly on close
+			// (unlike every other graphic tool above) — real KiCad always
+			// interrupts the outline gesture with the Copper Zone Properties
+			// dialog first (layers/net/clearances), and only creates the zone
+			// on that dialog's OK. Cancel there discards the outline entirely,
+			// so nothing is added to the AST here at all.
+			case 'zone': {
+				const pending = this.pending.current;
+				const points = pending.kind === 'zone' ? pending.points : [];
+				if (points.length >= 3 && (samePoint(points[0]!, point) || doubleClick)) {
+					this.pending.clear();
+					session.setEditPreview(null);
+					this.deps.openZoneDialogForOutline(points);
+				}
+				else if (!points.length || !samePoint(points[points.length - 1]!, point)) {
+					this.pending.set({ kind: 'zone', points: [...points, point] });
+				}
+				return;
+			}
 		}
 	}
 
@@ -884,6 +1289,7 @@ export class BoardPointerController {
 			case 'arc': session.setEditPreview({ kind: 'arc', points: pending.kind === 'arc' ? pending.points : [], cursor }); break;
 			case 'bezier': session.setEditPreview({ kind: 'bezier', points: pending.kind === 'bezier' ? pending.points : [], cursor }); break;
 			case 'polygon': session.setEditPreview({ kind: 'rule-area', points: pending.kind === 'polygon' ? pending.points : [], cursor }); break;
+			case 'zone': session.setEditPreview({ kind: 'rule-area', points: pending.kind === 'zone' ? pending.points : [], cursor }); break;
 		}
 	}
 
@@ -1142,7 +1548,7 @@ export class BoardPointerController {
 	 *  [[kicad-viewer-interactive-router-port]]. */
 	protected walkAroundObstacles(
 		session: KicadRenderSession, from: Vec2, to: Vec2, initialPath: Vec2[],
-		pending: Extract<PendingShape, { kind: 'route' }>, width: number,
+		pending: { layer: string; netId: number | null }, width: number,
 	): Vec2[] | null {
 		const routerNode = this.routerNode;
 		if (!routerNode) {
@@ -1218,19 +1624,30 @@ export class BoardPointerController {
 		session: KicadRenderSession, from: Vec2, to: Vec2,
 		pending: Extract<PendingShape, { kind: 'route' }>, width: number,
 	): { element: any; segments: { x1: number; y1: number; x2: number; y2: number }[] } | null {
+		return this.planShoveForPath(session, this.buildRoutePath(from, to), pending.layer, pending.netId, width);
+	}
+
+	/** Shared core of planShove — extracted so a mid-segment track drag
+	 *  (BoardPointerController's dragged-line preview, which already has its
+	 *  own candidate path from dragSegment45 and has no "from/to" to rebuild
+	 *  a corner-mode route between) can reuse the exact same shove-planning
+	 *  logic instead of a second copy. See planShove's own doc comment for
+	 *  what this computes and why it's single-obstacle/non-mutating. */
+	protected planShoveForPath(
+		session: KicadRenderSession, path: Vec2[], layer: string, netId: number | null, width: number,
+	): { element: any; segments: { x1: number; y1: number; x2: number; y2: number }[] } | null {
 		if (!this.routerNode) {
 			return null;
 		}
 		const clearanceFn = this.clearanceResolver(session);
-		const straight = this.buildRoutePath(from, to);
-		for (let index = 1; index < straight.length; index++) {
-			const a = straight[index - 1]!, b = straight[index]!;
-			const hit = this.routerNode.firstSegmentCollision(a.x, a.y, b.x, b.y, width, pending.layer, pending.netId, clearanceFn);
+		for (let index = 1; index < path.length; index++) {
+			const a = path[index - 1]!, b = path[index]!;
+			const hit = this.routerNode.firstSegmentCollision(a.x, a.y, b.x, b.y, width, layer, netId, clearanceFn);
 			if (!hit || hit.kind !== 'track' || hit.shape.type !== 'segment') {
 				continue;
 			}
 			const obstacle = hit.shape;
-			const requiredClearance = clearanceFn(pending.netId, hit.netId);
+			const requiredClearance = clearanceFn(netId, hit.netId);
 			const shovePath = shoveTrackPath(
 				obstacle.x1, obstacle.y1, obstacle.x2, obstacle.y2, obstacle.width / 2,
 				a.x, a.y, b.x, b.y, width / 2, requiredClearance);

@@ -68,6 +68,8 @@ export class ContextMenuController {
 			const items = this.deps.contextMenu.buildBoardItems({
 				session,
 				selectedIds,
+				pointer: { x: pointer.x, y: pointer.y },
+				screenToWorld: screen => session.screenToWorld(new Vec2(screen.x, screen.y)),
 				actions: {
 					zoomToSelection: s => {
 						const selected = s.activeScene?.hitTestItems.filter(item => s.selectionIds.has(item.id)) ?? [];
@@ -110,6 +112,23 @@ export class ContextMenuController {
 							this.deps.refreshBoardUi();
 							this.deps.setStatus(`${ locked ? 'Locked' : 'Unlocked' } ${ count } item(s).`);
 						}
+					},
+					createCorner: (s, id, world) => {
+						const nearest = s.nearestZoneOutlineInsertion(id, world.x, world.y);
+						if (!nearest) return;
+						s.pushUndoSnapshot('Create zone corner');
+						const newIndex = s.insertZoneOutlinePoint(id, nearest.edgeIndex, nearest.x, nearest.y);
+						if (newIndex === null) return;
+						this.deps.appState.refreshBoardText(s);
+						this.deps.updateUndoStackPane();
+						this.deps.refreshBoardUi();
+						this.deps.setStatus('Corner created.');
+						// Re-fills every zone, same as the outline-drag gestures and
+						// the Copper Zone Properties dialog's own commit path — see
+						// BoardPointerController's identical dispatch for why this
+						// reuses MainApp's existing 'fill-all-zones' progress-modal
+						// handler instead of duplicating that plumbing here.
+						window.dispatchEvent(new CustomEvent<string>('kionline:board-command', { detail: 'fill-all-zones' }));
 					}
 				}
 			});

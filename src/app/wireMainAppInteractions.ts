@@ -71,6 +71,8 @@ export interface WireMainAppInteractionsOptions {
 
 	getGridSpacingMm(): number;
 
+	openZoneDialogForOutline(points: Vec2[]): void;
+
 	getBoardPolarCoordinates(): boolean;
 
 	setBoardPolarCoordinates(enabled: boolean): void;
@@ -431,6 +433,7 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		showPropertiesModal: id => options.propertiesController.showPropertiesModal(id),
 		showTextInput: (anchor, event) => options.textInputFlow.showText(anchor, event, TEXT_INPUT_PLACEHOLDERS),
 		showTextBoxInput: (first, second, event) => options.textInputFlow.showTextBox(first, second, event),
+		openZoneDialogForOutline: options.openZoneDialogForOutline,
 		getHighlightNetEnabled: options.getHighlightNetEnabled,
 		getRoutingSizes: options.getBoardRoutingSizes,
 		getUseConnectedTrackWidth: () => options.doc.useConnectedTrackWidth,

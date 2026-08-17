@@ -17,7 +17,7 @@ export interface BoardAuxToolbarCallbacks {
 	getOverrideLocks(): boolean;
 	setOverrideLocks(value: boolean): void;
 	openLayerPairDialog(): void;
-	openProjectSetup(): void;
+	openProjectSetup(category?: string): void;
 }
 
 /** Real KiCad's TOP_AUX toolbar (pcbnew/toolbars_pcb_editor.cpp) — track
@@ -39,7 +39,7 @@ export class BoardAuxToolbar {
 		this.trackWidthEl.addEventListener('change', () => {
 			const index = Number(this.trackWidthEl.value);
 			if (this.trackWidthEl.value === 'edit') {
-				this.callbacks.openProjectSetup();
+				this.callbacks.openProjectSetup('predefined-sizes');
 				this.refresh();
 				return;
 			}
@@ -52,7 +52,7 @@ export class BoardAuxToolbar {
 		this.viaSizeEl.addEventListener('change', () => {
 			const index = Number(this.viaSizeEl.value);
 			if (this.viaSizeEl.value === 'edit') {
-				this.callbacks.openProjectSetup();
+				this.callbacks.openProjectSetup('predefined-sizes');
 				this.refresh();
 				return;
 			}

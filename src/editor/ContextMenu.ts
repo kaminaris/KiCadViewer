@@ -48,12 +48,22 @@ export interface ContextMenuBuildOptions {
 export interface BoardContextMenuBuildOptions {
 	session: KicadRenderSession;
 	selectedIds: string[];
+	/** The right-click's own position — used only by the Shape Modification
+	 *  submenu's "Create Corner" (needs a world point to find the nearest
+	 *  outline edge), mirroring buildItems' identical pointer/screenToWorld
+	 *  pair for its own Paste action. */
+	pointer: { x: number; y: number };
+	screenToWorld: (screen: { x: number; y: number }) => { x: number; y: number };
 	actions: {
 		zoomToSelection: (session: KicadRenderSession) => void;
 		rotate: (session: KicadRenderSession, id: string) => void;
 		flip: (session: KicadRenderSession, id: string) => void;
 		delete: (session: KicadRenderSession, ids: string[]) => void;
 		setLocked: (session: KicadRenderSession, ids: string[], locked: boolean) => void;
+		/** Real KiCad's Shape Modification ▸ Create Corner (pcb_point_editor
+		 *  .cpp's addCorner) — `world` is where the new vertex should land,
+		 *  already resolved to the nearest point on the zone's own outline. */
+		createCorner: (session: KicadRenderSession, id: string, world: { x: number; y: number }) => void;
 	};
 }
 
@@ -65,10 +75,37 @@ export class ContextMenu {
 	 *  popup regardless of which path closed it (item click, outside click,
 	 *  Escape, or a fresh showDisambiguation call from "Show More"). */
 	protected disambiguationKeyHandler: ((e: KeyboardEvent) => void) | null = null;
+	/** Belt-and-suspenders guard against the outside-close listener below
+	 *  firing for the SAME event that opened the menu. The listener is
+	 *  'mousedown' (not 'click' — see that field's own history): a
+	 *  `contextmenu` (right-click) open never involves a 'mousedown' at all,
+	 *  so this never mattered for the original right-click menu, but
+	 *  showDisambiguation opens the SAME menu from a left-click 'mousedown'
+	 *  — the primary defense there is BoardPointerController calling
+	 *  e.stopPropagation() right after invoking showDisambiguation, which
+	 *  keeps that exact event from ever reaching this window-level listener.
+	 *  This flag exists in case some future caller opens the menu from a
+	 *  'mousedown' without stopping propagation: cleared on show(), re-armed
+	 *  one animation frame later, so only the SAME synchronous event (still
+	 *  bubbling, same call stack, zero elapsed frames) is skipped — any
+	 *  later mousedown, even a fast one, has always had at least one frame
+	 *  pass first. */
+	protected outsideClickArmed = false;
 
 	constructor(protected readonly stage: HTMLElement) {
-		window.addEventListener('click', event => {
-			if (this.isOpen && !this.element.contains(event.target as Node)) {
+		// 'mousedown', not 'click': a left-click open (showDisambiguation)
+		// happens ON a 'mousedown', and this needs to tell "the same
+		// triggering event, still bubbling" apart from "a later, separate
+		// press" — 'click' can't do that, since it fires on MOUSEUP, which
+		// for a real human is tens of milliseconds after the press that
+		// opened the menu (long enough that any same-tick/same-frame guard
+		// has already reset), not the same synchronous event at all. That
+		// mismatch was the actual bug behind an earlier, ineffective fix
+		// here that tried to guard a 'click' listener with a one-frame-later
+		// arm — the arm re-armed long before the real trailing click fired,
+		// so it closed the menu it had just opened every time.
+		window.addEventListener('mousedown', event => {
+			if (this.isOpen && this.outsideClickArmed && !this.element.contains(event.target as Node)) {
 				this.close();
 			}
 		});
@@ -91,6 +128,8 @@ export class ContextMenu {
 			clientX - stageRect.left, Math.max(0, stageRect.width - menuRect.width)) }px`;
 		this.element.style.top = `${ Math.min(
 			clientY - stageRect.top, Math.max(0, stageRect.height - menuRect.height)) }px`;
+		this.outsideClickArmed = false;
+		requestAnimationFrame(() => { this.outsideClickArmed = true; });
 	}
 
 	buildItems(options: ContextMenuBuildOptions): HTMLElement[] {
@@ -147,13 +186,23 @@ export class ContextMenu {
 			this.separator()
 		];
 		const singleId = selectedIds.length === 1 ? selectedIds[0] : null;
+		// A zone's own selection id is its bare uuid, but its hitTestItems
+		// entry carries a composite id (`${uuid}:${layer}:outline`, one per
+		// layer — see BoardPainter.buildZone) since a single zone can paint
+		// several such items; the prefix match covers that case, matching
+		// KicadRenderSession.findZoneByUuid's identical bare/composite
+		// normalization on the read side.
 		const singleItem = singleId
-			? session.activeScene?.hitTestItems.find(item => item.id === singleId)
+			? session.activeScene?.hitTestItems.find(item => item.id === singleId || item.id.startsWith(`${ singleId }:`))
 			: null;
 		const isFootprint = singleItem?.kind === 'footprint';
 		items.push(this.item('Rotate', () => actions.rotate(session, singleId!), !isFootprint));
 		items.push(this.item('Flip', () => actions.flip(session, singleId!), !isFootprint));
 		items.push(this.separator());
+		if (singleId && singleItem?.kind === 'zone') {
+			items.push(this.buildShapeModificationSubmenu(session, singleId, options));
+			items.push(this.separator());
+		}
 		const allLocked = selectedIds.every(id => session.isBoardElementLocked(id));
 		const noneLocked = selectedIds.every(id => !session.isBoardElementLocked(id));
 		items.push(this.item('Lock', () => actions.setLocked(session, selectedIds, true), allLocked));
@@ -368,6 +417,37 @@ export class ContextMenu {
 			submenu.appendChild(
 				this.item(label, () => align(session, ids, axis), ids.length < 2));
 		}
+		wrap.append(trigger, submenu);
+		return wrap;
+	}
+
+	/** Real KiCad's board right-click ▸ Shape Modification submenu — only
+	 *  "Create Corner" is implemented here (this app's zone outline editor
+	 *  doesn't yet support Simplify Polygons/Chamfer Corner/Edit Corners…,
+	 *  the other items in real KiCad's version of this submenu), reached by
+	 *  a single selected zone. Inserts the new vertex at the point on the
+	 *  zone's own outline nearest the right-click that opened this menu —
+	 *  see KicadRenderSession.nearestZoneOutlineInsertion's doc comment for
+	 *  why that's "nearest point on an edge", not "nearest existing vertex". */
+	protected buildShapeModificationSubmenu(
+		session: KicadRenderSession, zoneId: string, options: BoardContextMenuBuildOptions
+	): HTMLDivElement {
+		const wrap = document.createElement('div');
+		wrap.className = 'submenu-wrap';
+		const trigger = document.createElement('button');
+		trigger.type = 'button';
+		trigger.className = 'menu-item';
+		trigger.textContent = 'Shape Modification ▸';
+		trigger.addEventListener('click', event => {
+			event.stopPropagation();
+			wrap.classList.toggle('open');
+		});
+		const submenu = document.createElement('div');
+		submenu.className = 'submenu';
+		submenu.appendChild(this.item('Create Corner', () => {
+			const world = options.screenToWorld(options.pointer);
+			options.actions.createCorner(session, zoneId, world);
+		}));
 		wrap.append(trigger, submenu);
 		return wrap;
 	}

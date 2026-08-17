@@ -609,6 +609,25 @@ export class ProjectSettingsDraft {
 		return true;
 	}
 
+	/** Restores a net class's routing/formatting fields to real KiCad's own
+	 *  stock values — `name` and `priority` are left untouched so this can't
+	 *  rename a class or disturb its position in the priority order. Exists
+	 *  for projects created before createBlank() seeded the Default class
+	 *  with real values (it used to write just `{ name: 'Default' }`,
+	 *  leaving every numeric field undefined and failing
+	 *  validateNetClasses()'s non-negative check) — this is the in-app fix
+	 *  for a project stuck in that state, no re-creation needed. */
+	resetNetClassToDefaults(index: number): NetClassRecord | null {
+		const target = this.netClasses[index];
+		if (!target) return null;
+		const defaults = clone(DEFAULT_NET_CLASS);
+		for (const key of Object.keys(defaults) as (keyof NetClassRecord)[]) {
+			if (key === 'name' || key === 'priority') continue;
+			(target as Record<string, unknown>)[key] = defaults[key];
+		}
+		return target;
+	}
+
 	get boardLayers(): KicadLayerDefinition[] {
 		return this.getBoardLayersElement()?.layers ?? [];
 	}

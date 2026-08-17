@@ -16,6 +16,8 @@ export interface BoardAppearancePanelCallbacks {
 	setActiveLayer(layer: string): void;
 	/** Optional: called whenever the user changes per-layer visibility/opacity */
 	onLayerStateChange?: (state: Record<string, { visible: boolean; opacity: number }>) => void;
+	/** Optional: called when any Objects-tab setting changes. Passes an object with visible_items (string[]), opacity (board opacity object), and displayModes */
+	onObjectsStateChange?: (state: { visible_items?: string[]; opacity?: Record<string, number>; displayModes?: Record<string, any> }) => void;
 }
 
 /** KiCad-style PCB Appearance dock. Layer controls are live today; the
@@ -194,53 +196,91 @@ export class BoardAppearancePanel {
 
 	protected objectsContent(session: KicadRenderSession, scene: BoardScene): HTMLElement {
 		const content = document.createElement('div');
-		const ratsnest = document.createElement('label');
-		ratsnest.className = 'appearance-object-toggle';
-		const ratsnestVisible = document.createElement('input');
-		ratsnestVisible.type = 'checkbox';
-		ratsnestVisible.checked = session.isRatsnestVisible;
-		ratsnestVisible.addEventListener('change', () => session.setRatsnestVisible(ratsnestVisible.checked));
-		ratsnest.append(ratsnestVisible, ' Ratsnest');
-		content.appendChild(ratsnest);
-		const padNumbers = document.createElement('label');
-		padNumbers.className = 'appearance-object-toggle';
-		const padNumbersVisible = document.createElement('input');
-		padNumbersVisible.type = 'checkbox';
-		padNumbersVisible.checked = session.showPadNumbers;
-		padNumbersVisible.addEventListener('change', () => { session.showPadNumbers = padNumbersVisible.checked; });
-		padNumbers.append(padNumbersVisible, ' Pad Numbers');
-		content.appendChild(padNumbers);
-		const netNames = document.createElement('label');
-		netNames.className = 'appearance-object-toggle';
-		const netNamesVisible = document.createElement('input');
-		netNamesVisible.type = 'checkbox';
-		netNamesVisible.checked = session.showNetNames;
-		netNamesVisible.addEventListener('change', () => { session.showNetNames = netNamesVisible.checked; });
-		netNames.append(netNamesVisible, ' Net Names');
-		content.appendChild(netNames);
-		const countByKind = new Map<string, number>();
-		for (const item of scene.hitTestItems) {
-			countByKind.set(item.kind, (countByKind.get(item.kind) ?? 0) + 1);
-		}
-		if (!countByKind.size) {
-			content.className = 'appearance-empty';
-			content.textContent = 'No board objects are visible.';
+			// Controls: Tracks / Vias / Pads / Zones display modes
+			const makeModeRow = (labelText: string, getMode: () => 'filled' | 'outline', setMode: (m: 'filled'|'outline') => void) => {
+				const row = document.createElement('div');
+				row.className = 'appearance-mode-row';
+				const label = document.createElement('span');
+				label.textContent = labelText;
+				const select = document.createElement('select');
+				select.dataset.modeKey = labelText.toLowerCase();
+				select.appendChild(new Option('Filled', 'filled', false, getMode() === 'filled'));
+				select.appendChild(new Option('Outline', 'outline', false, getMode() === 'outline'));
+				select.addEventListener('change', () => {
+					const val = select.value as 'filled'|'outline';
+					setMode(val);
+					this.emitObjectsStateChange();
+				});
+				row.append(label, select);
+				return row;
+			};
+			content.appendChild(makeModeRow('Tracks', () => session.currentTrackDisplayMode ?? 'filled', m => session.setTrackDisplayMode(m)));
+			content.appendChild(makeModeRow('Vias', () => session.currentViaDisplayMode ?? 'filled', m => session.setViaDisplayMode(m)));
+			content.appendChild(makeModeRow('Pads', () => session.currentPadDisplayMode ?? 'filled', m => session.setPadDisplayMode(m)));
+			content.appendChild(makeModeRow('Zones', () => session.currentZoneDisplayMode ?? 'filled', m => session.setZoneDisplayMode(m)));
+
+			// Images opacity (mapped to PRL.board.opacity.images)
+			const imagesRow = document.createElement('div');
+			imagesRow.className = 'appearance-object-row';
+			const imagesLabel = document.createElement('span');
+			imagesLabel.textContent = 'Images';
+			const imagesSlider = document.createElement('input');
+			imagesSlider.type = 'range';
+						imagesSlider.dataset.opacityKey = 'images';
+						imagesSlider.min = '0'; imagesSlider.max = '100'; imagesSlider.value = String(Math.round(0.6 * 100));
+						imagesSlider.addEventListener('input', () => this.emitObjectsStateChange());
+						imagesRow.append(imagesLabel, imagesSlider);
+			content.appendChild(imagesRow);
+			// Common object toggles (visible_items keys). Default to session-known flags where possible.
+			const visibleKeys = [
+				['tracks','Tracks'], ['vias','Vias'], ['pads','Pads'], ['zones','Zones'], ['bitmaps','Images'],
+				['footprints_front','Footprints Front'], ['footprints_back','Footprints Back'], ['footprint_values','Values'],
+				['footprint_references','References'], ['footprint_text','Footprint Text'], ['drawing_sheet','Drawing Sheet'], ['grid','Grid'],
+				['drc_warnings','DRC Warnings'], ['drc_errors','DRC Errors'], ['drc_exclusions','DRC Exclusions'],
+				['locked_item_shadows','Locked Item Shadow'], ['conflict_shadows','Colliding Courtyards'], ['board_outline_area','Board Area Shadow'],
+				['ly_points','Points'], ['footprint_anchors','Anchors'], ['ratsnest','Ratsnest']
+			] as const;
+			const list = document.createElement('ul');
+			list.className = 'appearance-object-toggle-list';
+			for (const [key, labelText] of visibleKeys) {
+				const li = document.createElement('li');
+				li.className = 'appearance-object-toggle';
+				li.dataset.key = key;
+				const chk = document.createElement('input');
+				chk.type = 'checkbox';
+				// Heuristic defaults from session where available
+				if (key === 'ratsnest') chk.checked = session.isRatsnestVisible;
+				else if (key === 'grid') chk.checked = true;
+				else chk.checked = true;
+				chk.addEventListener('change', () => {
+					// apply immediate known effects
+					if (key === 'ratsnest') session.setRatsnestVisible(chk.checked);
+					if (key === 'grid') session.setGridVisible(chk.checked);
+					this.emitObjectsStateChange();
+				});
+				li.append(chk, ' ', labelText);
+				list.appendChild(li);
+			}
+			content.appendChild(list);
+			// Count summary (existing behavior)
+			const countByKind = new Map<string, number>();
+			for (const item of scene.hitTestItems) {
+				countByKind.set(item.kind, (countByKind.get(item.kind) ?? 0) + 1);
+			}
+			if (countByKind.size) {
+				const counts = document.createElement('ul');
+				counts.className = 'appearance-list';
+				const labels: Record<string, string> = { 'footprint-ref': 'Footprints', pad: 'Pads', track: 'Tracks', via: 'Vias', zone: 'Zones', graphic: 'Graphics' };
+				for (const [kind, count] of countByKind) {
+					const row = document.createElement('li');
+					row.className = 'appearance-object-row';
+					row.append(labels[kind] ?? kind, this.count(count));
+					counts.appendChild(row);
+				}
+				content.appendChild(counts);
+			}
 			return content;
 		}
-		const labels: Record<string, string> = {
-			'footprint-ref': 'Footprints', pad: 'Pads', track: 'Tracks', via: 'Vias', zone: 'Zones', graphic: 'Graphics'
-		};
-		const list = document.createElement('ul');
-		list.className = 'appearance-list';
-		for (const [kind, count] of countByKind) {
-			const row = document.createElement('li');
-			row.className = 'appearance-object-row';
-			row.append(labels[kind] ?? kind, this.count(count));
-			list.appendChild(row);
-		}
-		content.appendChild(list);
-		return content;
-	}
 
 	protected netsContent(scene: BoardScene): HTMLElement {
 		const content = document.createElement('div');
@@ -284,6 +324,30 @@ export class BoardAppearancePanel {
 			}
 		}
 
+	protected emitObjectsStateChange(): void {
+		if (typeof this.callbacks.onObjectsStateChange !== 'function') return;
+		const container = this.element;
+		const visible_items: string[] = [];		// gather toggles from list
+		for (const li of Array.from(container.querySelectorAll('.appearance-object-toggle-list li'))) {
+			const key = (li as HTMLElement).dataset.key;
+			const chk = li.querySelector('input[type=checkbox]') as HTMLInputElement | null;
+			if (key && chk && chk.checked) visible_items.push(key);
+		}
+		// gather opacity sliders
+		const opacity: Record<string, number> = {};		for (const input of Array.from(container.querySelectorAll('input[type=range]'))) {
+			const k = (input as HTMLElement).dataset.opacityKey;
+			if (k) {
+				opacity[k] = (Number((input as HTMLInputElement).value) || 0) / 100;
+			}
+		}
+		// display modes
+		const displayModes: Record<string, any> = {};
+		for (const sel of Array.from(container.querySelectorAll('.appearance-mode-row select')) as HTMLSelectElement[]) {
+			const key = (sel as HTMLElement).dataset.modeKey ?? (sel.previousSibling && (sel.previousSibling as HTMLElement).textContent?.trim().toLowerCase());
+			if (key) displayModes[key as string] = sel.value;
+		}
+		this.callbacks.onObjectsStateChange({ visible_items, opacity, displayModes });
+	}
 	protected count(value: number): HTMLElement {
 		const count = document.createElement('span');
 		count.className = 'appearance-count';

@@ -15,6 +15,7 @@ export type PendingShape =
 	| { kind: 'bezier'; points: Vec2[] }      // 0-4 points
 	| { kind: 'polygon'; points: Vec2[] }     // 0-N points, closes on first-point click/double-click
 	| { kind: 'rule-area'; points: Vec2[] }   // 0-N points, closes on same-point click
+	| { kind: 'zone'; points: Vec2[] }        // PCB copper zone outline — closes into the Zone Properties dialog, not an immediate commit
 	| {
 		kind: 'route'; netId: number | null; layer: string; corners: Vec2[];
 		/** Set once, at route-start, when the "auto track width" toggle is on

@@ -15,6 +15,10 @@ export interface BoardPropertiesControllerDeps {
 	dialog: PropertiesDialog;
 	refreshBoardText(session: KicadRenderSession): void;
 	refreshUndo(): void;
+	/** Zones get their own tabbed Copper Zone Properties dialog rather than
+	 *  the generic row-based modal every other board kind here uses — see
+	 *  ZonePropertiesDialog's doc comment. */
+	openZoneEditDialog(paintId: string): void;
 }
 
 /** Board-specific property fields over the existing generic sidebar/modal
@@ -32,6 +36,10 @@ export class BoardPropertiesController {
 	}
 
 	showModal(hit: BoardHit): boolean {
+		if (hit.kind === 'zone') {
+			this.deps.openZoneEditDialog(hit.id);
+			return true;
+		}
 		if (!this.supports(hit.kind)) return false;
 		this.deps.dialog.clear();
 		this.deps.dialog.setTitle(`${ this.title(hit) } Properties`);

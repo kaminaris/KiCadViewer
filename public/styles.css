@@ -1032,8 +1032,10 @@ main.project-setup-mode > :not(.project-setup-workspace) { display: none !import
 
 .project-setup-content { min-width: 0; overflow: auto; padding: 18px 22px 28px; }
 .project-setup-page-heading { max-width: 1100px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
+.project-setup-page-heading-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .project-setup-page-heading h2 { margin: 0 0 5px; font-size: 16px; }
 .project-setup-page-heading p { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+.project-setup-reset-btn { flex-shrink: 0; }
 
 .project-setup-content button,
 .project-setup-footer button {
@@ -1609,6 +1611,28 @@ main.project-setup-mode > :not(.project-setup-workspace) { display: none !import
 .router-settings-sub-options .preferences-check:has(input:disabled) { color: var(--muted); }
 .preferences-footer button:hover, .preferences-secondary-action:hover { border-color: var(--accent); background: #3d4855; }
 .preferences-spacer { flex: 1; }
+
+/* Copper Zone Properties — mirrors real KiCad's DIALOG_COPPER_ZONE layout:
+   a fixed Layers checklist column plus a scrolling fields column with its
+   own tab strip (Clearances & Pad Connections / Display Overrides). */
+.zone-props-modal { width: min(620px, calc(100vw - 32px)); height: min(560px, calc(100vh - 32px)); }
+.zone-props-body { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 0; flex: 1; min-height: 0; }
+.zone-props-layers { padding: 14px 16px; border-right: 1px solid var(--line); overflow: auto; }
+.zone-props-layers h3 { margin: 0 0 10px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.zone-props-layer-row { display: flex; align-items: center; gap: 7px; margin: 0 0 8px; font-size: 12px; cursor: pointer; }
+.zone-props-layer-row input { accent-color: var(--accent); }
+.zone-props-swatch { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
+.zone-props-main { padding: 14px 18px; overflow: auto; min-width: 0; }
+.zone-props-warning { display: flex; align-items: center; gap: 6px; margin: 0 0 12px; padding: 7px 10px; border: 1px solid #7a5a1e; border-radius: 3px; background: rgba(230, 168, 45, .12); color: #e6c37a; font-size: 11px; }
+.zone-props-field { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; align-items: center; gap: 8px; margin: 9px 0; font-size: 12px; }
+.zone-props-field > span:first-child { color: var(--muted); }
+.zone-props-field input, .zone-props-field select { box-sizing: border-box; width: 100%; background: #171a20; color: var(--text); border: 1px solid #596273; border-radius: 2px; padding: 4px 6px; font: inherit; }
+.zone-props-unit { color: var(--muted); font-size: 11px; }
+.zone-props-tabs { display: flex; gap: 2px; margin: 14px 0 0; border-bottom: 1px solid #596273; }
+.zone-props-tab { appearance: none; border: 1px solid transparent; border-bottom: 0; border-radius: 3px 3px 0 0; background: transparent; color: var(--muted); padding: 6px 12px; font: 12px var(--font); cursor: pointer; }
+.zone-props-tab:hover { color: var(--text); }
+.zone-props-tab.active { color: var(--text); background: #292f38; border-color: #596273; }
+.zone-props-pane { padding: 12px 2px; }
 
 @media (max-width: 600px) {
 	.preferences-body { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }

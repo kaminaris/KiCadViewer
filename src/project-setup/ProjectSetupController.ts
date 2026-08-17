@@ -597,14 +597,25 @@ export class ProjectSetupController {
 		else this.renderPlannedPage();
 	}
 
-	protected pageHeading(titleText: string, description: string): void {
+	protected pageHeading(titleText: string, description: string, onReset?: () => void): void {
 		const header = document.createElement('div');
 		header.className = 'project-setup-page-heading';
+		const titleRow = document.createElement('div');
+		titleRow.className = 'project-setup-page-heading-row';
 		const title = document.createElement('h2');
 		title.textContent = titleText;
+		titleRow.append(title);
+		if (onReset) {
+			titleRow.append(button('Reset to Defaults', 'project-setup-reset-btn', () => {
+				if (!window.confirm(`Reset “${ titleText }” to KiCad's stock defaults? This only affects fields on this page.`)) return;
+				onReset();
+				this.changed();
+				this.renderPage();
+			}));
+		}
 		const text = document.createElement('p');
 		text.textContent = description;
-		header.append(title, text);
+		header.append(titleRow, text);
 		this.contentEl.append(header);
 	}
 
@@ -711,6 +722,12 @@ export class ProjectSetupController {
 		addField('PCB color', colorInput(String(netClass.pcb_color ?? ''), value => { netClass.pcb_color = value; this.changed(); }));
 		addField('Schematic color', colorInput(String(netClass.schematic_color ?? ''), value => { netClass.schematic_color = value; this.changed(); }));
 		addField('Tuning profile', textInput(String(netClass.tuning_profile ?? ''), value => { netClass.tuning_profile = value; this.changed(); }));
+		form.append(button('Reset to Defaults', '', () => {
+			if (!window.confirm(`Reset “${ netClass.name }”'s routing, color, and tuning fields to KiCad's stock defaults? Its name and priority are left as-is.`)) return;
+			this.draft?.resetNetClassToDefaults(index);
+			this.changed();
+			this.renderPage();
+		}));
 		if (netClass.name !== 'Default') form.append(button('Delete Net Class', 'danger', () => {
 			if (!window.confirm(`Delete net class “${ netClass.name }”? Assignments to it must be changed before Apply.`)) return;
 			this.draft?.removeNetClass(index);
@@ -1130,7 +1147,7 @@ export class ProjectSetupController {
 		const drawingString = (key: string, fallback: string): string => typeof drawing[key] === 'string' ? drawing[key] as string : fallback;
 		const drawingBool = (key: string, fallback: boolean): boolean => typeof drawing[key] === 'boolean' ? drawing[key] as boolean : fallback;
 		const setDrawing = (key: string, value: unknown): void => { draft.setSchematicDrawingValue(key, value); this.changed(); };
-		this.pageHeading('Formatting', 'KiCad schematic drawing defaults stored in the project file. Distances are serialized in mils.');
+		this.pageHeading('Formatting', 'KiCad schematic drawing defaults stored in the project file. Distances are serialized in mils.', () => this.resetSchematicFormatting());
 
 		const defaults = this.settingsGroup('Drawing Defaults');
 		for (const [label, key, fallback, step] of [
@@ -1197,11 +1214,27 @@ export class ProjectSetupController {
 		this.renderIssues();
 	}
 
+	/** Real KiCad defaults (eeschema/dialogs/panel_eeschema_editing_options + SCHEMATIC_SETTINGS), not guessed. */
+	protected resetSchematicFormatting(): void {
+		const draft = this.draft!;
+		draft.setSchematicValue('connection_grid_size', 50);
+		for (const [key, value] of [
+			['default_text_size', 50], ['default_line_thickness', 6], ['pin_symbol_size', 25],
+			['junction_size_choice', 3], ['hop_over_size_choice', 0],
+			['text_offset_ratio', 0.15], ['label_size_ratio', 0.375], ['overbar_offset_ratio', 1.23],
+			['dashed_lines_dash_length_ratio', 12], ['dashed_lines_gap_length_ratio', 3],
+			['intersheets_ref_show', false], ['intersheets_ref_short', false],
+			['intersheets_ref_prefix', ''], ['intersheets_ref_suffix', ''], ['intersheets_ref_own_page', true],
+			['operating_point_overlay_v_precision', 3], ['operating_point_overlay_v_range', '~V'],
+			['operating_point_overlay_i_precision', 3], ['operating_point_overlay_i_range', '~A']
+		] as const) draft.setSchematicDrawingValue(key, value);
+	}
+
 	protected renderSchematicAnnotation(): void {
 		const draft = this.draft!;
 		const annotation = draft.annotation;
 		const setAnnotation = (key: string, value: unknown): void => { draft.setAnnotationValue(key, value); this.changed(); };
-		this.pageHeading('Annotation', 'Symbol unit notation, ordering, numbering, and reference reuse from KiCad Schematic Setup.');
+		this.pageHeading('Annotation', 'Symbol unit notation, ordering, numbering, and reference reuse from KiCad Schematic Setup.', () => this.resetSchematicAnnotation());
 		const units = this.settingsGroup('Units');
 		units.append(
 			this.settingRow('Symbol unit notation', selectInput(Number(draft.getSchematicValue('subpart_id_separator', 0)), [
@@ -1225,6 +1258,16 @@ export class ProjectSetupController {
 		);
 		this.contentEl.append(units, order, numbering);
 		this.renderIssues();
+	}
+
+	protected resetSchematicAnnotation(): void {
+		const draft = this.draft!;
+		draft.setSchematicValue('subpart_id_separator', 0);
+		draft.setSchematicValue('subpart_first_id', 65);
+		draft.setAnnotationValue('sort_order', 0);
+		draft.setAnnotationValue('method', 0);
+		draft.setSchematicValue('annotate_start_num', 0);
+		draft.setSchematicValue('reuse_designators', false);
 	}
 
 	protected renderFieldNameTemplates(): void {
@@ -1564,7 +1607,7 @@ export class ProjectSetupController {
 
 	protected renderBoardFinish(): void {
 		const draft = this.draft!;
-		this.pageHeading('Board Finish', 'Fabrication finish and edge options serialized in KiCad’s physical stackup.');
+		this.pageHeading('Board Finish', 'Fabrication finish and edge options serialized in KiCad’s physical stackup.', () => this.resetBoardFinish());
 		if (!draft.hasBoard) { this.renderMissingBoardNotice(); return; }
 		const finish = this.settingsGroup('Fabrication');
 		const currentFinish = String(draft.getBoardFinishValue('copper_finish', 'None'));
@@ -1579,9 +1622,18 @@ export class ProjectSetupController {
 		this.contentEl.append(finish); this.renderIssues();
 	}
 
+	/** Real KiCad defaults (pcbnew/board_design_settings.cpp constructor). */
+	protected resetBoardFinish(): void {
+		const draft = this.draft!;
+		draft.setBoardFinishValue('copper_finish', 'None');
+		draft.setBoardFinishValue('dielectric_constraints', false);
+		draft.setBoardFinishValue('edge_connector', 'none');
+		draft.setBoardFinishValue('edge_plating', false);
+	}
+
 	protected renderMaskPaste(): void {
 		const draft = this.draft!;
-		this.pageHeading('Solder Mask / Paste', 'Global mask, paste, and via-protection settings from KiCad’s board setup. Negative paste values shrink apertures.');
+		this.pageHeading('Solder Mask / Paste', 'Global mask, paste, and via-protection settings from KiCad’s board setup. Negative paste values shrink apertures.', () => this.resetMaskPaste());
 		if (!draft.hasBoard) { this.renderMissingBoardNotice(); return; }
 		const mask = this.settingsGroup('Solder Mask');
 		mask.append(
@@ -1608,6 +1660,21 @@ export class ProjectSetupController {
 		this.contentEl.append(mask, paste, via); this.renderIssues();
 	}
 
+	/** Real KiCad defaults (pcbnew/board_design_settings.cpp — all clearance/
+	 *  ratio fields are 0.0 out of the box; tenting is on both sides by
+	 *  default, covering/plugging are off). */
+	protected resetMaskPaste(): void {
+		const draft = this.draft!;
+		draft.setBoardSetupNumber('pad_to_mask_clearance', 0);
+		draft.setBoardSetupNumber('solder_mask_min_width', 0);
+		draft.setBoardSetupBoolean('allow_soldermask_bridges_in_footprints', false);
+		draft.setBoardSetupNumber('pad_to_paste_clearance', 0);
+		draft.setBoardSetupNumber('pad_to_paste_clearance_ratio', 0);
+		draft.setBoardSetupSides('tenting', true, true);
+		draft.setBoardSetupSides('covering', false, false);
+		draft.setBoardSetupSides('plugging', false, false);
+	}
+
 	protected renderMissingBoardNotice(): void {
 		const notice = document.createElement('div'); notice.className = 'project-setup-planned';
 		const title = document.createElement('h3'); title.textContent = 'No board file loaded';
@@ -1620,7 +1687,7 @@ export class ProjectSetupController {
 		const getNumber = (path: string, fallback: number): number => Number(draft.getBoardDesignValue(path, fallback));
 		const getBool = (path: string, fallback: boolean): boolean => Boolean(draft.getBoardDesignValue(path, fallback));
 		const set = (path: string, value: unknown): void => { draft.setBoardDesignValue(path, value); this.changed(); };
-		this.pageHeading('Text & Graphics Defaults', 'Default geometry and text styles used when creating PCB items. Values are stored in millimeters.');
+		this.pageHeading('Text & Graphics Defaults', 'Default geometry and text styles used when creating PCB items. Values are stored in millimeters.', () => this.resetBoardDefaults());
 
 		const table = document.createElement('table');
 		table.className = 'project-settings-table board-defaults-table';
@@ -1657,8 +1724,8 @@ export class ProjectSetupController {
 		);
 		const pads = this.settingsGroup('Default Through-hole Pad');
 		pads.append(
-			this.settingRow('Width (mm)', numberInput(getNumber('defaults.pads.width', 1.5), value => set('defaults.pads.width', value))),
-			this.settingRow('Height (mm)', numberInput(getNumber('defaults.pads.height', 1.5), value => set('defaults.pads.height', value))),
+			this.settingRow('Width (mm)', numberInput(getNumber('defaults.pads.width', 2.54), value => set('defaults.pads.width', value))),
+			this.settingRow('Height (mm)', numberInput(getNumber('defaults.pads.height', 1.27), value => set('defaults.pads.height', value))),
 			this.settingRow('Drill (mm)', numberInput(getNumber('defaults.pads.drill', 0.8), value => set('defaults.pads.drill', value)))
 		);
 		const footprint = this.settingsGroup('Footprint Defaults');
@@ -1673,11 +1740,39 @@ export class ProjectSetupController {
 		this.renderIssues();
 	}
 
+	/** Real KiCad defaults (pcbnew/board_design_settings.cpp — per-layer-
+	 *  class line/text sizes, board outline/courtyard widths, and the
+	 *  default through-hole master pad, BOARD_DESIGN_SETTINGS::
+	 *  SetDefaultMasterPad — 2.54 × 1.27mm / 0.8mm drill, not the smaller
+	 *  1.5mm square this page used to show before this button existed). */
+	protected resetBoardDefaults(): void {
+		const draft = this.draft!;
+		const set = (path: string, value: unknown): void => draft.setBoardDesignValue(path, value);
+		for (const [prefix, lineWidth, textSize, thickness] of [
+			['silk', 0.1, 1, 0.1], ['copper', 0.2, 1.5, 0.3], ['fab', 0.1, 1, 0.15], ['other', 0.1, 1, 0.15]
+		] as const) {
+			set(`defaults.${ prefix }_line_width`, lineWidth);
+			set(`defaults.${ prefix }_text_size_h`, textSize);
+			set(`defaults.${ prefix }_text_size_v`, textSize);
+			set(`defaults.${ prefix }_text_thickness`, thickness);
+			set(`defaults.${ prefix }_text_italic`, false);
+			set(`defaults.${ prefix }_text_upright`, true);
+		}
+		set('defaults.board_outline_line_width', 0.05);
+		set('defaults.courtyard_line_width', 0.05);
+		set('defaults.pads.width', 2.54);
+		set('defaults.pads.height', 1.27);
+		set('defaults.pads.drill', 0.8);
+		for (const key of ['apply_defaults_to_fp_fields', 'apply_defaults_to_fp_text', 'apply_defaults_to_fp_shapes', 'apply_defaults_to_fp_dimensions', 'apply_defaults_to_fp_barcodes']) {
+			set(`defaults.${ key }`, false);
+		}
+	}
+
 	protected renderBoardFormatting(): void {
 		const draft = this.draft!;
 		const value = (path: string, fallback: unknown): unknown => draft.getBoardDesignValue(path, fallback);
 		const set = (path: string, next: unknown): void => { draft.setBoardDesignValue(path, next); this.changed(); };
-		this.pageHeading('PCB Formatting', 'Default dimension formatting and placement behavior used by newly created PCB dimensions.');
+		this.pageHeading('PCB Formatting', 'Default dimension formatting and placement behavior used by newly created PCB dimensions.', () => this.resetBoardFormatting());
 		const format = this.settingsGroup('Dimension Format');
 		format.append(
 			this.settingRow('Units', selectInput(Number(value('defaults.dimension_units', 3)), [
@@ -1707,19 +1802,32 @@ export class ProjectSetupController {
 		this.renderIssues();
 	}
 
+	protected resetBoardFormatting(): void {
+		const draft = this.draft!;
+		const set = (path: string, value: unknown): void => draft.setBoardDesignValue(path, value);
+		set('defaults.dimension_units', 3);
+		set('defaults.dimension_precision', 4);
+		set('defaults.dimensions.units_format', 0);
+		set('defaults.dimensions.text_position', 0);
+		set('defaults.dimensions.suppress_zeroes', true);
+		set('defaults.dimensions.keep_text_aligned', true);
+		set('defaults.dimensions.arrow_length', 1270000);
+		set('defaults.dimensions.extension_offset', 500000);
+	}
+
 	protected renderBoardConstraints(): void {
 		const draft = this.draft!;
 		const set = (path: string, next: unknown): void => { draft.setBoardDesignValue(path, next); this.changed(); };
 		const number = (key: string, fallback: number, step = '0.01'): HTMLElement => numberInput(Number(draft.getBoardDesignValue(`rules.${ key }`, fallback)), next => set(`rules.${ key }`, next), step);
-		this.pageHeading('Design Constraints', 'Global DRC and router constraint floors from KiCad Board Setup. All distances are millimeters.');
+		this.pageHeading('Design Constraints', 'Global DRC and router constraint floors from KiCad Board Setup. All distances are millimeters.', () => this.resetBoardConstraints());
 		const groups: Array<[string, Array<[string, string, number, string?]>]> = [
 			['Copper', [
 				['Minimum clearance', 'min_clearance', 0], ['Minimum connection width', 'min_connection', 0],
-				['Minimum track width', 'min_track_width', 0], ['Copper to board edge', 'min_copper_edge_clearance', 0.5],
+				['Minimum track width', 'min_track_width', 0.2], ['Copper to board edge', 'min_copper_edge_clearance', 0.5],
 				['Maximum geometric error', 'max_error', 0.005, '0.0001']
 			]],
 			['Vias and holes', [
-				['Minimum via annular width', 'min_via_annular_width', 0.05], ['Minimum via diameter', 'min_via_diameter', 0.5],
+				['Minimum via annular width', 'min_via_annular_width', 0.1], ['Minimum via diameter', 'min_via_diameter', 0.5],
 				['Minimum through-hole drill', 'min_through_hole_diameter', 0.3], ['Minimum microvia diameter', 'min_microvia_diameter', 0.2],
 				['Minimum microvia drill', 'min_microvia_drill', 0.1], ['Minimum hole-to-hole', 'min_hole_to_hole', 0.25],
 				['Minimum hole clearance', 'min_hole_clearance', 0.25]
@@ -1742,6 +1850,26 @@ export class ProjectSetupController {
 		);
 		this.contentEl.append(thermal);
 		this.renderIssues();
+	}
+
+	/** Real KiCad defaults (pcbnew/board_design_settings.cpp constructor —
+	 *  spot-checked against include/board_design_settings.h's DEFAULT_*
+	 *  macros; found and fixed two stale values this page previously showed
+	 *  (min_via_annular_width was 0.05mm, real default is (0.5-0.3)/2 =
+	 *  0.1mm) while doing this). */
+	protected resetBoardConstraints(): void {
+		const draft = this.draft!;
+		const set = (key: string, value: number): void => draft.setBoardDesignValue(`rules.${ key }`, value);
+		set('min_clearance', 0); set('min_connection', 0); set('min_track_width', 0.2);
+		set('min_copper_edge_clearance', 0.5); set('max_error', 0.005);
+		set('min_via_annular_width', 0.1); set('min_via_diameter', 0.5);
+		set('min_through_hole_diameter', 0.3); set('min_microvia_diameter', 0.2);
+		set('min_microvia_drill', 0.1); set('min_hole_to_hole', 0.25); set('min_hole_clearance', 0.25);
+		set('min_silk_clearance', 0); set('min_groove_width', 0);
+		set('min_text_height', 0.8); set('min_text_thickness', 0.08);
+		set('solder_mask_to_copper_clearance', 0);
+		set('min_resolved_spokes', 2);
+		draft.setBoardDesignValue('rules.use_height_for_length_calcs', true);
 	}
 
 	protected renderPredefinedSizes(): void {
@@ -1797,11 +1925,11 @@ export class ProjectSetupController {
 		const draft = this.draft!;
 		const get = (key: string, fallback: unknown): unknown => draft.getBoardDesignValue(`defaults.zones.${ key }`, fallback);
 		const set = (key: string, value: unknown): void => { draft.setBoardDesignValue(`defaults.zones.${ key }`, value); this.changed(); };
-		this.pageHeading('Zone Defaults', 'Defaults for newly created copper zones, matching KiCad’s polygon, hatch, thermal, and island controls.');
+		this.pageHeading('Zone Defaults', 'Defaults for newly created copper zones, matching KiCad’s polygon, hatch, thermal, and island controls.', () => this.resetZoneDefaults());
 		const fill = this.settingsGroup('Fill');
 		fill.append(
 			this.settingRow('Fill mode', selectInput(Number(get('fill_mode', 0)), [['Solid polygons', 0], ['Hatched', 1], ['Copper thieving', 2]], value => set('fill_mode', Number(value)))),
-			this.settingRow('Minimum clearance (mm)', numberInput(Number(get('min_clearance', 0.2)), value => set('min_clearance', value))),
+			this.settingRow('Minimum clearance (mm)', numberInput(Number(get('min_clearance', 0.5)), value => set('min_clearance', value))),
 			this.settingRow('Minimum thickness (mm)', numberInput(Number(get('min_thickness', 0.25)), value => set('min_thickness', value))),
 			this.settingRow('Pad connection', selectInput(Number(get('pad_connection', 1)), [['Inherited', 0], ['Thermal relief', 1], ['Solid', 2], ['None', 3]], value => set('pad_connection', Number(value))))
 		);
@@ -1831,9 +1959,26 @@ export class ProjectSetupController {
 		this.contentEl.append(fill, hatch, thermal, islands); this.renderIssues();
 	}
 
+	/** Real KiCad defaults (pcbnew/zones.h ZONE_* macros + ZONE_SETTINGS's
+	 *  own PARAM registrations in board_design_settings.cpp — found and
+	 *  fixed a stale min_clearance value this page previously showed
+	 *  (0.2mm; real ZONE_CLEARANCE_MM default is 0.5mm) while doing this). */
+	protected resetZoneDefaults(): void {
+		const draft = this.draft!;
+		const set = (key: string, value: unknown): void => draft.setBoardDesignValue(`defaults.zones.${ key }`, value);
+		set('fill_mode', 0); set('min_clearance', 0.5); set('min_thickness', 0.25); set('pad_connection', 1);
+		set('hatch_thickness', 1); set('hatch_gap', 1.5); set('hatch_orientation', 0);
+		set('hatch_smoothing_value', 0.1); set('border_hatch_pitch', 0.5);
+		set('hatch_smoothing_level', 0); set('border_display_style', 2);
+		set('thermal_relief_gap', 0.5); set('thermal_relief_spoke_width', 0.5);
+		set('corner_smoothing', 0); set('corner_radius', 0);
+		draft.setBoardDesignValue('zones_allow_external_fillets', false);
+		set('remove_islands', 0); set('min_island_area', 10);
+	}
+
 	protected renderTeardrops(): void {
 		const draft = this.draft!;
-		this.pageHeading('Teardrops', 'Global targets and the three KiCad parameter sets for round pads/vias, rectangular pads, and track ends.');
+		this.pageHeading('Teardrops', 'Global targets and the three KiCad parameter sets for round pads/vias, rectangular pads, and track ends.', () => this.resetTeardrops());
 		const targets = this.settingsGroup('Targets');
 		for (const [label, key, fallback] of [
 			['Vias', 'td_onvia', true], ['Through-hole pads', 'td_onpthpad', true], ['SMD pads', 'td_onsmdpad', true],
@@ -1846,6 +1991,23 @@ export class ProjectSetupController {
 		const commit = (): void => { draft.setBoardDesignValue('teardrop_parameters', parameters); this.changed(); };
 		for (const parameter of parameters) this.contentEl.append(this.renderTeardropCard(parameter, commit));
 		this.renderIssues();
+	}
+
+	/** Real KiCad defaults (pcbnew/teardrop/teardrop_parameters.h's
+	 *  TEARDROP_PARAMETERS_LIST/TEARDROP_PARAMETERS constructors — verified
+	 *  match against this.defaultTeardropParameter()'s own literals and the
+	 *  td_on* target toggles, no discrepancies found). */
+	protected resetTeardrops(): void {
+		const draft = this.draft!;
+		for (const [key, value] of [
+			['td_onvia', true], ['td_onpthpad', true], ['td_onsmdpad', true],
+			['td_ontrackend', false], ['td_onroundshapesonly', false]
+		] as const) draft.setTeardropOption(key, value);
+		draft.setBoardDesignValue('teardrop_parameters', [
+			this.defaultTeardropParameter('td_round_shape'),
+			this.defaultTeardropParameter('td_rect_shape'),
+			this.defaultTeardropParameter('td_track_end')
+		]);
 	}
 
 	protected defaultTeardropParameter(target: string): TeardropParameterRecord {
@@ -1878,7 +2040,7 @@ export class ProjectSetupController {
 	protected renderLengthTuning(): void {
 		const draft = this.draft!;
 		const all = draft.tuningPatternSettings;
-		this.pageHeading('Length-tuning Patterns', 'Default meander geometry for single tracks, differential pairs, and differential-pair skew tuning.');
+		this.pageHeading('Length-tuning Patterns', 'Default meander geometry for single tracks, differential pairs, and differential-pair skew tuning.', () => this.resetLengthTuning());
 		for (const [key, title, spacing] of [
 			['single_track_defaults', 'Single Track', 0.6], ['diff_pair_defaults', 'Differential Pair', 1], ['diff_pair_skew_defaults', 'Differential Pair Skew', 0.6]
 		] as const) {
@@ -1895,6 +2057,18 @@ export class ProjectSetupController {
 			this.contentEl.append(card);
 		}
 		this.renderIssues();
+	}
+
+	protected resetLengthTuning(): void {
+		const draft = this.draft!;
+		for (const [key, spacing] of [
+			['single_track_defaults', 0.6], ['diff_pair_defaults', 1], ['diff_pair_skew_defaults', 0.6]
+		] as const) {
+			draft.setBoardDesignValue(`tuning_pattern_settings.${ key }`, {
+				min_amplitude: 0.2, max_amplitude: 1, spacing, corner_style: 1,
+				corner_radius_percentage: 80, single_sided: false
+			});
+		}
 	}
 
 	protected renderDrcSeverity(): void {
