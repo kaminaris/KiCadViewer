@@ -58,16 +58,23 @@ import { RouterSettingsDialog }                                              fro
 import { BoardAuxToolbar }                                                   from '../ui/BoardAuxToolbar';
 import { LayerPairDialog }                                                   from '../ui/LayerPairDialog';
 import { ZonePropertiesDialog }                                              from '../ui/ZonePropertiesDialog';
+import { RuleAreaPropertiesDialog }                                          from '../ui/RuleAreaPropertiesDialog';
+import { BoardTextPropertiesDialog, type BoardTextPropertiesDraft }          from '../ui/BoardTextPropertiesDialog';
+import { BarcodePropertiesDialog, type BarcodePropertiesDraft }              from '../ui/BarcodePropertiesDialog';
+import { PolygonPropertiesDialog }                                          from '../ui/PolygonPropertiesDialog';
 import { KicadBoard }                                                        from '@kicad-io/Project/KicadBoard';
 import { resolveNetClass, buildNetClassRules, type NetClassRules }          from '@kicad-layout/NetClassResolver';
 import { wireMainAppInteractions }                                          from './wireMainAppInteractions';
 import { MenuBar, wireToolbarCommandForwarding }                             from './MenuBar';
 import { applySchematicTheme }                                                from './SchematicThemes';
 import { ProjectSetupController }                                           from '../project-setup/ProjectSetupController';
+import { configureZintBarcodeEncoder }                                      from '../io/BarcodeZint';
+import { validateBoardBarcode }                                              from '@kicad-render/paint/BarcodeEncoder';
 
 type EditTool = ToolbarEditTool;
 
 const statusBar = new StatusBar();
+configureZintBarcodeEncoder();
 
 /** Safety net for failures outside the explicit try/catches (file loading,
  *  reroute, etc. already report their own status) — an unhandled error
@@ -120,6 +127,7 @@ const propertyRenderers = new PropertyRenderers(propertyPanel, {
 	openFootprintChooser: context => footprintChooser.open(context)
 });
 const propertiesDialog = new PropertiesDialog();
+const boardTextPropertiesDialog = new BoardTextPropertiesDialog();
 const propertyDialogRenderers = new PropertyDialogRenderers(propertiesDialog, {
 	getSession: () => doc.session,
 	mutateElement: id => makeElementMutator(id),
@@ -152,7 +160,11 @@ const boardProperties = new BoardPropertiesController({
 	dialog: propertiesDialog,
 	refreshBoardText: activeSession => appState.refreshBoardText(activeSession),
 	refreshUndo: updateUndoStackPane,
-	openZoneEditDialog: paintId => openZoneEditDialog(paintId)
+	openZoneEditDialog: paintId => openZoneEditDialog(paintId),
+	openTextEditDialog: paintId => openBoardTextEditDialog(paintId),
+	openBarcodeEditDialog: paintId => openBarcodeEditDialog(paintId),
+	openPolygonEditDialog: paintId => openPolygonEditDialog(paintId),
+	refreshZoneFills: () => window.dispatchEvent(new CustomEvent<string>('kionline:board-command', { detail: 'fill-all-zones' }))
 });
 
 const pendingShapeTracker = new PendingShapeTracker();
@@ -334,9 +346,20 @@ const fileActions = new FileActions(dom.imageInput, {
 	getSession: () => doc.session,
 	getLastPointerWorld: () => runtime.lastPointerWorld,
 	snap,
-	setEditTool: tool => toolStateController.setEditTool(tool),
+	setPlacementTool: tool => {
+		if (doc.session?.documentTypeLoaded === 'board') {
+			window.dispatchEvent(new CustomEvent('kionline:board-command', { detail: tool === 'image' ? 'place-image' : 'select' }));
+		}
+		else {
+			toolStateController.setEditTool(tool);
+		}
+	},
 	setStatus,
-	refreshSchematicText: activeSession => { appState.refreshSchematicText(activeSession); },
+	getActiveBoardLayer: () => doc.activeBoardLayer,
+	refreshDocumentText: activeSession => {
+		if (activeSession.documentTypeLoaded === 'board') appState.refreshBoardText(activeSession);
+		else appState.refreshSchematicText(activeSession);
+	},
 	setImageSelection: id => {
 		doc.editSelectedId = id;
 		doc.editSelectedKind = 'image';
@@ -496,6 +519,12 @@ function getBoardCopperLayers(): string[] {
 	return (doc.session?.activeScene?.layersPresent ?? []).filter(layer => layer.endsWith('.Cu'));
 }
 
+function getBoardLayers(): string[] {
+	const scene = doc.session?.activeScene;
+	const declaredLayers = (scene as { declaredLayers?: string[] } | null | undefined)?.declaredLayers;
+	return declaredLayers?.length ? declaredLayers : scene?.layersPresent ?? [];
+}
+
 const layerPairDialog = new LayerPairDialog({
 	getBoardCopperLayers,
 	getViaLayerPair: () => doc.viaLayerPair,
@@ -509,6 +538,146 @@ const zonePropertiesDialog = new ZonePropertiesDialog({
 	getCopperLayers: getBoardCopperLayers,
 	getNets: () => doc.session?.getBoardNets() ?? []
 });
+
+const ruleAreaPropertiesDialog = new RuleAreaPropertiesDialog({ getLayers: getBoardLayers });
+
+const polygonPropertiesDialog = new PolygonPropertiesDialog({
+	getLayers: getBoardLayers,
+	isCopperLayer: layer => layer.endsWith('.Cu')
+});
+const barcodePropertiesDialog = new BarcodePropertiesDialog();
+
+function barcodeDraftFromElement(element: any): BarcodePropertiesDraft {
+	const origin = element.getOrigin?.() ?? {};
+	const size = element.getSize?.() ?? {};
+	const margins = element.getMargins?.() ?? { x: 0, y: 0 };
+	const type = String(element.getBarcodeType?.() ?? 'qr').toLowerCase();
+	return {
+		text: String(element.getBarcodeText?.() ?? ''),
+		type: type === 'code39' || type === 'code128' || type === 'datamatrix' || type === 'microqr' ? type : 'qr',
+		errorCorrection: ['M', 'Q', 'H'].includes(String(element.getErrorCorrection?.() ?? '').toUpperCase())
+			? String(element.getErrorCorrection()).toUpperCase() as 'M' | 'Q' | 'H' : 'L',
+		showText: !Boolean(element.isTextHidden?.()),
+		textHeightMm: Number(element.getTextHeight?.()) || 1,
+		widthMm: Number(size.width) || 40,
+		heightMm: Number(size.height) || 40,
+		locked: Boolean(element.isLocked?.()),
+		layer: String(element.getLayer?.() ?? doc.activeBoardLayer),
+		knockout: Boolean(element.isKnockout?.()),
+		marginXmm: Number(margins.x) || 0,
+		marginYmm: Number(margins.y) || 0,
+		positionX: Number(origin.x) || 0,
+		positionY: Number(origin.y) || 0,
+		orientation: Number(origin.rotation) || 0,
+	};
+}
+
+function openBarcodeDialogForPlacement(anchor: Vec2): void {
+	const session = doc.session;
+	if (!session) return;
+	barcodePropertiesDialog.open({
+		text: 'Barcode', type: 'qr', errorCorrection: 'L', showText: true, textHeightMm: 1,
+		widthMm: 40, heightMm: 40, locked: false, layer: doc.activeBoardLayer, knockout: false,
+		marginXmm: 0, marginYmm: 0, positionX: anchor.x, positionY: anchor.y, orientation: 0,
+	}, getBoardLayers(), async draft => {
+		const error = await validateBoardBarcode({ type: draft.type, text: draft.text, errorCorrection: draft.errorCorrection });
+		if (error) return error;
+		const id = session.addBoardBarcode(draft.positionX, draft.positionY, draft);
+		if (!id) return;
+		session.select(id);
+		appState.refreshBoardText(session);
+		updateUndoStackPane();
+		updateEditSidebar();
+	});
+}
+
+function openBarcodeEditDialog(paintId: string): void {
+	const session = doc.session;
+	const hit = session?.activeScene?.hitTestItems.find(item => item.id === paintId) as { element?: any } | undefined;
+	if (!session || hit?.element?.name !== 'barcode') return;
+	barcodePropertiesDialog.open(barcodeDraftFromElement(hit.element), getBoardLayers(), async draft => {
+		const error = await validateBoardBarcode({ type: draft.type, text: draft.text, errorCorrection: draft.errorCorrection });
+		if (error) return error;
+		const updated = session.mutateElementByPaintId(paintId, current => {
+			current.setBarcodeText(draft.text);
+			current.setBarcodeType(draft.type);
+			if (draft.type === 'qr' || draft.type === 'microqr') current.setErrorCorrection(draft.errorCorrection);
+			current.setTextHidden(!draft.showText);
+			current.setTextHeight(Math.max(0.01, draft.textHeightMm));
+			current.setSize(Math.max(0.01, draft.widthMm), Math.max(0.01, draft.heightMm));
+			current.setLayer(draft.layer);
+			current.setKnockout(draft.knockout);
+			if (draft.knockout) current.setMargins(Math.max(0, draft.marginXmm), Math.max(0, draft.marginYmm));
+			current.setLocked(draft.locked);
+			current.setOrigin(draft.positionX, draft.positionY, draft.orientation);
+		});
+		if (!updated) return;
+		appState.refreshBoardText(session);
+		updateUndoStackPane();
+		updateEditSidebar();
+	});
+}
+
+function boardTextDraftFromElement(element: any): BoardTextPropertiesDraft {
+	const font = element.getFont?.() ?? {};
+	const origin = element.getOrigin?.() ?? {};
+	const justify = element.getJustify?.() ?? {};
+	const isTextBox = element.name === 'gr_text_box';
+	const stroke = element.getStroke?.() ?? { width: 0.1, type: 'default' };
+	return {
+		isTextBox,
+		text: String(element.value ?? ''),
+		locked: Boolean(element.isLocked?.()),
+		layer: String(element.getLayer?.() ?? ''),
+		knockout: Boolean(element.isKnockout?.()),
+		widthMm: Number(font.width) || 1.5,
+		heightMm: Number(font.height) || 1.5,
+		thicknessMm: Number(font.thickness) || 0.3,
+		bold: Boolean(font.bold),
+		italic: Boolean(font.italic),
+		horizontalAlignment: justify.horizontal === 'left' || justify.horizontal === 'right' ? justify.horizontal : 'middle',
+		verticalAlignment: justify.vertical === 'top' || justify.vertical === 'bottom' ? justify.vertical : 'middle',
+		mirrored: Boolean(justify.mirrored),
+		positionX: Number(origin.x) || 0,
+		positionY: Number(origin.y) || 0,
+		orientation: isTextBox ? Number(element.getSimpleChildValue?.('angle') ?? 0) : Number(origin.rotation) || 0,
+		border: Boolean(element.getSimpleChildValue?.('border')),
+		borderWidthMm: Number(stroke.width) || 0.1,
+		borderStyle: String(stroke.type ?? 'default')
+	};
+}
+
+/** Applies the board text dialog as one AST mutation, which makes Cancel
+ * non-destructive and keeps undo/save/reparse behavior identical to other
+ * board property edits. */
+function openBoardTextEditDialog(paintId: string): void {
+	const session = doc.session;
+	const hit = session?.activeScene?.hitTestItems.find(item => item.id === paintId) as { element?: any } | undefined;
+	const element = hit?.element;
+	if (!session || (element?.name !== 'gr_text' && element?.name !== 'fp_text' && element?.name !== 'gr_text_box')) {
+		return;
+	}
+	boardTextPropertiesDialog.open(boardTextDraftFromElement(element), getBoardLayers(), draft => {
+		const updated = session.mutateElementByPaintId(paintId, current => {
+			current.value = draft.text;
+			current.setLocked(draft.locked);
+			current.setLayer(draft.layer);
+			if (!draft.isTextBox) current.setKnockout(draft.knockout);
+			current.setFont(draft.widthMm, draft.heightMm, draft.italic, draft.bold, draft.thicknessMm);
+			current.setJustify(draft.horizontalAlignment, draft.verticalAlignment, draft.mirrored);
+			if (draft.isTextBox) {
+				current.setSimpleChild('angle', draft.orientation, 'numeric');
+				current.setSimpleChild('border', draft.border, 'boolean');
+				current.setStroke(Math.max(0, draft.borderWidthMm), draft.borderStyle);
+			}
+			else current.setOrigin(draft.positionX, draft.positionY, draft.orientation);
+		});
+		if (!updated) return;
+		appState.refreshBoardText(session);
+		updateUndoStackPane();
+		updateEditSidebar();
+	});
+}
 
 /** Zone AST create/update and the actual copper fill (real Clipper2 work,
  *  off-thread) are deliberately separate calls — see fillZone's own doc
@@ -548,12 +717,73 @@ function openZoneDialogForOutline(points: Vec2[]): void {
 
 function openZoneEditDialog(paintId: string): void {
 	const session = doc.session;
+	const ruleAreaDraft = session?.getRuleAreaDraft(paintId);
+	if (session && ruleAreaDraft) {
+		ruleAreaPropertiesDialog.open(ruleAreaDraft, committed => {
+			commitZoneDraftAndRefill(() => (session.updateRuleAreaProperties(paintId, committed) ? paintId : null));
+		});
+		return;
+	}
 	const draft = session?.getZoneDraft(paintId);
 	if (!session || !draft) {
 		return;
 	}
 	zonePropertiesDialog.open(draft, committed => {
 		commitZoneDraftAndRefill(() => (session.updateZoneProperties(paintId, committed) ? paintId : null));
+	});
+}
+
+function openRuleAreaDialogForOutline(points: Vec2[]): void {
+	const session = doc.session;
+	if (!session) {
+		return;
+	}
+	const layers = getBoardLayers();
+	const draft = {
+		...RuleAreaPropertiesDialog.blankDraft(),
+		layers: layers.includes(doc.activeBoardLayer) ? [doc.activeBoardLayer] : layers.slice(0, 1)
+	};
+	ruleAreaPropertiesDialog.open(draft, committed => {
+		commitZoneDraftAndRefill(() => session.createRuleAreaFromOutline(points, committed));
+	});
+}
+
+/** Plain graphic polygons never affect zone fills, so this commits directly
+ *  rather than routing through commitZoneDraftAndRefill's fill-all-zones
+ *  dispatch — mirrors openBoardTextEditDialog's commit shape. */
+function commitPolygonEdit(action: () => string | null): void {
+	const session = doc.session;
+	if (!session || !action()) {
+		return;
+	}
+	appState.refreshBoardText(session);
+	updateUndoStackPane();
+	updateEditSidebar();
+}
+
+function openPolygonDialogForOutline(points: Vec2[]): void {
+	const session = doc.session;
+	if (!session) {
+		return;
+	}
+	const layers = getBoardLayers();
+	const draft = {
+		...PolygonPropertiesDialog.blankDraft(),
+		layer: layers.includes(doc.activeBoardLayer) ? doc.activeBoardLayer : (layers[0] ?? '')
+	};
+	polygonPropertiesDialog.open(draft, committed => {
+		commitPolygonEdit(() => session.createPolygonFromOutline(points, committed));
+	});
+}
+
+function openPolygonEditDialog(paintId: string): void {
+	const session = doc.session;
+	const draft = session?.getPolygonDraft(paintId);
+	if (!session || !draft) {
+		return;
+	}
+	polygonPropertiesDialog.open(draft, committed => {
+		commitPolygonEdit(() => (session.updatePolygonProperties(paintId, committed) ? paintId : null));
 	});
 }
 
@@ -908,6 +1138,9 @@ wireMainAppInteractions({
 	getCurrentPowerKind: () => currentPowerKind,
 	getGridSpacingMm: () => settings.gridSpacingFor(doc.kind),
 	openZoneDialogForOutline,
+	openRuleAreaDialogForOutline,
+	openPolygonDialogForOutline,
+	openBarcodeDialogForPlacement,
 	getBoardPolarCoordinates: () => doc.boardPolarCoordinates,
 	setBoardPolarCoordinates,
 	getBoardDisplayUnit: () => settings.current.displayUnit,

@@ -29,7 +29,14 @@ export default defineConfig(({ command }) => ({
 	base: command === 'build' ? '/KiCadViewer/' : '/',
 	root: '.',
 	publicDir: 'public',
-	server: { port: 5173 },
+	server: {
+		port: 5173,
+		// `shared` may resolve to a monorepo sibling two levels above this
+		// app's root (see above) — Vite's default fs.allow only reaches
+		// upward to the nearest workspace root it can detect, which isn't
+		// guaranteed to cover that sibling, so allow it explicitly.
+		fs: { allow: [__dirname, shared] },
+	},
 	// Read by StatusBar to show which build a user is actually running —
 	// see src/env.d.ts for the ambient type declarations.
 	define: {

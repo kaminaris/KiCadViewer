@@ -204,6 +204,49 @@ export class PropertiesDialog {
 		container.appendChild(help);
 	}
 
+	/** Notebook of tab pages sharing one content pane — matches real KiCad's
+	 *  own geometry-entry tab strips (e.g. DIALOG_SHAPE_PROPERTIES' "By
+	 *  Corners" / "By Corner and Size" / "By Center and Size"). Each tab's
+	 *  `render` callback is invoked fresh into the cleared pane, so it can
+	 *  read live state (e.g. current geometry) at click time rather than
+	 *  needing to precompute every tab's content up front. `activeIndex`
+	 *  lets the caller remember the user's last-selected tab across a
+	 *  mutate-triggered dialog re-render (real KiCad does the same via its
+	 *  own `s_lastTabForShape` static map) — `onTabChange` fires with the
+	 *  newly-clicked index so the caller can persist it. */
+	tabs(
+		container: HTMLElement, tabs: { label: string; render: (pane: HTMLElement) => void }[],
+		activeIndex: number, onTabChange: (index: number) => void
+	): void {
+		const wrap = document.createElement('div');
+		wrap.className = 'kd-tabs';
+		const strip = document.createElement('div');
+		strip.className = 'kd-tab-strip';
+		const pane = document.createElement('div');
+		pane.className = 'kd-tab-pane';
+		const buttons: HTMLButtonElement[] = [];
+		const select = (index: number) => {
+			buttons.forEach((button, i) => button.classList.toggle('active', i === index));
+			pane.replaceChildren();
+			tabs[index]?.render(pane);
+		};
+		tabs.forEach((tab, index) => {
+			const button = document.createElement('button');
+			button.type = 'button';
+			button.className = 'kd-tab-btn';
+			button.textContent = tab.label;
+			button.addEventListener('click', () => {
+				if (index === activeIndex) return;
+				onTabChange(index);
+			});
+			buttons.push(button);
+			strip.appendChild(button);
+		});
+		wrap.append(strip, pane);
+		container.appendChild(wrap);
+		select(Math.min(activeIndex, tabs.length - 1));
+	}
+
 	buttonRow(container: HTMLElement): HTMLElement {
 		const row = document.createElement('div');
 		row.className = 'kd-btn-row';

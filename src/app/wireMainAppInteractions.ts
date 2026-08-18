@@ -73,6 +73,12 @@ export interface WireMainAppInteractionsOptions {
 
 	openZoneDialogForOutline(points: Vec2[]): void;
 
+	openRuleAreaDialogForOutline(points: Vec2[]): void;
+
+	openPolygonDialogForOutline(points: Vec2[]): void;
+
+	openBarcodeDialogForPlacement(anchor: Vec2): void;
+
 	getBoardPolarCoordinates(): boolean;
 
 	setBoardPolarCoordinates(enabled: boolean): void;
@@ -274,6 +280,9 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 	options.dom.saveProjectButton.addEventListener('click', () => {
 		void options.sessionController.saveProject();
 	});
+	options.dom.exportProjectZipButton.addEventListener('click', () => {
+		void options.sessionController.exportProjectZip();
+	});
 	options.dom.newProjectButton.addEventListener('click', () => {
 		void options.sessionController.newProject().then(key => { if (key) options.onProjectOpened(key); });
 	});
@@ -433,7 +442,11 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		showPropertiesModal: id => options.propertiesController.showPropertiesModal(id),
 		showTextInput: (anchor, event) => options.textInputFlow.showText(anchor, event, TEXT_INPUT_PLACEHOLDERS),
 		showTextBoxInput: (first, second, event) => options.textInputFlow.showTextBox(first, second, event),
+		tryPlacePendingImage: anchor => options.fileActions.tryPlacePendingImage(anchor),
 		openZoneDialogForOutline: options.openZoneDialogForOutline,
+		openRuleAreaDialogForOutline: options.openRuleAreaDialogForOutline,
+		openPolygonDialogForOutline: options.openPolygonDialogForOutline,
+		openBarcodeDialogForPlacement: options.openBarcodeDialogForPlacement,
 		getHighlightNetEnabled: options.getHighlightNetEnabled,
 		getRoutingSizes: options.getBoardRoutingSizes,
 		getUseConnectedTrackWidth: () => options.doc.useConnectedTrackWidth,
@@ -448,7 +461,9 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 	});
 	boardToolbar = new BoardToolbar({
 		getActiveTool: () => options.doc.boardTool,
-		onToolClick: tool => boardPointerController.setTool(tool)
+		onToolClick: tool => tool === 'image'
+			? options.fileActions.startImageInsertion()
+			: boardPointerController.setTool(tool)
 	});
 	new BoardToggleToolbar({
 		getGridVisible: () => options.doc.boardGridVisible,
@@ -521,7 +536,8 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		autoplaceSelectedFields: () => options.sessionController.tidySelectedFields(),
 		setEditTool: tool => options.toolStateController.setEditTool(tool),
 		startImageInsertion: () => options.fileActions.startImageInsertion(),
-		refreshBoardText: options.refreshBoardText
+		refreshBoardText: options.refreshBoardText,
+		showBoardPropertiesModal: id => options.propertiesController.showPropertiesModal(id)
 		,getBoardTool: () => options.doc.boardTool
 		,setBoardTool: tool => boardPointerController.setTool(tool)
 		,finishBoardRoute: () => boardPointerController.finishRoute()

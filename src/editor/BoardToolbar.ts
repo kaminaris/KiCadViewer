@@ -1,4 +1,4 @@
-export type BoardTool = 'select' | 'route' | 'via' | 'line' | 'arc' | 'rect' | 'circle' | 'polygon' | 'bezier' | 'text' | 'text-box' | 'zone' | 'grid-origin' | 'drill-origin';
+export type BoardTool = 'select' | 'route' | 'via' | 'line' | 'arc' | 'rect' | 'circle' | 'polygon' | 'bezier' | 'text' | 'text-box' | 'image' | 'barcode' | 'zone' | 'rule-area' | 'dimension-aligned' | 'dimension-orthogonal' | 'grid-origin' | 'drill-origin';
 
 export interface BoardToolbarCallbacks {
 	getActiveTool(): BoardTool;

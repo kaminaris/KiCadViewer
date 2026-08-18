@@ -1633,6 +1633,46 @@ main.project-setup-mode > :not(.project-setup-workspace) { display: none !import
 .zone-props-tab:hover { color: var(--text); }
 .zone-props-tab.active { color: var(--text); background: #292f38; border-color: #596273; }
 .zone-props-pane { padding: 12px 2px; }
+.rule-area-placement-placeholder { color: var(--muted); font: 12px var(--font); padding: 8px 2px; }
+
+/* Board Text Properties — the compact, two-column lower half follows
+   Pcbnew's DIALOG_TEXT_PROPERTIES: content first, then layer/font/style,
+   metrics and position. */
+.board-text-props-modal { width: min(620px, calc(100vw - 32px)); height: min(540px, calc(100vh - 32px)); }
+.board-text-props-body { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; flex: 1; min-height: 0; overflow: auto; padding: 14px 16px; }
+.board-text-props-text-label { grid-column: 1 / -1; margin: 0 0 -7px; color: var(--muted); font-size: 12px; }
+.board-text-props-body textarea { grid-column: 1 / -1; box-sizing: border-box; width: 100%; min-height: 96px; resize: vertical; border: 1px solid #596273; border-radius: 2px; background: #171a20; color: var(--text); padding: 6px 7px; font: 12px var(--font); }
+.board-text-props-syntax-help { grid-column: 1 / -1; width: max-content; margin-top: -5px; color: #79b9ed; font-size: 11px; }
+.board-text-props-basics { display: grid; align-content: start; }
+.board-text-props-basics .preferences-check { margin: 0 0 8px; }
+.board-text-props-font { min-width: 0; }
+.board-text-props-font > .board-text-props-field { margin-top: 0; }
+.board-text-props-field { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; align-items: center; gap: 7px; margin: 8px 0; color: var(--muted); font-size: 12px; }
+.board-text-props-field input, .board-text-props-field select { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid #596273; border-radius: 2px; background: #171a20; color: var(--text); padding: 4px 6px; font: inherit; }
+.board-text-props-field select:disabled { opacity: 1; color: var(--text); }
+.board-text-props-unit { color: var(--muted); font-size: 11px; }
+.board-text-props-layer-select { display: flex; min-width: 0; align-items: center; gap: 6px; }
+.board-text-props-layer-select select { flex: 1; }
+.board-text-props-layer-swatch { width: 13px; height: 13px; flex: none; border: 1px solid rgba(255,255,255,.35); border-radius: 1px; }
+
+/* Polygon Properties — a plain graphic polygon has no geometry tab (real
+   KiCad hides it too, see PolygonPropertiesDialog's doc comment), so this
+   is just a single column of the board-text-props field/layer primitives. */
+.polygon-props-modal { width: min(380px, calc(100vw - 32px)); height: min(360px, calc(100vh - 32px)); }
+.polygon-props-body { display: grid; flex: 1; min-height: 0; overflow: auto; padding: 14px 16px; align-content: start; }
+.polygon-props-field-disabled { opacity: .5; }
+.board-text-props-style-buttons { display: flex; align-items: center; gap: 3px; margin: 8px 0 0 72px; flex-wrap: wrap; }
+.board-text-props-icon-button, .board-text-props-link-size { appearance: none; min-width: 27px; height: 25px; border: 1px solid transparent; border-radius: 2px; background: transparent; color: var(--text); font: 13px var(--font); cursor: pointer; }
+.board-text-props-icon-button:hover, .board-text-props-link-size:hover { border-color: #596273; background: #2c3540; }
+.board-text-props-icon-button.active, .board-text-props-link-size.active { border-color: #3178b8; background: #173f62; color: #fff; }
+.board-text-props-icon-button[title="Bold"] { font-weight: 700; }
+.board-text-props-icon-button[title="Italic"] { font-style: italic; }
+.board-text-props-align-left { text-align: left; }
+.board-text-props-align-centre { text-align: center; }
+.board-text-props-align-right { text-align: right; }
+.board-text-props-metrics, .board-text-props-position { display: grid; align-content: start; }
+.board-text-props-error { grid-column: 1 / -1; margin: 0; color: #ff8f8f; font-size: 12px; }
+.board-text-props-link-size { justify-self: end; margin: -34px 0 0; font-size: 15px; }
 
 @media (max-width: 600px) {
 	.preferences-body { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
@@ -1642,6 +1682,8 @@ main.project-setup-mode > :not(.project-setup-workspace) { display: none !import
 	.preferences-field { grid-template-columns: 1fr; gap: 5px; }
 	.preferences-color-fields { grid-template-columns: 1fr; }
 	.hotkey-row { grid-template-columns: 1fr 120px; }
+	.board-text-props-body { grid-template-columns: 1fr; }
+	.board-text-props-style-buttons { margin-left: 72px; }
 }
 
 /* Symbol chooser — a compact, app-native take on KiCad's library dialog.
@@ -1834,6 +1876,14 @@ body.modal-dragging { user-select: none; }
 .kd-btn-row { display: flex; gap: 6px; padding: 6px 8px; }
 .kd-radio-row { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 11px; color: var(--text); }
 .kd-radio-row input { accent-color: var(--accent); }
+
+.kd-tabs { display: flex; flex-direction: column; }
+.kd-tab-strip { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid rgba(255,255,255,.08); }
+.kd-tab-btn { appearance: none; border: 1px solid transparent; border-bottom: none; border-radius: 3px 3px 0 0; background: transparent; color: var(--muted); padding: 5px 12px; font-size: 11px; cursor: pointer; }
+.kd-tab-btn:hover { color: var(--text); }
+.kd-tab-btn.active { color: var(--text); background: var(--panel-2); border-color: #454e5c; }
+.kd-tab-pane { padding-top: 2px; }
+.kd-col-heading { padding: 6px 8px 2px; font-size: 10.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
 
 .kd-grid-wrap { padding: 6px 8px; overflow-x: auto; }
 .kd-grid { width: 100%; border-collapse: collapse; font-size: 11px; }

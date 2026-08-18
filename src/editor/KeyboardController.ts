@@ -37,6 +37,7 @@ export interface KeyboardControllerCallbacks {
 	setEditTool(tool: EditTool): void;
 	startImageInsertion(): void;
 	refreshBoardText(session: KicadRenderSession): void;
+	showBoardPropertiesModal(id: string): boolean;
 	getBoardTool(): BoardTool;
 	setBoardTool(tool: BoardTool): void;
 	finishBoardRoute(): boolean;
@@ -279,6 +280,14 @@ export class KeyboardController {
 				this.cb.nudgeBoardMove(nudge.x, nudge.y);
 				return;
 			}
+		}
+		// KiCad's Edit Properties hotkey. The modal controller decides whether
+		// the selected board item has an editable dialog, so E stays available
+		// for future board object dialogs without claiming unrelated hotkeys.
+		if (e.key.toLowerCase() === 'e' && !e.ctrlKey && !e.metaKey && !e.altKey
+			&& session.selection && this.cb.showBoardPropertiesModal(session.selection)) {
+			e.preventDefault();
+			return;
 		}
 		if (this.matches(e, 'move') && this.cb.beginBoardMove()) {
 			e.preventDefault();

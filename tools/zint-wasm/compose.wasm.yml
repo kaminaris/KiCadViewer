@@ -1,0 +1,8 @@
+services:
+  zint-wasm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ../../public/vendor/zint:/out
+    command: /out

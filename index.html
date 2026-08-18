@@ -26,6 +26,7 @@
 					<div class="menu-divider"></div>
 					<button type="button" class="menu-command" data-action-target="btn-save-project">Save Project<span>Ctrl+S</span></button>
 					<button type="button" class="menu-command" data-action-target="btn-export-edit">Export Current Document…</button>
+					<button type="button" class="menu-command" data-action-target="btn-export-project-zip">Export Project (.zip)…</button>
 					<div class="menu-divider menu-board"></div>
 					<button type="button" class="menu-command menu-board" data-action-target="view-tab-project-settings">Board Setup…</button>
 				</div></div>
@@ -102,8 +103,8 @@
 					<button type="button" class="menu-command menu-schematic" data-tool="image">Image</button>
 					<button type="button" class="menu-command menu-schematic" data-tool="delete">Interactive Delete</button>
 					<button type="button" class="menu-command menu-board" data-board-command="place-via">Add Via</button>
-					<button type="button" class="menu-command menu-board" disabled>Add Filled Zone</button>
-					<button type="button" class="menu-command menu-board" disabled>Add Rule Area</button>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-zone">Add Filled Zone</button>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-rule-area">Add Rule Area</button>
 					<div class="menu-divider menu-board"></div>
 					<button type="button" class="menu-command menu-board" data-board-command="draw-line">Draw Line<span>L</span></button>
 					<button type="button" class="menu-command menu-board" data-board-command="draw-arc">Draw Arc<span>A</span></button>
@@ -114,6 +115,9 @@
 					<button type="button" class="menu-command menu-board" data-board-command="draw-bezier">Draw Bezier<span>B</span></button>
 					<button type="button" class="menu-command menu-board" data-board-command="place-text">Place Text<span>Ctrl+Shift+T</span></button>
 					<button type="button" class="menu-command menu-board" data-board-command="draw-text-box">Draw Text Box</button>
+					<button type="button" class="menu-command menu-board" data-board-command="place-barcode">Place Barcode</button>
+					<button type="button" class="menu-command menu-board" data-board-command="dimension-aligned">Add Aligned Dimension</button>
+					<button type="button" class="menu-command menu-board" data-board-command="dimension-orthogonal">Add Orthogonal Dimension</button>
 					<div class="menu-divider menu-board"></div>
 					<div class="menu-divider menu-board"></div>
 					<button type="button" class="menu-command menu-board" data-board-command="set-drill-origin">Drill/Place File Origin</button>
@@ -173,6 +177,7 @@
 				<button type="button" class="toolbar-button" id="btn-open-project" title="Open Project Folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8 H10 L12 10 H21 V19 H3 Z"/><path d="M12 12 V17 M9.5 14.5 L12 12 L14.5 14.5"/></svg></button>
 				<button type="button" class="toolbar-button" data-input-target="zip-input" title="Open Project Archive"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8 H10 L12 10 H21 V19 H3 Z"/><path d="M12 11 V17 M9 14 L12 17 L15 14"/></svg></button>
 				<button type="button" class="toolbar-button" id="btn-save-project" title="Save Project" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4 H17 L20 7 V20 H5 Z M8 4 V10 H16 V4 M8 20 V14 H17 V20"/></svg></button>
+				<button type="button" class="toolbar-button" id="btn-export-project-zip" title="Export Project (.zip)" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8 H10 L12 10 H21 V19 H3 Z"/><path d="M12 17 V11 M9 14 L12 11 L15 14"/></svg></button>
 			</div>
 			<div class="toolbar-divider" aria-hidden="true"></div>
 			<nav class="toolbar-section toolbar-view-switcher" aria-label="Editor views">
@@ -609,7 +614,7 @@
 			<button type="button" class="tool-btn" data-tool="zone" title="Add Filled Zone">
 				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 5 H19 V19 H5 Z M7 17 L17 7 M7 12 L12 7 M12 17 L17 12"/></svg>
 			</button>
-			<button type="button" class="tool-btn" disabled title="Add Rule Area — coming after board editing">
+			<button type="button" class="tool-btn" data-tool="rule-area" title="Add Rule Area">
 				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" stroke-dasharray="3 2"/></svg>
 			</button>
 			<div class="tool-sep"></div>
@@ -637,6 +642,19 @@
 			</button>
 			<button type="button" class="tool-btn" data-tool="text-box" title="Draw Text Box">
 				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="4.5" y="5" width="15" height="14"/><path d="M8 9 H16 M12 9 V15 M9.5 15 H14.5"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="barcode" title="Place Barcode">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 5V19 M7 5V19 M9 5V19 M13 5V19 M16 5V19 M20 5V19"/><path d="M3 3H21V21H3Z"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="image" title="Place Image">
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17 L10 12 L14 15 L20 10 V19 H4 Z"/></svg>
+			</button>
+			<div class="tool-sep"></div>
+			<button type="button" class="tool-btn" data-tool="dimension-aligned" title="Add Aligned Dimension">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 6 L8 9 M5 6 L8 3 M5 6 V19 M19 6 L16 9 M19 6 L16 3 M19 6 V19 M5 16 H19"/><path d="M9 13 H15"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="dimension-orthogonal" title="Add Orthogonal Dimension">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 5 H19 M5 5 L8 2 M5 5 L8 8 M19 5 L16 2 M19 5 L16 8 M5 5 V19 M19 5 V19 M8 15 H16"/></svg>
 			</button>
 		</aside>
 		<aside class="board-appearance hidden" id="board-appearance" aria-label="PCB appearance"></aside>

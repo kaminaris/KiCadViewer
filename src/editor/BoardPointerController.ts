@@ -1,4 +1,4 @@
-import type { KicadRenderSession, HitResult, ViaDragFix } from '@kicad-render/KicadRenderSession';
+import type { KicadRenderSession, HitResult, ViaDragFix, ResizeHandle, SelectionResizeBox } from '@kicad-render/KicadRenderSession';
 import { Vec2 }                    from '@kicad-render/math/Vec2';
 import type { AppMode }            from '../app/AppState';
 import { PendingShapeTracker, type PendingShape } from './PendingShape';
@@ -13,6 +13,7 @@ import { resolveNetClass, resolveClearanceMm, type NetClassRules } from '@kicad-
 import type { RouterSettings } from '../app/ActiveDocument';
 
 const RECT_SELECT_MOVE_THRESHOLD_PX = 4;
+const RESIZE_HANDLE_ORDER: readonly ResizeHandle[] = ['nw', 'n', 'ne', 'w', 'center', 'e', 'sw', 's', 'se'];
 
 /** What assembleTrackLine returns — the whole connected straight-track line
  *  a mid-segment drag operates on, not just the one segment clicked. See
@@ -38,6 +39,7 @@ type BoardGesture =
 	| { kind: 'pan'; lastScreen: Vec2; moved: boolean }
 	| { kind: 'single'; paintId: string; lastSnapped: Vec2 }
 	| { kind: 'group'; lastSnapped: Vec2 }
+	| { kind: 'resize'; paintId: string; handle: Exclude<ResizeHandle, 'center'>; original: SelectionResizeBox }
 	| {
 	kind: 'via'; paintId: string; viaSize: number; fixes: ViaDragFix[];
 	lastPreview: { fixes: ViaDragPreviewFix[]; viaPos: Vec2 } | null
@@ -47,17 +49,25 @@ type BoardGesture =
 	lastPreview: { fixes: ViaDragPreviewFix[]; dragPoint: Vec2 } | null
 }
 	| { kind: 'track-body'; line: AssembledTrackLine; dragIndex: number; lastPreview: Vec2[] | null }
-	/** Dragging one of a selected zone's CORNER handles — see
-	 *  zoneOutlineAnchorAtScreen's doc comment. Plain 1:1 vertex move via
-	 *  moveZoneOutlinePoint each mousemove. */
-	| { kind: 'zone-point'; paintId: string; index: number }
-	/** Dragging one of a selected zone's EDGE-MIDPOINT handles — shifts the
-	 *  whole edge sideways in parallel (moveZoneOutlineEdge), never inserts
+	/** Dragging one selected board polygon's CORNER handles. */
+	| { kind: 'polygon-point'; paintId: string; index: number }
+	/** Dragging one selected board polygon's EDGE-MIDPOINT handles — shifts the
+	 *  whole edge sideways in parallel (moveBoardPolygonEdge), never inserts
 	 *  a corner (that's the separate "Create Corner" context-menu action).
 	 *  `lastSnapped` is this frame's own delta-tracking anchor, exactly like
-	 *  the 'single'/'group' footprint-drag gestures below — moveZoneOutlineEdge
+	 *  the 'single'/'group' footprint-drag gestures below — moveBoardPolygonEdge
 	 *  takes a delta, not an absolute position. */
-	| { kind: 'zone-edge'; paintId: string; edgeIndex: number; lastSnapped: Vec2 }
+	| { kind: 'polygon-edge'; paintId: string; edgeIndex: number; lastSnapped: Vec2 }
+	/** Dragging one of a selected dimension's two MEASURED-point handles —
+	 *  re-measures the dimension (see KicadRenderSession.moveDimensionMeasuredPoint). */
+	| { kind: 'dimension-point'; paintId: string; index: 0 | 1 }
+	/** Dragging one of a selected dimension's two crossbar/arrow-end handles
+	 *  — changes the crossbar height (see setDimensionHeightFromCursor).
+	 *  The dimension's own TEXT handle needs no dedicated gesture kind — it
+	 *  resolves to the text sub-item's own paint id and reuses the ordinary
+	 *  'single' drag gesture, which already moves it independently (see
+	 *  BoardPainter.buildDimension's doc comment). */
+	| { kind: 'dimension-height'; paintId: string }
 	| { kind: 'rect'; originWorld: Vec2; originScreen: Vec2; moved: boolean };
 
 export interface BoardPointerControllerDeps {
@@ -80,10 +90,19 @@ export interface BoardPointerControllerDeps {
 	showPropertiesModal(id: string): void;
 	showTextInput(anchor: Vec2, event: MouseEvent): void;
 	showTextBoxInput(first: Vec2, second: Vec2, event: MouseEvent): void;
+	tryPlacePendingImage(anchor: Vec2): void;
+	openBarcodeDialogForPlacement(anchor: Vec2): void;
 	/** A finished zone-outline gesture hands off to the Copper Zone
 	 *  Properties dialog instead of committing directly — see the 'zone'
 	 *  case in graphicClick's doc comment. */
 	openZoneDialogForOutline(points: Vec2[]): void;
+	/** Rule areas use the same polygon gesture as zones, then open their
+	 * own keepout-properties dialog. */
+	openRuleAreaDialogForOutline(points: Vec2[]): void;
+	/** A finished plain graphic polygon outline opens its own Polygon
+	 *  Properties dialog (layer, fill, line width/style) rather than
+	 *  committing directly — see the 'polygon' case in graphicClick. */
+	openPolygonDialogForOutline(points: Vec2[]): void;
 	getHighlightNetEnabled(): boolean;
 	/** `netName` is the net actually being routed (null when starting a
 	 *  route on an unassigned/no-net point) — real KiCad sizes a route from
@@ -130,9 +149,9 @@ export interface BoardPointerControllerDeps {
  * of a small, self-contained class that self-gates on document type rather
  * than generalizing the schematic equivalent.
  *
- * Current scope: select + drag one or more footprints (by pad or, now that
- * BoardPainter has a synthetic whole-body hit item, anywhere on the
- * footprint), rectangle multi-select, interactive 45° track routing, and
+	 * Current scope: select + drag board items and footprints (by pad or, now
+	 * that BoardPainter has a synthetic whole-body hit item, anywhere on the
+	 * footprint), rectangle multi-select, interactive 45° track routing, and
  * via placement. Rotate/flip/delete and layer hotkeys live in
  * KeyboardController, mirroring the schematic editor's separation.
  */
@@ -190,9 +209,15 @@ export class BoardPointerController {
 			else if (command === 'draw-circle') this.setTool('circle');
 			else if (command === 'draw-polygon') this.setTool('polygon');
 			else if (command === 'draw-zone') this.setTool('zone');
+			else if (command === 'draw-rule-area') this.setTool('rule-area');
 			else if (command === 'draw-bezier') this.setTool('bezier');
 			else if (command === 'place-text') this.setTool('text');
 			else if (command === 'draw-text-box') this.setTool('text-box');
+			else if (command === 'place-image') this.setTool('image');
+			else if (command === 'place-barcode') this.setTool('barcode');
+			else if (command === 'dimension-aligned') this.setTool('dimension-aligned');
+			else if (command === 'dimension-orthogonal') this.setTool('dimension-orthogonal');
+			else if (command === 'select') this.setTool('select');
 			else if (command === 'set-grid-origin') this.setTool('grid-origin');
 			else if (command === 'set-drill-origin') this.setTool('drill-origin');
 			else if (command === 'reset-grid-origin') this.resetOrigin('grid');
@@ -221,8 +246,13 @@ export class BoardPointerController {
 								: tool === 'polygon' ? `Draw Polygon on ${ this.deps.getActiveLayer() } — click vertices; click the first point, press Enter, or right-click to finish.`
 									: tool === 'bezier' ? `Draw Bezier on ${ this.deps.getActiveLayer() } — click start, two control points, then end.`
 											: tool === 'zone' ? 'Draw Zone — click vertices; click the first point, press Enter, or right-click to finish and open Zone Properties.'
+											: tool === 'rule-area' ? 'Draw Rule Area — click vertices; click the first point, press Enter, or right-click to finish and open Rule Area Properties.'
+												: tool === 'dimension-aligned' ? `Add Aligned Dimension on ${ this.deps.getActiveLayer() } — click two measured points, then the dimension-line position.`
+													: tool === 'dimension-orthogonal' ? `Add Orthogonal Dimension on ${ this.deps.getActiveLayer() } — click two measured points, then the dimension-line position.`
 										: tool === 'text' ? `Place Text on ${ this.deps.getActiveLayer() } — click to enter text.`
 											: tool === 'text-box' ? `Draw Text Box on ${ this.deps.getActiveLayer() } — click opposite corners, then enter text.`
+											: tool === 'image' ? `Place Image on ${ this.deps.getActiveLayer() } — click to insert the selected image.`
+												: tool === 'barcode' ? `Place Barcode on ${ this.deps.getActiveLayer() } — click to set its position and properties.`
 				: tool === 'grid-origin' ? 'Set Grid Origin — click a grid point.'
 					: tool === 'drill-origin' ? 'Set Drill/Place File Origin — click a grid point.' : 'PCB select tool active.');
 	}
@@ -250,7 +280,7 @@ export class BoardPointerController {
 	finishDrawing(): boolean {
 		const session = this.deps.getSession();
 		const pending = this.pending.current;
-		if (!session || (pending.kind !== 'polygon' && pending.kind !== 'zone') || pending.points.length < 3) {
+		if (!session || (pending.kind !== 'polygon' && pending.kind !== 'zone' && pending.kind !== 'rule-area') || pending.points.length < 3) {
 			return false;
 		}
 		if (pending.kind === 'zone') {
@@ -259,11 +289,15 @@ export class BoardPointerController {
 			this.deps.openZoneDialogForOutline(pending.points);
 			return true;
 		}
-		this.commitGraphic(session, session.addBoardGraphicPolygon(
-			pending.points, this.deps.getActiveLayer(), BoardPointerController.graphicStrokeWidth));
+		if (pending.kind === 'rule-area') {
+			this.pending.clear();
+			session.setEditPreview(null);
+			this.deps.openRuleAreaDialogForOutline(pending.points);
+			return true;
+		}
 		this.pending.clear();
 		session.setEditPreview(null);
-		this.deps.setStatus('Polygon finished.');
+		this.deps.openPolygonDialogForOutline(pending.points);
 		return true;
 	}
 
@@ -379,14 +413,15 @@ export class BoardPointerController {
 		// Pcbnew completes a graphic polygon (or, here, a zone outline) with a
 		// right click.  This needs to precede board navigation, which
 		// otherwise treats every right click as the start of a pan gesture.
-		if (this.deps.getMode() === 'edit' && (this.deps.getTool() === 'polygon' || this.deps.getTool() === 'zone')
-			&& e.button === 2 && (this.pending.current.kind === 'polygon' || this.pending.current.kind === 'zone')) {
+		if (this.deps.getMode() === 'edit' && (this.deps.getTool() === 'polygon' || this.deps.getTool() === 'zone' || this.deps.getTool() === 'rule-area')
+			&& e.button === 2 && (this.pending.current.kind === 'polygon' || this.pending.current.kind === 'zone' || this.pending.current.kind === 'rule-area')) {
 			if (this.finishDrawing()) {
 				this.suppressNextContextMenu = true;
 				e.preventDefault();
 				return;
 			}
-			this.deps.setStatus(`A ${ this.deps.getTool() === 'zone' ? 'zone' : 'polygon' } needs at least three vertices before it can be finished.`);
+			const noun = this.deps.getTool() === 'zone' ? 'zone' : this.deps.getTool() === 'rule-area' ? 'rule area' : 'polygon';
+			this.deps.setStatus(`A ${ noun } needs at least three vertices before it can be finished.`);
 			this.suppressNextContextMenu = true;
 			e.preventDefault();
 			return;
@@ -417,19 +452,58 @@ export class BoardPointerController {
 			return;
 		}
 		if (this.deps.getTool() === 'select') {
-			const handle = this.zoneOutlineAnchorAtScreen(session, screenPos);
-			if (handle) {
-				if ('corner' in handle) {
-					session.pushUndoSnapshot('Edit zone outline');
-					this.gesture = { kind: 'zone-point', paintId: handle.paintId, index: handle.corner };
+			const dimHandle = this.dimensionAnchorAtScreen(session, screenPos);
+			if (dimHandle) {
+				if (dimHandle.kind === 'measured') {
+					session.pushUndoSnapshot('Edit dimension');
+					this.gesture = { kind: 'dimension-point', paintId: dimHandle.paintId, index: dimHandle.index };
+				}
+				else if (dimHandle.kind === 'crossbar') {
+					session.pushUndoSnapshot('Edit dimension');
+					this.gesture = { kind: 'dimension-height', paintId: dimHandle.paintId };
 				}
 				else {
-					session.pushUndoSnapshot('Edit zone outline');
+					// The text handle reuses the ordinary single-item drag —
+					// its paint id is the text sub-item's own, which
+					// translateElementGeometry already moves independently
+					// (see BoardPainter.buildDimension's doc comment).
+					const textPaintId = dimHandle.paintId.replace(/:(line|text)$/, ':text');
+					session.pushUndoSnapshot('Move dimension text');
+					this.gesture = { kind: 'single', paintId: textPaintId, lastSnapped: this.snappedWorld(session, screenPos) };
+				}
+				e.preventDefault();
+				return;
+			}
+			const handle = this.polygonOutlineAnchorAtScreen(session, screenPos);
+			if (handle) {
+				if ('corner' in handle) {
+					session.pushUndoSnapshot('Edit polygon outline');
+					this.gesture = { kind: 'polygon-point', paintId: handle.paintId, index: handle.corner };
+				}
+				else {
+					session.pushUndoSnapshot('Edit polygon outline');
 					this.gesture = {
-						kind: 'zone-edge', paintId: handle.paintId, edgeIndex: handle.edge,
+						kind: 'polygon-edge', paintId: handle.paintId, edgeIndex: handle.edge,
 						lastSnapped: this.snappedWorld(session, screenPos)
 					};
 				}
+				e.preventDefault();
+				return;
+			}
+			const resizeHandle = this.resizeHandleAtScreen(session, screenPos);
+			if (resizeHandle) {
+				if (session.isBoardElementLocked(resizeHandle.box.id) && !this.deps.getOverrideLocks()) {
+					this.deps.setStatus('Item locked — enable "Override locks" to resize it.');
+					e.preventDefault();
+					return;
+				}
+				session.pushUndoSnapshot('Resize item');
+				this.gesture = resizeHandle.handle === 'center'
+					? { kind: 'single', paintId: resizeHandle.box.id, lastSnapped: this.snappedWorld(session, screenPos) }
+					: {
+						kind: 'resize', paintId: resizeHandle.box.id,
+						handle: resizeHandle.handle, original: resizeHandle.box
+					};
 				e.preventDefault();
 				return;
 			}
@@ -451,6 +525,11 @@ export class BoardPointerController {
 		}
 		if (this.deps.getTool() === 'text-box') {
 			this.textBoxClick(session, screenPos, e);
+			e.preventDefault();
+			return;
+		}
+		if (this.deps.getTool() === 'image') {
+			this.deps.tryPlacePendingImage(this.snappedWorld(session, screenPos));
 			e.preventDefault();
 			return;
 		}
@@ -608,14 +687,17 @@ export class BoardPointerController {
 			return;
 		}
 		if (hit.kind !== 'pad' && hit.kind !== 'footprint') {
-			// Other board-level items (zones, graphics, text) are selectable
-			// even though dragging isn't implemented for them yet. Keeping
-			// these as a click-only gesture lets Delete and the context menu act
-			// on imported routing without accidentally treating the click as an
-			// empty-space marquee.
 			session.select(hit.id);
 			this.deps.refreshAppearance();
-			this.gesture = { kind: 'none' };
+			if (session.isBoardElementLocked(hit.id) && !this.deps.getOverrideLocks()) {
+				this.deps.setStatus('Item locked — enable "Override locks" to move it.');
+				this.gesture = { kind: 'none' };
+			}
+			else {
+				this.gesture = allowGesture
+					? { kind: 'single', paintId: hit.id, lastSnapped: this.snappedWorld(session, screenPos) }
+					: { kind: 'none' };
+			}
 			e?.preventDefault();
 			return;
 		}
@@ -705,7 +787,7 @@ export class BoardPointerController {
 			const dx = snapped.x - this.gesture.lastSnapped.x;
 			const dy = snapped.y - this.gesture.lastSnapped.y;
 			if (dx !== 0 || dy !== 0) {
-				this.captureUndoOnce(session, 'Move footprint');
+				this.captureUndoOnce(session, 'Move item');
 				// Delta from the last frame's snapped position, exactly like
 				// 'group' below — NOT moveFootprintByPaintId(paintId,
 				// snapped.x, snapped.y), which sets the footprint's ORIGIN
@@ -727,19 +809,44 @@ export class BoardPointerController {
 			this.deps.updateStatusBar(screenPos);
 			return;
 		}
-		if (this.gesture.kind === 'zone-point') {
+		if (this.gesture.kind === 'resize') {
 			const snapped = this.snappedWorld(session, screenPos);
-			session.moveZoneOutlinePoint(this.gesture.paintId, this.gesture.index, snapped.x, snapped.y);
+			const bounds = this.resizedBoundsFromHandle(this.gesture.original, this.gesture.handle, snapped);
+			session.resizeBoardElementBoundsById(
+				this.gesture.paintId, bounds.x, bounds.y, bounds.width, bounds.height, this.gesture.handle);
 			this.deps.updateStatusBar(screenPos);
 			return;
 		}
-		if (this.gesture.kind === 'zone-edge') {
+		if (this.gesture.kind === 'polygon-point') {
+			const snapped = this.snappedWorld(session, screenPos);
+			session.moveBoardPolygonPoint(this.gesture.paintId, this.gesture.index, snapped.x, snapped.y);
+			this.deps.updateStatusBar(screenPos);
+			return;
+		}
+		if (this.gesture.kind === 'dimension-point') {
+			// Object-anchor-snapped, matching real KiCad's own dimension tool
+			// (same snap the initial placement clicks already use — see
+			// dimensionAnchorSnap's own doc comment) — re-measuring a
+			// dimension by dragging its endpoint onto a pad/graphic corner is
+			// exactly the "snaps" behavior being replicated here.
+			const snapped = this.dimensionAnchorSnap(session, screenPos);
+			session.moveDimensionMeasuredPoint(this.gesture.paintId, this.gesture.index, snapped.x, snapped.y);
+			this.deps.updateStatusBar(screenPos);
+			return;
+		}
+		if (this.gesture.kind === 'dimension-height') {
+			const snapped = this.snappedWorld(session, screenPos);
+			session.setDimensionHeightFromCursor(this.gesture.paintId, snapped.x, snapped.y);
+			this.deps.updateStatusBar(screenPos);
+			return;
+		}
+		if (this.gesture.kind === 'polygon-edge') {
 			const snapped = this.snappedWorld(session, screenPos);
 			const dx = snapped.x - this.gesture.lastSnapped.x;
 			const dy = snapped.y - this.gesture.lastSnapped.y;
 			if (dx !== 0 || dy !== 0) {
-				session.moveZoneOutlineEdge(this.gesture.paintId, this.gesture.edgeIndex, dx, dy);
-				this.gesture = { kind: 'zone-edge', paintId: this.gesture.paintId, edgeIndex: this.gesture.edgeIndex, lastSnapped: snapped };
+				session.moveBoardPolygonEdge(this.gesture.paintId, this.gesture.edgeIndex, dx, dy);
+				this.gesture = { kind: 'polygon-edge', paintId: this.gesture.paintId, edgeIndex: this.gesture.edgeIndex, lastSnapped: snapped };
 			}
 			this.deps.updateStatusBar(screenPos);
 			return;
@@ -919,12 +1026,35 @@ export class BoardPointerController {
 			}
 			return;
 		}
-		if (gesture.kind === 'zone-point' || gesture.kind === 'zone-edge') {
+		if (gesture.kind === 'resize') {
 			const session = this.deps.getSession();
 			if (session) {
 				this.deps.refreshBoardText(session);
 				this.deps.refreshAppearance();
-				this.deps.setStatus('Zone outline edited.');
+				this.deps.setStatus('Item resized.');
+			}
+			return;
+		}
+		if (gesture.kind === 'dimension-point' || gesture.kind === 'dimension-height') {
+			const session = this.deps.getSession();
+			if (session) {
+				this.deps.refreshBoardText(session);
+				this.deps.refreshAppearance();
+				this.deps.setStatus(gesture.kind === 'dimension-point' ? 'Dimension re-measured.' : 'Dimension crossbar height changed.');
+			}
+			return;
+		}
+		if (gesture.kind === 'polygon-point' || gesture.kind === 'polygon-edge') {
+			const session = this.deps.getSession();
+			if (session) {
+				this.deps.refreshBoardText(session);
+				this.deps.refreshAppearance();
+				this.deps.setStatus('Polygon outline edited.');
+				const isZone = (session.activeScene?.hitTestItems ?? []).some(item => item.kind === 'zone'
+					&& (item.id === gesture.paintId || item.id.startsWith(`${ gesture.paintId }:`)));
+				if (!isZone) {
+					return;
+				}
 				// Re-fills every zone (not just this one — matches the Copper
 				// Zone Properties dialog's own commit path) via the same
 				// progress-modal-backed handler MainApp already wires up for
@@ -1073,19 +1203,19 @@ export class BoardPointerController {
 		return new Vec2(this.deps.snap(world.x), this.deps.snap(world.y));
 	}
 
-	/** Hit-tests the selected zone's outline handles (see
-	 *  KicadRenderSession.getZoneOutlineAnchors/drawZoneEditHandles) — the
+	/** Hit-tests the selected board polygon's outline handles (see
+	 *  KicadRenderSession.getBoardPolygonAnchors/drawZoneEditHandles) — the
 	 *  board counterpart of the schematic PointerController's
 	 *  curveAnchorAtScreen. A corner within range always wins over a
 	 *  midpoint at the same screen position, so an existing vertex is never
 	 *  shadowed by its own adjacent edge's midpoint handle. */
-	protected zoneOutlineAnchorAtScreen(session: KicadRenderSession, screenPos: Vec2):
+	protected polygonOutlineAnchorAtScreen(session: KicadRenderSession, screenPos: Vec2):
 		{ paintId: string; corner: number } | { paintId: string; edge: number } | null {
 		if (session.selectionIds.size !== 1) {
 			return null;
 		}
 		const paintId = [...session.selectionIds][0]!;
-		const anchors = session.getZoneOutlineAnchors(paintId);
+		const anchors = session.getBoardPolygonAnchors(paintId);
 		if (!anchors) {
 			return null;
 		}
@@ -1109,6 +1239,98 @@ export class BoardPointerController {
 		}
 		const edge = closest(anchors.midpoints);
 		return edge !== null ? { paintId, edge } : null;
+	}
+
+	/** Hit-tests the selected dimension's 5 point-editor handles (see
+	 *  KicadRenderSession.getDimensionEditAnchors/drawDimensionEditHandles)
+	 *  — same closest-within-radius pattern as polygonOutlineAnchorAtScreen.
+	 *  Measured-point handles win over crossbar-end handles at the same
+	 *  screen position (checked first), which only matters for a
+	 *  height-zero dimension where both coincide. */
+	protected dimensionAnchorAtScreen(session: KicadRenderSession, screenPos: Vec2):
+		{ paintId: string; kind: 'measured'; index: 0 | 1 }
+		| { paintId: string; kind: 'crossbar'; index: 0 | 1 }
+		| { paintId: string; kind: 'text' }
+		| null {
+		if (session.selectionIds.size !== 1) {
+			return null;
+		}
+		const paintId = [...session.selectionIds][0]!;
+		const anchors = session.getDimensionEditAnchors(paintId);
+		if (!anchors) {
+			return null;
+		}
+		const hitRadius = 9 * (window.devicePixelRatio || 1);
+		const closest = (points: Vec2[]): number | null => {
+			let bestIndex: number | null = null;
+			let bestDistance = Infinity;
+			points.forEach((point, index) => {
+				const screen = session.camera.worldToScreen(point);
+				const distance = Math.hypot(screen.x - screenPos.x, screen.y - screenPos.y);
+				if (distance <= hitRadius && distance < bestDistance) {
+					bestIndex = index;
+					bestDistance = distance;
+				}
+			});
+			return bestIndex;
+		};
+		const measuredIndex = closest(anchors.measured);
+		if (measuredIndex !== null) {
+			return { paintId, kind: 'measured', index: measuredIndex as 0 | 1 };
+		}
+		const crossbarIndex = closest(anchors.crossbar);
+		if (crossbarIndex !== null) {
+			return { paintId, kind: 'crossbar', index: crossbarIndex as 0 | 1 };
+		}
+		const textScreen = session.camera.worldToScreen(anchors.text);
+		if (Math.hypot(textScreen.x - screenPos.x, textScreen.y - screenPos.y) <= hitRadius) {
+			return { paintId, kind: 'text' };
+		}
+		return null;
+	}
+
+	protected resizeHandleAtScreen(session: KicadRenderSession, screenPos: Vec2): {
+		handle: ResizeHandle;
+		box: SelectionResizeBox;
+	} | null {
+		const box = session.getSelectionResizeBox();
+		if (!box) {
+			return null;
+		}
+		const x2 = box.x + box.width;
+		const y2 = box.y + box.height;
+		const cx = box.x + box.width / 2;
+		const cy = box.y + box.height / 2;
+		const points = [
+			new Vec2(box.x, box.y), new Vec2(cx, box.y), new Vec2(x2, box.y),
+			new Vec2(box.x, cy), new Vec2(cx, cy), new Vec2(x2, cy),
+			new Vec2(box.x, y2), new Vec2(cx, y2), new Vec2(x2, y2)
+		];
+		const hitRadius = 9 * (window.devicePixelRatio || 1);
+		let closest: { handle: ResizeHandle; distance: number } | null = null;
+		for (let index = 0; index < points.length; index++) {
+			const point = session.camera.worldToScreen(points[index]!);
+			const distance = Math.hypot(point.x - screenPos.x, point.y - screenPos.y);
+			if (distance <= hitRadius && (!closest || distance < closest.distance)) {
+				closest = { handle: RESIZE_HANDLE_ORDER[index]!, distance };
+			}
+		}
+		return closest ? { handle: closest.handle, box } : null;
+	}
+
+	protected resizedBoundsFromHandle(
+		box: SelectionResizeBox, handle: Exclude<ResizeHandle, 'center'>, cursor: Vec2
+	): SelectionResizeBox {
+		let left = box.x;
+		let right = box.x + box.width;
+		let top = box.y;
+		let bottom = box.y + box.height;
+		const grid = this.deps.getGridSpacingMm();
+		if (handle.includes('w')) left = Math.min(cursor.x, right - grid);
+		if (handle.includes('e')) right = Math.max(cursor.x, left + grid);
+		if (handle.includes('n')) top = Math.min(cursor.y, bottom - grid);
+		if (handle.includes('s')) bottom = Math.max(cursor.y, top + grid);
+		return { id: box.id, x: left, y: top, width: right - left, height: bottom - top };
 	}
 
 	protected resetOrigin(kind: 'grid' | 'drill-place'): void {
@@ -1169,12 +1391,12 @@ export class BoardPointerController {
 		return 'replace';
 	}
 
-	protected isGraphicTool(tool: BoardTool): tool is 'line' | 'arc' | 'rect' | 'circle' | 'polygon' | 'bezier' | 'zone' {
-		return tool === 'line' || tool === 'arc' || tool === 'rect' || tool === 'circle' || tool === 'polygon' || tool === 'bezier' || tool === 'zone';
+	protected isGraphicTool(tool: BoardTool): tool is 'line' | 'arc' | 'rect' | 'circle' | 'polygon' | 'bezier' | 'zone' | 'rule-area' | 'barcode' | 'dimension-aligned' | 'dimension-orthogonal' {
+		return tool === 'line' || tool === 'arc' || tool === 'rect' || tool === 'circle' || tool === 'polygon' || tool === 'bezier' || tool === 'zone' || tool === 'rule-area' || tool === 'barcode' || tool === 'dimension-aligned' || tool === 'dimension-orthogonal';
 	}
 
 	protected isGraphicPending(pending: PendingShape): boolean {
-		return pending.kind === 'anchor' || pending.kind === 'arc' || pending.kind === 'polygon' || pending.kind === 'bezier' || pending.kind === 'zone';
+		return pending.kind === 'anchor' || pending.kind === 'arc' || pending.kind === 'polygon' || pending.kind === 'bezier' || pending.kind === 'zone' || pending.kind === 'rule-area' || pending.kind === 'dimension';
 	}
 
 	protected graphicClick(session: KicadRenderSession, screenPos: Vec2, doubleClick: boolean): void {
@@ -1243,13 +1465,16 @@ export class BoardPointerController {
 				else this.pending.set({ kind: 'bezier', points: next });
 				return;
 			}
+			// Like zone/rule-area (see below), a graphic polygon interrupts the
+			// outline gesture with its own Polygon Properties dialog (layer,
+			// fill, line width/style) rather than committing straight away.
 			case 'polygon': {
 				const pending = this.pending.current;
 				const points = pending.kind === 'polygon' ? pending.points : [];
 				if (points.length >= 3 && (samePoint(points[0]!, point) || doubleClick)) {
-					this.commitGraphic(session, session.addBoardGraphicPolygon(points, this.deps.getActiveLayer(), BoardPointerController.graphicStrokeWidth));
 					this.pending.clear();
 					session.setEditPreview(null);
+					this.deps.openPolygonDialogForOutline(points);
 				}
 				else if (!points.length || !samePoint(points[points.length - 1]!, point)) {
 					this.pending.set({ kind: 'polygon', points: [...points, point] });
@@ -1275,6 +1500,39 @@ export class BoardPointerController {
 				}
 				return;
 			}
+			case 'rule-area': {
+				const pending = this.pending.current;
+				const points = pending.kind === 'rule-area' ? pending.points : [];
+				if (points.length >= 3 && (samePoint(points[0]!, point) || doubleClick)) {
+					this.pending.clear();
+					session.setEditPreview(null);
+					this.deps.openRuleAreaDialogForOutline(points);
+				}
+				else if (!points.length || !samePoint(points[points.length - 1]!, point)) {
+					this.pending.set({ kind: 'rule-area', points: [...points, point] });
+				}
+				return;
+			}
+			case 'dimension-aligned':
+			case 'dimension-orthogonal': {
+				const type = this.deps.getTool() === 'dimension-aligned' ? 'aligned' : 'orthogonal';
+				const snapped = this.dimensionAnchorSnap(session, screenPos);
+				const pending = this.pending.current;
+				const points = pending.kind === 'dimension' && pending.type === type ? pending.points : [];
+				if (points.length < 2) {
+					if (!points.length || !samePoint(points[0]!, snapped)) {
+						this.pending.set({ kind: 'dimension', type, points: [...points, snapped] });
+					}
+					return;
+				}
+				this.commitGraphic(session, session.addBoardDimension(type, points[0]!, points[1]!, snapped, this.deps.getActiveLayer()));
+				this.pending.clear();
+				session.setEditPreview(null);
+				return;
+			}
+			case 'barcode':
+				this.deps.openBarcodeDialogForPlacement(point);
+				return;
 		}
 	}
 
@@ -1290,6 +1548,15 @@ export class BoardPointerController {
 			case 'bezier': session.setEditPreview({ kind: 'bezier', points: pending.kind === 'bezier' ? pending.points : [], cursor }); break;
 			case 'polygon': session.setEditPreview({ kind: 'rule-area', points: pending.kind === 'polygon' ? pending.points : [], cursor }); break;
 			case 'zone': session.setEditPreview({ kind: 'rule-area', points: pending.kind === 'zone' ? pending.points : [], cursor }); break;
+			case 'rule-area': session.setEditPreview({ kind: 'rule-area', points: pending.kind === 'rule-area' ? pending.points : [], cursor }); break;
+			case 'dimension-aligned':
+			case 'dimension-orthogonal':
+				session.setEditPreview({
+					kind: 'dimension', type: tool === 'dimension-aligned' ? 'aligned' : 'orthogonal',
+					points: pending.kind === 'dimension' ? pending.points : [],
+					cursor: this.dimensionAnchorSnap(session, screenPos)
+				});
+				break;
 		}
 	}
 
@@ -1357,6 +1624,16 @@ export class BoardPointerController {
 		return anchor
 			? { point: anchor.point, netId: anchor.netId, snapped: true, trackWidth: anchor.kind === 'track' ? anchor.width : undefined }
 			: { point, netId: null, snapped: false };
+	}
+
+	/** Dimension-tool counterpart to routeAnchorSnap — real KiCad's dimension
+	 *  tool magnetizes onto pad/footprint/graphic-item anchors via the SAME
+	 *  grid helper every other drawing tool uses (see nearestBoardGraphicAnchor's
+	 *  doc comment), falling back to plain grid-snap when nothing is close
+	 *  enough. Not net-filtered — a dimension isn't an electrical item. */
+	protected dimensionAnchorSnap(session: KicadRenderSession, screenPos: Vec2): Vec2 {
+		const anchor = session.nearestBoardGraphicAnchor(session.screenToWorld(screenPos), session.pickToleranceWorld * 8);
+		return anchor ?? this.snappedWorld(session, screenPos);
 	}
 
 	/** The net a route-tool anchor-snap should be restricted to right now —

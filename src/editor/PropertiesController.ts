@@ -102,10 +102,10 @@ export class PropertiesController {
 		this.deps.propertyPanel.refreshUndoStack(session);
 	}
 
-	showPropertiesModal(hitId: string): void {
+	showPropertiesModal(hitId: string): boolean {
 		const session = this.deps.getSession();
 		if (!session) {
-			return;
+			return false;
 		}
 		session.select(hitId);
 		this.deps.propertiesDialog.clear();
@@ -113,11 +113,10 @@ export class PropertiesController {
 		const hit = session.activeScene?.hitTestItems.find(item => item.id === hitId);
 		const element = (hit as any)?.element;
 		if (!hit || !element) {
-			return;
+			return false;
 		}
 		if (session.documentTypeLoaded === 'board') {
-			this.deps.boardProperties.showModal(hit as any);
-			return;
+			return this.deps.boardProperties.showModal(hit as any);
 		}
 		const labelKind = (hit as any).labelKind as string | undefined;
 		switch (hit.kind) {
@@ -146,10 +145,11 @@ export class PropertiesController {
 				break;
 		}
 		if (!this.deps.propertiesDialog.body.children.length) {
-			return;
+			return false;
 		}
 		this.deps.propertiesDialog.show();
 		this.updateUndoStackPane();
+		return true;
 	}
 
 	closePropertiesModal(): void {

@@ -16,11 +16,13 @@ export interface FileActionsCallbacks {
 
 	snap(n: number): number;
 
-	setEditTool(tool: 'image' | 'select'): void;
+	setPlacementTool(tool: 'image' | 'select'): void;
 
 	setStatus(message: string): void;
 
-	refreshSchematicText(session: KicadRenderSession): void;
+	getActiveBoardLayer(): string;
+
+	refreshDocumentText(session: KicadRenderSession): void;
 
 	setImageSelection(id: string): void;
 
@@ -39,7 +41,7 @@ export class FileActions {
 	) {}
 
 	startImageInsertion(): void {
-		this.cb.setEditTool('image');
+		this.cb.setPlacementTool('image');
 		this.pendingImagePayload = null;
 		this.imageInput.value = '';
 		this.imageInput.click();
@@ -52,8 +54,8 @@ export class FileActions {
 		}
 		try {
 			this.pendingImagePayload = await this.readEmbeddedImage(file);
-			this.cb.setEditTool('image');
-			this.cb.setStatus(`Image loaded (${ file.name }) — click the schematic to place it.`);
+			this.cb.setPlacementTool('image');
+			this.cb.setStatus(`Image loaded (${ file.name }) — click the canvas to place it.`);
 		}
 		catch (error) {
 			this.pendingImagePayload = null;
@@ -70,13 +72,14 @@ export class FileActions {
 		const payload = this.pendingImagePayload;
 		this.pendingImagePayload = null;
 		if (this.insertImageAt(payload, anchor)) {
-			this.cb.setEditTool('select');
+			this.cb.setPlacementTool('select');
 		}
 	}
 
 	handleWindowPaste(event: ClipboardEvent): void {
 		const session = this.cb.getSession();
-		if (this.cb.getMode() !== 'edit' || !session || session.documentTypeLoaded !== 'schematic') {
+		if (this.cb.getMode() !== 'edit' || !session
+			|| (session.documentTypeLoaded !== 'schematic' && session.documentTypeLoaded !== 'board')) {
 			return;
 		}
 		const target = event.target as HTMLElement | null;
@@ -109,16 +112,19 @@ export class FileActions {
 
 	protected insertImageAt(payload: EmbeddedImagePayload, anchor: Vec2): boolean {
 		const session = this.cb.getSession();
-		if (this.cb.getMode() !== 'edit' || !session || session.documentTypeLoaded !== 'schematic') {
-			this.cb.setStatus('Open a schematic in Edit mode before inserting an image.');
+		if (this.cb.getMode() !== 'edit' || !session
+			|| (session.documentTypeLoaded !== 'schematic' && session.documentTypeLoaded !== 'board')) {
+			this.cb.setStatus('Open a schematic or PCB in Edit mode before inserting an image.');
 			return false;
 		}
-		const id = session.addGraphicImage(anchor.x, anchor.y, payload.data, payload.mimeType);
+		const id = session.documentTypeLoaded === 'board'
+			? session.addBoardGraphicImage(anchor.x, anchor.y, payload.data, payload.mimeType, this.cb.getActiveBoardLayer())
+			: session.addGraphicImage(anchor.x, anchor.y, payload.data, payload.mimeType);
 		if (!id) {
 			this.cb.setStatus('Could not insert image.');
 			return false;
 		}
-		this.cb.refreshSchematicText(session);
+		this.cb.refreshDocumentText(session);
 		session.select(id);
 		this.cb.setImageSelection(id);
 		this.cb.setStatus('Added image.');

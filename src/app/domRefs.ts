@@ -73,6 +73,7 @@ export interface MainDomRefs {
 	circuitFileInput: HTMLInputElement;
 	openProjectButton: HTMLButtonElement;
 	saveProjectButton: HTMLButtonElement;
+	exportProjectZipButton: HTMLButtonElement;
 	newProjectButton: HTMLButtonElement;
 	zipInput: HTMLInputElement;
 	demoButton: HTMLButtonElement;
@@ -146,6 +147,7 @@ export function createMainDomRefs(): MainDomRefs {
 		circuitFileInput: requiredById<HTMLInputElement>('circuit-file-input'),
 		openProjectButton: requiredById<HTMLButtonElement>('btn-open-project'),
 		saveProjectButton: requiredById<HTMLButtonElement>('btn-save-project'),
+		exportProjectZipButton: requiredById<HTMLButtonElement>('btn-export-project-zip'),
 		newProjectButton: requiredById<HTMLButtonElement>('btn-new-project'),
 		zipInput: requiredById<HTMLInputElement>('zip-input'),
 		demoButton: requiredById<HTMLButtonElement>('btn-demo'),

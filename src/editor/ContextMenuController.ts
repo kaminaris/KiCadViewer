@@ -113,11 +113,11 @@ export class ContextMenuController {
 							this.deps.setStatus(`${ locked ? 'Locked' : 'Unlocked' } ${ count } item(s).`);
 						}
 					},
-					createCorner: (s, id, world) => {
-						const nearest = s.nearestZoneOutlineInsertion(id, world.x, world.y);
+					createCorner: (s, id, world, refillZones) => {
+						const nearest = s.nearestBoardPolygonInsertion(id, world.x, world.y);
 						if (!nearest) return;
-						s.pushUndoSnapshot('Create zone corner');
-						const newIndex = s.insertZoneOutlinePoint(id, nearest.edgeIndex, nearest.x, nearest.y);
+						s.pushUndoSnapshot('Create polygon corner');
+						const newIndex = s.insertBoardPolygonPoint(id, nearest.edgeIndex, nearest.x, nearest.y);
 						if (newIndex === null) return;
 						this.deps.appState.refreshBoardText(s);
 						this.deps.updateUndoStackPane();
@@ -128,7 +128,9 @@ export class ContextMenuController {
 						// BoardPointerController's identical dispatch for why this
 						// reuses MainApp's existing 'fill-all-zones' progress-modal
 						// handler instead of duplicating that plumbing here.
-						window.dispatchEvent(new CustomEvent<string>('kionline:board-command', { detail: 'fill-all-zones' }));
+						if (refillZones) {
+							window.dispatchEvent(new CustomEvent<string>('kionline:board-command', { detail: 'fill-all-zones' }));
+						}
 					}
 				}
 			});

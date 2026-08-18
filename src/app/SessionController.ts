@@ -14,6 +14,7 @@ import { BrowserFsAdapter, getDirectoryPicker, type FsDirectoryHandle } from './
 import { IndexedDbFsAdapter }                                           from './IndexedDbFsAdapter';
 import { ZipArchive }                                                   from './ZipArchive';
 import { ZipFsAdapter }                                                 from './ZipFsAdapter';
+import { ZipWriter }                                                    from './ZipWriter';
 import { ProjectContext }                                               from './ProjectContext';
 import { ProjectRegistry }                                              from './ProjectRegistry';
 import type { ProjectStore }                                            from './ProjectStore';
@@ -538,6 +539,7 @@ export class SessionController {
 			this.state.projectContext = new ProjectContext(key, project, adapter, dirHandle.name);
 			this.state.currentSheetNode = project.mainSchematic;
 			this.dom.saveProjectButton.disabled = false;
+			this.dom.exportProjectZipButton.disabled = false;
 			const sheetCount = this.countSheetsRecursive(project.mainSchematic);
 			void this.registry.upsertProject({
 				id: key, name: dirHandle.name, kind: 'folder', dirHandle, proFile, lastOpenedAt: Date.now(), sheetCount
@@ -552,6 +554,7 @@ export class SessionController {
 			this.state.projectContext = null;
 			this.state.currentSheetNode = null;
 			this.dom.saveProjectButton.disabled = true;
+			this.dom.exportProjectZipButton.disabled = true;
 			this.statusBar.setStatus(
 				`Could not open project — ${ error instanceof Error ? error.message : String(error) }`);
 			return null;
@@ -671,6 +674,7 @@ export class SessionController {
 					this.state.projectContext = new ProjectContext(projectId, project, adapter, record.name);
 					this.state.currentSheetNode = project.mainSchematic ?? null;
 					this.dom.saveProjectButton.disabled = false;
+					this.dom.exportProjectZipButton.disabled = false;
 					void this.registry.upsertProject({ ...record, lastOpenedAt: Date.now() });
 				}
 				else if (!record.dirHandle) {
@@ -695,6 +699,7 @@ export class SessionController {
 					this.state.projectContext = new ProjectContext(projectId, project, adapter, record.name);
 					this.state.currentSheetNode = project.mainSchematic ?? null;
 					this.dom.saveProjectButton.disabled = false;
+					this.dom.exportProjectZipButton.disabled = false;
 					void this.registry.upsertProject({ ...record, lastOpenedAt: Date.now() });
 				}
 			}
@@ -793,6 +798,32 @@ export class SessionController {
 	 * SharedWorker/IndexedDB sync layer (Phase 6) instead of only
 	 * re-syncing this page's own currentSheetNode below.
 	 */
+	/** Re-parses the LIVE session text into currentSheetNode/mainBoard first —
+	 *  the project tree was populated once at open time and the render
+	 *  session holds its own separate, possibly-since-edited AST for
+	 *  whichever ONE document is currently displayed, so without this
+	 *  re-sync, saveAll() (or a zip export walking the same tree) would
+	 *  silently write back the as-opened snapshot instead of the user's
+	 *  edits — the same class of bug Phase A's KicadSchematic.saveAll() fix
+	 *  targeted, one layer up. Shared by saveProject() and
+	 *  exportProjectZip() since both need the tree current before walking it. */
+	private syncLiveTextIntoProjectTree(projectContext: ProjectContext): void {
+		if (this.state.kind === 'board' && projectContext.project.mainBoard && this.state.session) {
+			const liveText = this.state.session.getBoardText();
+			if (liveText) {
+				projectContext.project.mainBoard.data = liveText;
+				projectContext.project.mainBoard.rootElement = new KicadParser().parse(liveText);
+			}
+		}
+		else if (this.state.currentSheetNode && this.state.session) {
+			const liveText = this.state.session.getSchematicText();
+			if (liveText) {
+				this.state.currentSheetNode.data = liveText;
+				this.state.currentSheetNode.rootElement = new KicadParser().parse(liveText);
+			}
+		}
+	}
+
 	async saveProject(): Promise<void> {
 		const projectContext = this.state.projectContext;
 		if (!projectContext || !projectContext.fsAdapter) {
@@ -800,20 +831,7 @@ export class SessionController {
 			return;
 		}
 		try {
-			if (this.state.kind === 'board' && projectContext.project.mainBoard && this.state.session) {
-				const liveText = this.state.session.getBoardText();
-				if (liveText) {
-					projectContext.project.mainBoard.data = liveText;
-					projectContext.project.mainBoard.rootElement = new KicadParser().parse(liveText);
-				}
-			}
-			else if (this.state.currentSheetNode && this.state.session) {
-				const liveText = this.state.session.getSchematicText();
-				if (liveText) {
-					this.state.currentSheetNode.data = liveText;
-					this.state.currentSheetNode.rootElement = new KicadParser().parse(liveText);
-				}
-			}
+			this.syncLiveTextIntoProjectTree(projectContext);
 			await projectContext.project.saveAll(projectContext.fsAdapter.saveFile);
 			if (this.state.kind === 'board') {
 				this.appState.markBoardSaved();
@@ -826,6 +844,47 @@ export class SessionController {
 		catch (error) {
 			this.statusBar.setStatus(
 				`Could not save project — ${ error instanceof Error ? error.message : String(error) }`);
+		}
+	}
+
+	/**
+	 * Downloads the whole open project as a .zip — the write-side
+	 * counterpart to openProjectZip(), and the feature ZipArchive.ts's own
+	 * doc comment flagged as deliberately deferred ("would mean building a
+	 * NEW zip and offering it as a download, a separate feature"). Works for
+	 * every project regardless of how it was opened (real folder, IndexedDB
+	 * "browser" project, or an already-imported zip) since it walks
+	 * `project.saveAll()` the exact same way `saveProject()` does — just
+	 * with a `saveFile` that collects into a ZipWriter instead of writing to
+	 * `projectContext.fsAdapter`. That also means the entry paths inside the
+	 * zip are whatever each project piece's own `.path` already is, so the
+	 * result re-imports cleanly via "Open Project Archive…" and opens
+	 * directly in real KiCad. Does NOT persist anything (no saveProject()
+	 * side effects) — purely a snapshot of the current live state for
+	 * external use (e.g. a real-KiCad parity check).
+	 */
+	async exportProjectZip(): Promise<void> {
+		const projectContext = this.state.projectContext;
+		if (!projectContext) {
+			this.statusBar.setStatus('No project open to export.');
+			return;
+		}
+		try {
+			this.syncLiveTextIntoProjectTree(projectContext);
+			const writer = new ZipWriter();
+			await projectContext.project.saveAll(async (path, content) => { writer.addTextFile(path, content); });
+			const blob = await writer.build();
+			const url = URL.createObjectURL(blob);
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = `${ projectContext.rootName || 'project' }.zip`;
+			link.click();
+			URL.revokeObjectURL(url);
+			this.statusBar.setStatus(`Exported "${ projectContext.rootName }.zip".`);
+		}
+		catch (error) {
+			this.statusBar.setStatus(
+				`Could not export project — ${ error instanceof Error ? error.message : String(error) }`);
 		}
 	}
 
@@ -851,6 +910,7 @@ export class SessionController {
 			this.state.projectContext = new ProjectContext(key, project, adapter, name);
 			this.state.currentSheetNode = project.mainSchematic ?? null;
 			this.dom.saveProjectButton.disabled = false;
+			this.dom.exportProjectZipButton.disabled = false;
 			void this.registry.upsertProject({
 				id: key, name, kind: 'browser', proFile: `${ name }.kicad_pro`,
 				lastOpenedAt: Date.now(), sheetCount: project.mainSchematic ? this.countSheetsRecursive(project.mainSchematic) : undefined
@@ -907,6 +967,7 @@ export class SessionController {
 			this.state.projectContext = new ProjectContext(key, project, fsAdapter, file.name);
 			this.state.currentSheetNode = project.mainSchematic;
 			this.dom.saveProjectButton.disabled = false;
+			this.dom.exportProjectZipButton.disabled = false;
 			const sheetCount = this.countSheetsRecursive(project.mainSchematic);
 			void this.registry.upsertProject({ id: key, name: file.name, kind: 'imported', proFile, lastOpenedAt: Date.now(), sheetCount });
 			const loaded = await this.loadText(project.mainSchematic.data, 'schematic', project.mainSchematic.path);
@@ -919,6 +980,7 @@ export class SessionController {
 			this.state.projectContext = null;
 			this.state.currentSheetNode = null;
 			this.dom.saveProjectButton.disabled = true;
+			this.dom.exportProjectZipButton.disabled = true;
 			this.statusBar.setStatus(
 				`Could not import zip — ${ error instanceof Error ? error.message : String(error) }`);
 			return null;

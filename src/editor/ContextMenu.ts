@@ -62,8 +62,8 @@ export interface BoardContextMenuBuildOptions {
 		setLocked: (session: KicadRenderSession, ids: string[], locked: boolean) => void;
 		/** Real KiCad's Shape Modification ▸ Create Corner (pcb_point_editor
 		 *  .cpp's addCorner) — `world` is where the new vertex should land,
-		 *  already resolved to the nearest point on the zone's own outline. */
-		createCorner: (session: KicadRenderSession, id: string, world: { x: number; y: number }) => void;
+		 *  already resolved to the nearest point on the selected outline. */
+		createCorner: (session: KicadRenderSession, id: string, world: { x: number; y: number }, refillZones: boolean) => void;
 	};
 }
 
@@ -199,8 +199,8 @@ export class ContextMenu {
 		items.push(this.item('Rotate', () => actions.rotate(session, singleId!), !isFootprint));
 		items.push(this.item('Flip', () => actions.flip(session, singleId!), !isFootprint));
 		items.push(this.separator());
-		if (singleId && singleItem?.kind === 'zone') {
-			items.push(this.buildShapeModificationSubmenu(session, singleId, options));
+		if (singleId && session.getBoardPolygonAnchors(singleId)) {
+			items.push(this.buildShapeModificationSubmenu(session, singleId, singleItem?.kind === 'zone', options));
 			items.push(this.separator());
 		}
 		const allLocked = selectedIds.every(id => session.isBoardElementLocked(id));
@@ -422,15 +422,15 @@ export class ContextMenu {
 	}
 
 	/** Real KiCad's board right-click ▸ Shape Modification submenu — only
-	 *  "Create Corner" is implemented here (this app's zone outline editor
+	 *  "Create Corner" is implemented here (this app's polygon point editor
 	 *  doesn't yet support Simplify Polygons/Chamfer Corner/Edit Corners…,
 	 *  the other items in real KiCad's version of this submenu), reached by
-	 *  a single selected zone. Inserts the new vertex at the point on the
-	 *  zone's own outline nearest the right-click that opened this menu —
-	 *  see KicadRenderSession.nearestZoneOutlineInsertion's doc comment for
+	 *  a single selected graphic polygon, copper zone, or rule area. Inserts
+	 *  the new vertex at the point on its outline nearest the right-click —
+	 *  see KicadRenderSession.nearestBoardPolygonInsertion's doc comment for
 	 *  why that's "nearest point on an edge", not "nearest existing vertex". */
 	protected buildShapeModificationSubmenu(
-		session: KicadRenderSession, zoneId: string, options: BoardContextMenuBuildOptions
+		session: KicadRenderSession, polygonId: string, refillZones: boolean, options: BoardContextMenuBuildOptions
 	): HTMLDivElement {
 		const wrap = document.createElement('div');
 		wrap.className = 'submenu-wrap';
@@ -446,7 +446,7 @@ export class ContextMenu {
 		submenu.className = 'submenu';
 		submenu.appendChild(this.item('Create Corner', () => {
 			const world = options.screenToWorld(options.pointer);
-			options.actions.createCorner(session, zoneId, world);
+			options.actions.createCorner(session, polygonId, world, refillZones);
 		}));
 		wrap.append(trigger, submenu);
 		return wrap;
