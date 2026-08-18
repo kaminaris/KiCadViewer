@@ -5,11 +5,12 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 	<title>KiOnline</title>
 	<link rel="stylesheet" href="/KiCadViewer/styles.css" />
-  <script type="module" crossorigin src="/KiCadViewer/assets/index-D0vMiE31.js"></script>
+  <script type="module" crossorigin src="/KiCadViewer/assets/index-Di2Iuves.js"></script>
 </head>
 <body>
 	<div class="screen" id="screen-home"></div>
 	<div class="screen hidden" id="screen-project"></div>
+	<div class="screen hidden" id="screen-symbol"></div>
 	<div class="screen hidden" id="screen-editor">
 	<header class="top">
 		<div class="top-title-row">
@@ -26,6 +27,7 @@
 					<div class="menu-divider"></div>
 					<button type="button" class="menu-command" data-action-target="btn-save-project">Save Project<span>Ctrl+S</span></button>
 					<button type="button" class="menu-command" data-action-target="btn-export-edit">Export Current Document…</button>
+					<button type="button" class="menu-command" data-action-target="btn-export-project-zip">Export Project (.zip)…</button>
 					<div class="menu-divider menu-board"></div>
 					<button type="button" class="menu-command menu-board" data-action-target="view-tab-project-settings">Board Setup…</button>
 				</div></div>
@@ -102,17 +104,21 @@
 					<button type="button" class="menu-command menu-schematic" data-tool="image">Image</button>
 					<button type="button" class="menu-command menu-schematic" data-tool="delete">Interactive Delete</button>
 					<button type="button" class="menu-command menu-board" data-board-command="place-via">Add Via</button>
-					<button type="button" class="menu-command menu-board" disabled>Add Filled Zone</button>
-					<button type="button" class="menu-command menu-board" disabled>Add Rule Area</button>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-zone">Add Filled Zone</button>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-rule-area">Add Rule Area</button>
 					<div class="menu-divider menu-board"></div>
 					<button type="button" class="menu-command menu-board" data-board-command="draw-line">Draw Line<span>L</span></button>
 					<button type="button" class="menu-command menu-board" data-board-command="draw-arc">Draw Arc<span>A</span></button>
 					<button type="button" class="menu-command menu-board" data-board-command="draw-rectangle">Draw Rectangle</button>
 					<button type="button" class="menu-command menu-board" data-board-command="draw-circle">Draw Circle<span>C</span></button>
 					<button type="button" class="menu-command menu-board" data-board-command="draw-polygon">Draw Polygon</button>
+					<button type="button" class="menu-command menu-board" data-board-command="draw-zone">Add Filled Zone</button>
 					<button type="button" class="menu-command menu-board" data-board-command="draw-bezier">Draw Bezier<span>B</span></button>
 					<button type="button" class="menu-command menu-board" data-board-command="place-text">Place Text<span>Ctrl+Shift+T</span></button>
 					<button type="button" class="menu-command menu-board" data-board-command="draw-text-box">Draw Text Box</button>
+					<button type="button" class="menu-command menu-board" data-board-command="place-barcode">Place Barcode</button>
+					<button type="button" class="menu-command menu-board" data-board-command="dimension-aligned">Add Aligned Dimension</button>
+					<button type="button" class="menu-command menu-board" data-board-command="dimension-orthogonal">Add Orthogonal Dimension</button>
 					<div class="menu-divider menu-board"></div>
 					<div class="menu-divider menu-board"></div>
 					<button type="button" class="menu-command menu-board" data-board-command="set-drill-origin">Drill/Place File Origin</button>
@@ -125,7 +131,7 @@
 					<button type="button" class="menu-command" disabled>Route Differential Pair</button>
 					<div class="menu-divider"></div>
 					<button type="button" class="menu-command" disabled>Length Tune</button>
-					<button type="button" class="menu-command" disabled>Router Settings…</button>
+					<button type="button" class="menu-command" data-action-target="btn-router-settings">Router Settings…</button>
 				</div></div>
 				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Inspect</button><div class="menu-popover">
 					<button type="button" class="menu-command menu-schematic" data-action-target="btn-highlight-net">Highlight Net</button>
@@ -137,13 +143,18 @@
 				</div></div>
 				<div class="menu-group menu-schematic"><button type="button" class="menu-trigger" aria-expanded="false">Tools</button><div class="menu-popover">
 					<button type="button" class="menu-command" data-action-target="btn-index-symbols">Manage Symbol Libraries…</button>
+					<button type="button" class="menu-command" data-action-target="btn-symbol-fields-table">Bulk Edit Symbol Fields…</button>
 				</div></div>
 				<div class="menu-group menu-board"><button type="button" class="menu-trigger" aria-expanded="false">Tools</button><div class="menu-popover">
-					<button type="button" class="menu-command" disabled>Update PCB from Schematic…</button>
+					<button type="button" class="menu-command" data-action-target="btn-index-footprints">Manage Footprint Libraries…</button>
+					<div class="menu-divider"></div>
+					<button type="button" class="menu-command" data-action-target="btn-update-pcb-from-schematic">Update PCB from Schematic…</button>
 					<button type="button" class="menu-command" disabled>Update Footprints from Library…</button>
 					<div class="menu-divider"></div>
 					<button type="button" class="menu-command" disabled>Zones Manager…</button>
-					<button type="button" class="menu-command" disabled>Cleanup Tracks and Vias…</button>
+					<button type="button" class="menu-command" data-board-command="cleanup-tracks">Cleanup Tracks and Vias…</button>
+					<div class="menu-divider"></div>
+					<button type="button" class="menu-command" data-board-command="recreate-pcb">Recreate PCB…</button>
 				</div></div>
 				<div class="menu-group"><button type="button" class="menu-trigger" aria-expanded="false">Preferences</button><div class="menu-popover">
 					<button type="button" class="menu-command" data-action-target="btn-preferences">Preferences…<span>Ctrl+,</span></button>
@@ -167,6 +178,7 @@
 				<button type="button" class="toolbar-button" id="btn-open-project" title="Open Project Folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8 H10 L12 10 H21 V19 H3 Z"/><path d="M12 12 V17 M9.5 14.5 L12 12 L14.5 14.5"/></svg></button>
 				<button type="button" class="toolbar-button" data-input-target="zip-input" title="Open Project Archive"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8 H10 L12 10 H21 V19 H3 Z"/><path d="M12 11 V17 M9 14 L12 17 L15 14"/></svg></button>
 				<button type="button" class="toolbar-button" id="btn-save-project" title="Save Project" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4 H17 L20 7 V20 H5 Z M8 4 V10 H16 V4 M8 20 V14 H17 V20"/></svg></button>
+				<button type="button" class="toolbar-button" id="btn-export-project-zip" title="Export Project (.zip)" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8 H10 L12 10 H21 V19 H3 Z"/><path d="M12 17 V11 M9 14 L12 11 L15 14"/></svg></button>
 			</div>
 			<div class="toolbar-divider" aria-hidden="true"></div>
 			<nav class="toolbar-section toolbar-view-switcher" aria-label="Editor views">
@@ -177,11 +189,44 @@
 			<div class="toolbar-divider" aria-hidden="true"></div>
 			<div class="toolbar-section hidden" id="edit-actions">
 				<button type="button" class="toolbar-button" id="btn-index-symbols" title="Manage Symbol Libraries"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5 H15 L20 10 V19 H4 Z M15 5 V10 H20"/><path d="M8 14 H16 M12 11 V17"/></svg></button>
+				<button type="button" class="toolbar-button" id="btn-index-footprints" title="Manage Footprint Libraries"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5 H19 V19 H5 Z M8 8 H16 V16 H8 Z"/><path d="M3 10 H5 M3 14 H5 M19 10 H21 M19 14 H21 M10 3 V5 M14 3 V5 M10 19 V21 M14 19 V21"/></svg></button>
 				<button type="button" class="toolbar-button" id="btn-export-edit" title="Export Schematic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4 H17 L20 7 V20 H5 Z M17 4 V8 H20"/><path d="M12 10 V17 M9 14 L12 17 L15 14"/></svg></button>
 			</div>
 			<input type="file" id="file-input" accept=".kicad_sch,.kicad_pcb,.kicad_pro" hidden />
 			<input type="file" id="zip-input" accept=".zip" hidden />
 			<input type="file" id="symbol-directory-input" webkitdirectory directory multiple hidden />
+			<input type="file" id="footprint-directory-input" accept=".kicad_mod" webkitdirectory directory multiple hidden />
+		</div>
+		<!-- PCB routing toolbar (real KiCad's TOP_AUX toolbar) — .menu-board
+			reuses the same document-kind visibility rule the menu bar's board-
+			only entries already use, hidden outside board mode. -->
+		<div class="board-aux-toolbar menu-board" role="toolbar" aria-label="PCB routing toolbar">
+			<label class="aux-select-group" for="aux-track-width">Track:
+				<select id="aux-track-width" title="Select the default width for new tracks. Can be overridden by the width of an existing track if 'Auto track width' is enabled.">
+					<option value="0" selected>use netclass width</option>
+				</select>
+			</label>
+			<button type="button" class="toolbar-button aux-toggle" id="aux-auto-track-width" title="Auto track width — continue at the width of the track you're connecting to instead of the selection above" aria-pressed="false">
+				<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12 H9 M15 12 H21"/><circle cx="12" cy="12" r="2.5"/></svg>
+			</button>
+			<div class="toolbar-divider" aria-hidden="true"></div>
+			<label class="aux-select-group" for="aux-via-size">Via:
+				<select id="aux-via-size" title="Select the diameter/drill for new vias">
+					<option value="0" selected>use netclass sizes</option>
+				</select>
+			</label>
+			<div class="toolbar-divider" aria-hidden="true"></div>
+			<label class="aux-select-group" for="aux-layer-select">Layer:
+				<select id="aux-layer-select" title="Active copper layer (+/- to switch)"></select>
+			</label>
+			<button type="button" class="toolbar-button" id="aux-layer-pair" title="Select Layer Pair — which two layers a new via spans" aria-haspopup="dialog">
+				<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8 L12 4 L19 8 L12 12 Z M5 12 L12 16 L19 12 M5 16 L12 20 L19 16"/></svg>
+			</button>
+			<div class="toolbar-divider" aria-hidden="true"></div>
+			<label class="aux-checkbox-group" title="Allow editing locked footprints/tracks/vias">
+				<input type="checkbox" id="aux-override-locks" />
+				Override locks
+			</label>
 		</div>
 		<!-- Circuit Layout (auto-place/auto-wire demo) is parked, not deleted —
 			no button reaches setMode('circuit') anymore, so this stays
@@ -212,6 +257,9 @@
 		<button type="button" id="btn-undo" hidden></button>
 		<button type="button" id="btn-redo" hidden></button>
 		<button type="button" id="btn-preferences" hidden></button>
+		<button type="button" id="btn-symbol-fields-table" hidden></button>
+		<button type="button" id="btn-update-pcb-from-schematic" hidden></button>
+		<button type="button" id="btn-router-settings" hidden></button>
 	</header>
 	<main>
 		<aside class="edit-left-pane" id="left-dock">
@@ -297,6 +345,9 @@
 			<button type="button" class="tool-btn" data-board-toggle="track-display" title="Sketch Tracks" aria-label="Sketch Tracks" aria-pressed="false">
 				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 17 L10 12 L14 15 L19 7"/><path d="M5 20 L10 15 L14 18 L19 10"/></svg>
 			</button>
+			<button type="button" class="tool-btn" data-board-toggle="corner-mode" title="Route Corner Mode: 45° Corners" aria-label="Route Corner Mode: 45° Corners" aria-pressed="false">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 19 L13 19 L19 13 L19 5"/></svg>
+			</button>
 
 			<div class="tool-sep"></div>
 
@@ -336,6 +387,11 @@
 					<div class="zone-fill-progress-track"><div class="zone-fill-progress-fill" id="symbol-index-progress-fill"></div></div>
 					<div class="zone-fill-progress-label" id="symbol-index-progress-label">Starting…</div>
 				</div>
+				<div class="table-modal zone-fill-progress-modal hidden" id="footprint-index-progress-modal">
+					<h3>Indexing Footprints…</h3>
+					<div class="zone-fill-progress-track"><div class="zone-fill-progress-fill" id="footprint-index-progress-fill"></div></div>
+					<div class="zone-fill-progress-label" id="footprint-index-progress-label">Starting…</div>
+				</div>
 			<div class="symbol-chooser hidden" id="symbol-chooser-modal" role="dialog" aria-modal="true" aria-labelledby="symbol-chooser-title">
 				<div class="symbol-chooser-header">
 					<h3 id="symbol-chooser-title">Choose Symbol</h3>
@@ -360,6 +416,113 @@
 					<button type="button" id="symbol-chooser-ok" class="primary">OK</button>
 				</div>
 			</div>
+				<div class="symbol-chooser hidden" id="footprint-chooser-modal" role="dialog" aria-modal="true" aria-labelledby="footprint-chooser-title">
+					<div class="symbol-chooser-header">
+						<h3 id="footprint-chooser-title">Choose Footprint</h3>
+						<button type="button" class="symbol-chooser-close" id="footprint-chooser-close" aria-label="Close">×</button>
+					</div>
+					<div class="symbol-chooser-search"><span aria-hidden="true">⌕</span><input id="footprint-chooser-filter" type="search" placeholder="Filter footprints…" autocomplete="off" /></div>
+					<div class="symbol-chooser-body">
+						<div class="symbol-chooser-list" id="footprint-chooser-list"></div>
+						<div class="symbol-chooser-preview">
+							<div class="symbol-preview-art" id="footprint-preview-art">
+								<canvas id="footprint-preview-canvas" class="hidden"></canvas>
+								<span id="footprint-preview-placeholder">Select a footprint to preview</span>
+							</div>
+							<div class="symbol-preview-details" id="footprint-preview-details"></div>
+						</div>
+					</div>
+					<div class="symbol-chooser-footer">
+						<label id="footprint-apply-filters-label"><input id="footprint-apply-filters" type="checkbox" /> Apply footprint filters <span id="footprint-apply-filters-count"></span></label>
+						<label id="footprint-filter-pin-count-label"><input id="footprint-filter-pin-count" type="checkbox" /> Filter by pin count <span id="footprint-filter-pin-count-count"></span></label>
+						<span class="symbol-chooser-spacer"></span>
+						<button type="button" id="footprint-chooser-cancel">Cancel</button>
+						<button type="button" id="footprint-chooser-ok" class="primary">OK</button>
+					</div>
+				</div>
+				<div class="sft-modal hidden" id="symbol-fields-table-modal" role="dialog" aria-modal="true" aria-labelledby="sft-title">
+					<div class="sft-header">
+						<h3 id="sft-title">Bulk Edit Symbol Fields</h3>
+						<button type="button" class="symbol-chooser-close" id="sft-close" aria-label="Close">×</button>
+					</div>
+					<div class="sft-body">
+						<div class="sft-left-panel">
+							<div class="sft-field-list-header">
+								<span>Field</span><span>Incl.</span><span>Group…</span><span></span>
+							</div>
+							<div class="sft-field-list" id="sft-field-list"></div>
+							<button type="button" class="kd-btn" id="sft-add-field">+ Add Field</button>
+						</div>
+						<div class="sft-right-panel">
+							<div class="sft-tabs">
+								<button type="button" class="sft-tab active" id="sft-tab-edit">Edit</button>
+								<button type="button" class="sft-tab" id="sft-tab-export">Export</button>
+							</div>
+							<div class="sft-toolbar">
+								<input id="sft-filter" type="search" placeholder="Filter…" autocomplete="off" />
+								<select id="sft-scope">
+									<option value="project">Entire Project</option>
+									<option value="sheet">Current Sheet</option>
+								</select>
+								<label><input id="sft-group-symbols" type="checkbox" checked /> Group symbols</label>
+							</div>
+							<div class="sft-panel" id="sft-panel-edit">
+								<div class="sft-grid-wrap" id="sft-grid-wrap"></div>
+							</div>
+							<div class="sft-panel hidden" id="sft-panel-export">
+								<div class="sft-export-summary" id="sft-export-summary"></div>
+							</div>
+						</div>
+					</div>
+					<div class="sft-footer">
+						<button type="button" id="sft-export" disabled>Export</button>
+						<span class="symbol-chooser-spacer"></span>
+						<button type="button" id="sft-apply">Apply, Save Schematic &amp; Continue</button>
+						<button type="button" id="sft-ok" class="primary">OK</button>
+						<button type="button" id="sft-cancel">Cancel</button>
+					</div>
+				</div>
+				<div class="sft-modal hidden" id="update-pcb-modal" role="dialog" aria-modal="true" aria-labelledby="upd-title">
+					<div class="sft-header">
+						<h3 id="upd-title">Update PCB from Schematic</h3>
+						<button type="button" class="symbol-chooser-close" id="upd-close" aria-label="Close">×</button>
+					</div>
+					<div class="upd-body">
+						<div class="upd-section">
+							<div class="upd-section-title">Options</div>
+							<label class="upd-check-row"><input id="upd-opt-relink" type="checkbox" checked disabled /> Re-link footprints to schematic symbols based on their reference designators</label>
+							<label class="upd-check-row"><input id="upd-opt-group" type="checkbox" disabled /> Group footprints based on symbol group</label>
+							<label class="upd-check-row upd-check-row-muted"><input id="upd-opt-design-blocks" type="checkbox" disabled /> Apply design block layouts to new groups</label>
+						</div>
+						<div class="upd-section">
+							<div class="upd-section-title">Update Footprints</div>
+							<label class="upd-check-row"><input id="upd-opt-replace" type="checkbox" checked /> Replace footprints with those specified by symbols</label>
+							<label class="upd-check-row"><input id="upd-opt-delete" type="checkbox" checked /> Delete footprints with no symbols</label>
+							<label class="upd-check-row"><input id="upd-opt-override-locks" type="checkbox" checked /> Override locks</label>
+						</div>
+						<div class="upd-section">
+							<div class="upd-section-title">Update Fields</div>
+							<label class="upd-check-row"><input id="upd-opt-update-fields" type="checkbox" checked /> Update footprint fields from symbols</label>
+							<label class="upd-check-row"><input id="upd-opt-remove-fields" type="checkbox" /> Remove footprint fields not found in symbols</label>
+						</div>
+						<div class="upd-section upd-section-report">
+							<div class="upd-section-title">Changes to Be Applied</div>
+							<div class="upd-report" id="upd-report"></div>
+						</div>
+					</div>
+					<div class="upd-filters">
+						<label><input id="upd-filter-errors" type="checkbox" checked /> Errors <span class="upd-count upd-count-error" id="upd-count-errors">0</span></label>
+						<label><input id="upd-filter-warnings" type="checkbox" checked /> Warnings <span class="upd-count upd-count-warning" id="upd-count-warnings">0</span></label>
+						<label><input id="upd-filter-actions" type="checkbox" checked /> Actions <span class="upd-count upd-count-action" id="upd-count-actions">0</span></label>
+						<label><input id="upd-filter-infos" type="checkbox" checked /> Infos <span class="upd-count upd-count-info" id="upd-count-infos">0</span></label>
+					</div>
+					<div class="sft-footer">
+						<button type="button" id="upd-save">Save…</button>
+						<span class="symbol-chooser-spacer"></span>
+						<button type="button" id="upd-apply" class="primary" disabled>Update PCB</button>
+						<button type="button" id="upd-close-btn">Close</button>
+					</div>
+				</div>
 				<div class="context-menu hidden" id="context-menu"></div>
 		</div>
 		<aside class="tool-panel hidden" id="tool-panel">
@@ -449,10 +612,10 @@
 			<button type="button" class="tool-btn" disabled title="Tune Track Length — coming after basic routing">
 				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 14 H8 C9 14 9 8 11 8 S13 20 15 20 S16 12 18 12 H20"/></svg>
 			</button>
-			<button type="button" class="tool-btn" disabled title="Add Filled Zone — coming after board editing">
+			<button type="button" class="tool-btn" data-tool="zone" title="Add Filled Zone">
 				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 5 H19 V19 H5 Z M7 17 L17 7 M7 12 L12 7 M12 17 L17 12"/></svg>
 			</button>
-			<button type="button" class="tool-btn" disabled title="Add Rule Area — coming after board editing">
+			<button type="button" class="tool-btn" data-tool="rule-area" title="Add Rule Area">
 				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" stroke-dasharray="3 2"/></svg>
 			</button>
 			<div class="tool-sep"></div>
@@ -480,6 +643,19 @@
 			</button>
 			<button type="button" class="tool-btn" data-tool="text-box" title="Draw Text Box">
 				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="4.5" y="5" width="15" height="14"/><path d="M8 9 H16 M12 9 V15 M9.5 15 H14.5"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="barcode" title="Place Barcode">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 5V19 M7 5V19 M9 5V19 M13 5V19 M16 5V19 M20 5V19"/><path d="M3 3H21V21H3Z"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="image" title="Place Image">
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17 L10 12 L14 15 L20 10 V19 H4 Z"/></svg>
+			</button>
+			<div class="tool-sep"></div>
+			<button type="button" class="tool-btn" data-tool="dimension-aligned" title="Add Aligned Dimension">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 6 L8 9 M5 6 L8 3 M5 6 V19 M19 6 L16 9 M19 6 L16 3 M19 6 V19 M5 16 H19"/><path d="M9 13 H15"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="dimension-orthogonal" title="Add Orthogonal Dimension">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 5 H19 M5 5 L8 2 M5 5 L8 8 M19 5 L16 2 M19 5 L16 8 M5 5 V19 M19 5 V19 M8 15 H16"/></svg>
 			</button>
 		</aside>
 		<aside class="board-appearance hidden" id="board-appearance" aria-label="PCB appearance"></aside>
