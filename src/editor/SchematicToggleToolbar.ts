@@ -13,6 +13,8 @@ export interface SchematicToggleToolbarCallbacks {
 	setHiddenPinsVisible(visible: boolean): void;
 	getLineMode(): SchLineMode;
 	cycleLineMode(): void;
+	getAnnotateAutomatically(): boolean;
+	setAnnotateAutomatically(enabled: boolean): void;
 	getPropertiesVisible(): boolean;
 	setPropertiesVisible(visible: boolean): void;
 	getHierarchyVisible(): boolean;
@@ -38,11 +40,11 @@ const LINE_MODE_LABELS: Record<SchLineMode, string> = {
  *  `BoardToggleToolbar`'s exact shape — grid/units/crosshair reuse the
  *  SAME session-level mechanisms pcbnew's own toolbar already wired (real
  *  KiCad shares `EDA_UNITS`/`CROSS_HAIR_MODE` across every editor frame),
- *  so no new engine state was needed for those three. Grid Overrides/
- *  Annotate Automatically remain intentionally disabled stub buttons in
- *  the markup for now — same "build the shell, wire behavior later"
- *  pattern `BoardToggleToolbar`'s own still-stubbed buttons (Grid
- *  Overrides, Line Modes) already established. */
+ *  so no new engine state was needed for those three. Grid Overrides
+ *  remains an intentionally disabled stub button in the markup for now —
+ *  same "build the shell, wire behavior later" pattern `BoardToggleToolbar`'s
+ *  own still-stubbed buttons (Grid Overrides, Line Modes) already
+ *  established. */
 export class SchematicToggleToolbar {
 	protected readonly gridButton = document.querySelector<HTMLButtonElement>(
 		'#schematic-toggle-panel [data-sch-toggle="grid"]');
@@ -54,6 +56,8 @@ export class SchematicToggleToolbar {
 		'#schematic-toggle-panel [data-sch-toggle="hidden-pins"]');
 	protected readonly lineModeButton = document.querySelector<HTMLButtonElement>(
 		'#schematic-toggle-panel [data-sch-toggle="line-mode"]');
+	protected readonly annotateButton = document.querySelector<HTMLButtonElement>(
+		'#schematic-toggle-panel [data-sch-toggle="annotate"]');
 	protected readonly propertiesButton = document.querySelector<HTMLButtonElement>(
 		'#schematic-toggle-panel [data-sch-toggle="properties"]');
 	protected readonly hierarchyButton = document.querySelector<HTMLButtonElement>(
@@ -80,6 +84,10 @@ export class SchematicToggleToolbar {
 			this.callbacks.cycleLineMode();
 			this.refresh();
 		});
+		this.annotateButton?.addEventListener('click', () => {
+			this.callbacks.setAnnotateAutomatically(!this.callbacks.getAnnotateAutomatically());
+			this.refresh();
+		});
 		this.propertiesButton?.addEventListener('click', () => {
 			this.callbacks.setPropertiesVisible(!this.callbacks.getPropertiesVisible());
 			this.refresh();
@@ -104,6 +112,7 @@ export class SchematicToggleToolbar {
 		this.setPressed(this.lineModeButton, lineMode !== '90');
 		this.lineModeButton?.setAttribute('title', `Line Mode: ${ LINE_MODE_LABELS[lineMode] }`);
 		this.lineModeButton?.setAttribute('aria-label', `Line Mode: ${ LINE_MODE_LABELS[lineMode] }`);
+		this.setPressed(this.annotateButton, this.callbacks.getAnnotateAutomatically());
 		this.setPressed(this.propertiesButton, this.callbacks.getPropertiesVisible());
 		this.setPressed(this.hierarchyButton, this.callbacks.getHierarchyVisible());
 	}

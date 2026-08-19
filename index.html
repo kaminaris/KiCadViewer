@@ -154,6 +154,7 @@
 				<div class="menu-group menu-schematic"><button type="button" class="menu-trigger" aria-expanded="false">Tools</button><div class="menu-popover">
 					<button type="button" class="menu-command" data-action-target="btn-index-symbols">Manage Symbol Libraries…</button>
 					<button type="button" class="menu-command" data-action-target="btn-symbol-fields-table">Bulk Edit Symbol Fields…</button>
+					<button type="button" class="menu-command" data-action-target="btn-annotate-schematic">Annotate Schematic…</button>
 				</div></div>
 				<div class="menu-group menu-board"><button type="button" class="menu-trigger" aria-expanded="false">Tools</button><div class="menu-popover">
 					<button type="button" class="menu-command" data-action-target="btn-index-footprints">Manage Footprint Libraries…</button>
@@ -290,6 +291,7 @@
 		<button type="button" id="btn-redo" hidden></button>
 		<button type="button" id="btn-preferences" hidden></button>
 		<button type="button" id="btn-symbol-fields-table" hidden></button>
+		<button type="button" id="btn-annotate-schematic" hidden></button>
 		<button type="button" id="btn-update-pcb-from-schematic" hidden></button>
 		<button type="button" id="btn-router-settings" hidden></button>
 	</header>
@@ -351,7 +353,7 @@
 
 			<div class="tool-sep"></div>
 
-			<button type="button" class="tool-btn" disabled title="Annotate Automatically — not yet implemented" aria-label="Annotate Automatically">
+			<button type="button" class="tool-btn active" data-sch-toggle="annotate" title="Annotate Automatically" aria-label="Annotate Automatically" aria-pressed="true">
 				<svg class="tool-icon" viewBox="0 0 24 24"><circle cx="5" cy="6" r="1.3" fill="currentColor" stroke="none"/><path d="M9 6 H19"/><circle cx="5" cy="12" r="1.3" fill="currentColor" stroke="none"/><path d="M9 12 H19"/><circle cx="5" cy="18" r="1.3" fill="currentColor" stroke="none"/><path d="M9 18 H19"/></svg>
 			</button>
 			<button type="button" class="tool-btn" data-sch-toggle="hierarchy" title="Hierarchy Navigator" aria-label="Hierarchy Navigator" aria-pressed="false">

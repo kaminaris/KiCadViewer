@@ -1034,6 +1034,21 @@ const symbolFieldsTable = new SymbolFieldsTable({
 	openFootprintChooser: context => footprintChooser.open(context)
 });
 dom.symbolFieldsTableButton.addEventListener('click', () => symbolFieldsTable.open());
+dom.annotateSchematicButton.addEventListener('click', () => {
+	const session = doc.session;
+	if (!session) {
+		return;
+	}
+	const count = session.annotateSchematic();
+	if (count > 0) {
+		appState.refreshSchematicText(session);
+		updateUndoStackPane();
+		setStatus(`Annotated ${ count } symbol${ count === 1 ? '' : 's' }.`);
+	}
+	else {
+		setStatus('Nothing to annotate — every symbol already has a reference.');
+	}
+});
 
 const updatePcbFromSchematic = new UpdatePcbFromSchematic(footprintLibraryCache, {
 	setStatus,

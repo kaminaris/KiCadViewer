@@ -449,6 +449,12 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 			const label = next === '90' ? '90 degree' : next === '45' ? '45 degree' : 'free angle';
 			options.setStatus(`Line mode: ${ label }.`);
 		},
+		getAnnotateAutomatically: () => options.doc.schAnnotateAutomatically,
+		setAnnotateAutomatically: enabled => {
+			options.doc.schAnnotateAutomatically = enabled;
+			options.getSession()?.setAnnotateAutomatically(enabled);
+			options.setStatus(`Annotate automatically ${ enabled ? 'on' : 'off' }.`);
+		},
 		getPropertiesVisible: () => !schematicPropertiesPaneEl?.classList.contains('hidden'),
 		setPropertiesVisible: visible => {
 			schematicPropertiesPaneEl?.classList.toggle('hidden', !visible);

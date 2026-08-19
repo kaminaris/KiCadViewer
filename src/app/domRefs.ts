@@ -105,6 +105,7 @@ export interface MainDomRefs {
 	redoButton: HTMLButtonElement;
 	preferencesButton: HTMLButtonElement;
 	symbolFieldsTableButton: HTMLButtonElement;
+	annotateSchematicButton: HTMLButtonElement;
 	updatePcbFromSchematicButton: HTMLButtonElement;
 	routerSettingsButton: HTMLButtonElement;
 	propertiesModalCloseButton: HTMLElement | null;
@@ -196,6 +197,7 @@ export function createMainDomRefs(): MainDomRefs {
 		redoButton: requiredById<HTMLButtonElement>('btn-redo'),
 		preferencesButton: requiredById<HTMLButtonElement>('btn-preferences'),
 		symbolFieldsTableButton: requiredById<HTMLButtonElement>('btn-symbol-fields-table'),
+		annotateSchematicButton: requiredById<HTMLButtonElement>('btn-annotate-schematic'),
 		updatePcbFromSchematicButton: requiredById<HTMLButtonElement>('btn-update-pcb-from-schematic'),
 		routerSettingsButton: requiredById<HTMLButtonElement>('btn-router-settings'),
 		propertiesModalCloseButton: optionalById<HTMLElement>('properties-modal-close'),
