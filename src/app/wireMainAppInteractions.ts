@@ -23,6 +23,8 @@ import { PointerController }                                             from '.
 import { BoardPointerController }                                       from '../editor/BoardPointerController';
 import { BoardToolbar }                                                 from '../editor/BoardToolbar';
 import { BoardToggleToolbar }                                           from '../editor/BoardToggleToolbar';
+import { SchematicToggleToolbar }                                       from '../editor/SchematicToggleToolbar';
+import type { HierarchyPanel }                                          from '../ui/HierarchyPanel';
 import { ContextMenuController }                                         from '../editor/ContextMenuController';
 import { runZoneFillJobs }                                               from '../worker/zoneFillClient';
 import type { MainDomRefs }                                              from './domRefs';
@@ -48,6 +50,7 @@ export interface WireMainAppInteractionsOptions {
 	propertiesController: PropertiesController;
 	toolStateController: ToolStateController;
 	sessionController: SessionController;
+	hierarchyPanel: HierarchyPanel;
 
 	getSession(): KicadRenderSession | null;
 
@@ -220,6 +223,8 @@ export interface WireMainAppInteractionsOptions {
 }
 
 export function wireMainAppInteractions(options: WireMainAppInteractionsOptions): void {
+	const schematicPropertiesPaneEl = options.dom.editPropertiesEl.closest<HTMLElement>('.edit-pane');
+
 	// Inspector controls must be interaction islands — pointer events must not
 	// bubble to canvas drag-tracking listeners.
 	for (const eventName of ['pointerdown', 'pointerup', 'pointermove', 'mousedown', 'mouseup', 'click', 'dblclick']) {
@@ -417,6 +422,44 @@ export function wireMainAppInteractions(options: WireMainAppInteractionsOptions)
 		showTableEditModal: id => options.textInputFlow.showTableEditor(id),
 		showPropertiesModal: id => options.propertiesController.showPropertiesModal(id),
 		descendIntoSheetAtScreen: screenPos => options.sessionController.descendIntoSheetAtScreen(screenPos)
+	});
+
+	new SchematicToggleToolbar({
+		getGridVisible: () => options.doc.schGridVisible,
+		setGridVisible: visible => {
+			options.doc.schGridVisible = visible;
+			options.getSession()?.setGridVisible(visible);
+			options.setStatus(`Grid ${ visible ? 'shown' : 'hidden' }.`);
+		},
+		getDisplayUnit: options.getBoardDisplayUnit,
+		setDisplayUnit: options.setBoardDisplayUnit,
+		getCrosshairMode: options.getBoardCrosshairMode,
+		cycleCrosshairMode: options.cycleBoardCrosshairMode,
+		getHiddenPinsVisible: () => options.getSession()?.hiddenPinsVisible ?? false,
+		setHiddenPinsVisible: visible => {
+			options.getSession()?.setHiddenPinsVisible(visible);
+			options.setStatus(`Hidden pins ${ visible ? 'shown' : 'hidden' }.`);
+		},
+		getLineMode: () => options.doc.schLineMode,
+		cycleLineMode: () => {
+			const order = ['90', '45', 'free'] as const;
+			const next = order[(order.indexOf(options.doc.schLineMode) + 1) % order.length]!;
+			options.doc.schLineMode = next;
+			options.getSession()?.setLineMode(next);
+			const label = next === '90' ? '90 degree' : next === '45' ? '45 degree' : 'free angle';
+			options.setStatus(`Line mode: ${ label }.`);
+		},
+		getPropertiesVisible: () => !schematicPropertiesPaneEl?.classList.contains('hidden'),
+		setPropertiesVisible: visible => {
+			schematicPropertiesPaneEl?.classList.toggle('hidden', !visible);
+		},
+		getHierarchyVisible: () => !options.dom.editHierarchyPaneEl.classList.contains('hidden'),
+		setHierarchyVisible: visible => {
+			options.dom.editHierarchyPaneEl.classList.toggle('hidden', !visible);
+			if (visible) {
+				options.hierarchyPanel.refresh();
+			}
+		}
 	});
 
 	let boardToolbar: BoardToolbar;

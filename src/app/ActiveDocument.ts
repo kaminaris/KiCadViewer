@@ -1,4 +1,6 @@
-import type { KicadRenderSession, KicadGlobalLabelShape, KicadDirectiveLabelShape } from '@kicad-render/KicadRenderSession';
+import type {
+	KicadRenderSession, KicadGlobalLabelShape, KicadDirectiveLabelShape, SchLineMode
+} from '@kicad-render/KicadRenderSession';
 import { Vec2 }                                                                     from '@kicad-render/math/Vec2';
 import type { CircuitDesignRecipe, CircuitPlacement, LockedNetlist }               from '@kicad-layout/index';
 import type { KicadSchematic }                                                     from '@kicad-io/Project/KicadSchematic';
@@ -9,8 +11,23 @@ import type { ProjectContext }                                                  
 
 /** 'circuit-demo' was dropped — real KiCad has no such document type, and it
  *  only ever existed here as an in-page-tab-strip label (see
- *  harmonic-munching-trinket plan's Phase 0); nothing branches on it. */
-export type DocumentKind = 'schematic' | 'board';
+ *  harmonic-munching-trinket plan's Phase 0); nothing branches on it.
+ *  'symbol' is the standalone symbol editor — unlike 'schematic'/'board' it
+ *  never flows through SessionController's view/edit/circuit AppMode state
+ *  machine or ProjectContext-backed sheet loading; it drives `#screen-
+ *  editor`'s shared chrome (menu bar/toolbar/tool-panel/left-dock/status
+ *  bar) directly from MainApp's route handling instead. See the harmonic-
+ *  munching-trinket plan's "Real Symbol Editor" write-up for the full
+ *  design. */
+export type DocumentKind = 'schematic' | 'board' | 'symbol';
+
+/** ActiveDocument's own `kind` field is narrower than the full DocumentKind
+ *  — the schematic/PCB session it represents never becomes 'symbol' (see
+ *  DocumentKind's own doc comment: symbol editing bypasses ActiveDocument/
+ *  SessionController entirely). Kept as a distinct type, not a cast at
+ *  every call site, so `doc.kind`-typed code stays honestly narrower than
+ *  Router's screen-level `EditorView`. */
+export type SessionDocumentKind = Exclude<DocumentKind, 'symbol'>;
 
 /** Interactive router mode — mirrors real KiCad's PNS_MODE
  *  (pns_routing_settings.h): 'highlight' (RM_MarkObstacles) never auto-
@@ -66,7 +83,7 @@ export function defaultRouterSettings(): RouterSettings {
  *  that used to be MainApp.ts module-level `let`s, with nothing left to
  *  multiplex between. */
 export class ActiveDocument {
-	kind: DocumentKind = 'schematic';
+	kind: SessionDocumentKind = 'schematic';
 
 	session: KicadRenderSession | null = null;
 	mode: AppMode = 'view';
@@ -74,6 +91,23 @@ export class ActiveDocument {
 	highlightNetEnabled = false;
 	activeBoardLayer = 'F.Cu';
 	boardGridVisible = true;
+	/** Schematic-side counterpart to boardGridVisible — grid visibility used
+	 *  to be unconditionally on for schematic (hardcoded in the two
+	 *  `setGridVisible` call sites this flag now feeds), matching real
+	 *  KiCad's eeschema having its own independent "Show Grid" toggle
+	 *  (`ACTIONS::toggleGrid`) distinct from pcbnew's. Defaults true so
+	 *  introducing this flag is a no-op until the toggle button is used. */
+	schGridVisible = true;
+	/** Real KiCad's eeschema "Line Mode" toolbar toggle (`LINE_MODE`) —
+	 *  see `computeWireBend`'s doc comment for what each mode does.
+	 *  Defaults '90' to match real KiCad's own default, and this app's own
+	 *  prior hardcoded-90-only behavior. */
+	schLineMode: SchLineMode = '90';
+	/** Real KiCad's eeschema "Annotate Automatically" toolbar toggle
+	 *  (`EESCHEMA_SETTINGS::m_AnnotatePanel.automatic`) — see
+	 *  `KicadRenderSession.setAnnotateAutomatically`'s doc comment. Defaults
+	 *  true to match this app's own long-standing placement behavior. */
+	schAnnotateAutomatically = true;
 	boardPolarCoordinates = false;
 	boardAppearanceVisible = true;
 	boardTool: BoardTool = 'select';

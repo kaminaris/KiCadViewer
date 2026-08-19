@@ -1,4 +1,5 @@
 import { KicadRenderSession }                                           from '@kicad-render/KicadRenderSession';
+import type { SchLineMode }                                             from '@kicad-render/KicadRenderSession';
 import type { Vec2 }                                                    from '@kicad-render/math/Vec2';
 import type { SchematicDocInfo }                                        from '@kicad-render/paint/SchematicPainter';
 import {
@@ -20,7 +21,7 @@ import { ProjectRegistry }                                              from './
 import type { ProjectStore }                                            from './ProjectStore';
 import { SyncedProjectStore }                                           from './SyncedProjectStore';
 import { createProjectSyncTransport }                                   from './transport/createProjectSyncTransport';
-import type { DocumentKind }                                            from './ActiveDocument';
+import type { SessionDocumentKind }                                     from './ActiveDocument';
 import type { AppMode }                                                 from './AppState';
 import type { AppState }                                                from './AppState';
 import type { Settings }                                                from './Settings';
@@ -35,7 +36,7 @@ import { openNewProjectDialog }                                         from '..
  * passes its one ActiveDocument instance here directly; TypeScript's
  * structural typing accepts it with no adapter code needed. */
 export interface SessionControllerState {
-	kind: DocumentKind;
+	kind: SessionDocumentKind;
 	mode: AppMode;
 	circuitDragMode: boolean;
 	session: KicadRenderSession | null;
@@ -43,6 +44,9 @@ export interface SessionControllerState {
 	placements: CircuitPlacement[];
 	placedFragment: string;
 	boardGridVisible: boolean;
+	schGridVisible: boolean;
+	schLineMode: SchLineMode;
+	schAnnotateAutomatically: boolean;
 	boardAppearanceVisible: boolean;
 	selectedRef: string | null;
 	editSelectedId: string | null;
@@ -234,7 +238,10 @@ export class SessionController {
 				error instanceof Error ? error.message : String(error));
 			this.state.session.onRender = () => this.statusBar.recordRender();
 			this.state.session.setGridSpacing(this.settings.gridSpacingFor(this.state.kind));
-			this.state.session.setGridVisible(this.state.kind !== 'board' || this.state.boardGridVisible);
+			this.state.session.setGridVisible(
+				this.state.kind === 'board' ? this.state.boardGridVisible : this.state.schGridVisible);
+			this.state.session.setLineMode(this.state.schLineMode);
+			this.state.session.setAnnotateAutomatically(this.state.schAnnotateAutomatically);
 			if (!this.state.session.hasWebGL) {
 				// WebGL context creation failed (disabled GPU, headless
 				// environment, etc.) — the session already fell back to
@@ -330,6 +337,7 @@ export class SessionController {
 		this.dom.indexSymbolsButton.classList.toggle('hidden', board);
 		this.dom.exportEditButton.title = board ? 'Export PCB' : 'Export Schematic';
 		this.dom.toolPanel.classList.toggle('hidden', next !== 'edit' || board);
+		this.dom.schematicTogglePanel.classList.toggle('hidden', next !== 'edit' || board);
 		this.dom.boardTogglePanel.classList.toggle('hidden', !board);
 		this.dom.boardToolPanel.classList.toggle('hidden', !board);
 		this.dom.boardAppearanceEl.classList.toggle('hidden', !board || !this.state.boardAppearanceVisible);
@@ -655,7 +663,7 @@ export class SessionController {
 	 * tab of this origin already has access to it), so multi-tab support for
 	 * either is actually MORE robust than for a folder one.
 	 */
-	async openFromRegistryRoute(projectId: string, view: DocumentKind, sheetPath: string | null): Promise<void> {
+	async openFromRegistryRoute(projectId: string, view: SessionDocumentKind, sheetPath: string | null): Promise<void> {
 		if (this.state.projectContext?.key !== projectId) {
 			const record = await this.registry.getProject(projectId);
 			if (!record) {

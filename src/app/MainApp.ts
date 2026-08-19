@@ -23,8 +23,10 @@ import { Router, type EditorView, type Route }                              from
 import { HomeScreen }                                                       from '../ui/HomeScreen';
 import { ProjectOverviewScreen }                                            from '../ui/ProjectOverviewScreen';
 import { SymbolEditorScreen }                                               from '../ui/SymbolEditorScreen';
+import { EditorChrome }                                                     from '../ui/EditorChrome';
 import { PreferencesDialog }                                                 from '../ui/PreferencesDialog';
 import { BoardAppearancePanel }                                              from '../ui/BoardAppearancePanel';
+import { HierarchyPanel }                                                    from '../ui/HierarchyPanel';
 import { SymbolChooser }                                                    from '../ui/SymbolChooser';
 import {
 	Toolbar,
@@ -94,6 +96,7 @@ applySchematicTheme(settings.current.schematicTheme, settings.current.schematicC
 document.documentElement.dataset.theme = settings.current.theme;
 document.documentElement.dataset.toolbarIconSize = settings.current.toolbarIconSize;
 const dom = createMainDomRefs();
+const editorChrome = new EditorChrome(dom.screenEditorEl);
 new MenuBar(document.getElementById('main-menu-bar') as HTMLElement);
 wireToolbarCommandForwarding();
 
@@ -201,11 +204,13 @@ let propertiesController: PropertiesController;
 let toolStateController: ToolStateController;
 let boardAppearance: BoardAppearancePanel | null = null;
 let boardAuxToolbar: BoardAuxToolbar | null = null;
+let hierarchyPanel: HierarchyPanel;
 
 function updateEditSidebar(): void {
 	propertiesController.updateEditSidebar();
 	boardAppearance?.refresh();
 	boardAuxToolbar?.refresh();
+	hierarchyPanel.refresh();
 }
 
 function updateUndoStackPane(): void { propertiesController.updateUndoStackPane(); }
@@ -249,7 +254,7 @@ function syncActiveGrid(): void {
 	dom.gridSelectEl.title = board ? 'PCB grid spacing' : 'Schematic grid spacing';
 	dom.gridSelectEl.value = String(spacing);
 	doc.session?.setGridSpacing(spacing);
-	doc.session?.setGridVisible(doc.kind !== 'board' || doc.boardGridVisible);
+	doc.session?.setGridVisible(doc.kind === 'board' ? doc.boardGridVisible : doc.schGridVisible);
 	statusBar.setPolarCoordinates(doc.kind === 'board' && doc.boardPolarCoordinates);
 }
 
@@ -512,6 +517,14 @@ boardAppearance = new BoardAppearancePanel(dom.boardAppearanceEl, {
 			setStatus('Saved appearance settings.');
 		}
 		catch (err) { setStatus('Could not persist appearance settings.'); }
+	}
+});
+
+hierarchyPanel = new HierarchyPanel(dom.editHierarchyEl, {
+	getRootSheet: () => doc.projectContext?.project.mainSchematic ?? null,
+	getCurrentSheet: () => doc.currentSheetNode,
+	navigateToSheet: node => {
+		void sessionController.navigateToSheet(node).then(() => hierarchyPanel.refresh());
 	}
 });
 
@@ -826,12 +839,11 @@ function updateBreadcrumb(): void {
 	}
 	dom.breadcrumbEl.classList.remove('hidden');
 	dom.viewTabsEl.classList.remove('hidden');
-	dom.breadcrumbProjectEl.textContent = projectContext.rootName;
-	dom.breadcrumbSheetEl.textContent = activeEditorView === 'project-settings'
+	editorChrome.setBreadcrumb(projectContext.rootName, activeEditorView === 'project-settings'
 		? 'Project Setup'
 		: doc.kind === 'board'
 		? 'PCB'
-		: (doc.currentSheetNode?.name || projectContext.rootName);
+		: (doc.currentSheetNode?.name || projectContext.rootName));
 	updateDirtyIndicators();
 	dom.viewTabSchematicBtn.classList.toggle('active', activeEditorView === 'schematic');
 	dom.viewTabBoardBtn.classList.toggle('active', activeEditorView === 'board');
@@ -851,10 +863,10 @@ function updateDirtyIndicators(): void {
 			? 'PCB'
 			: (doc.currentSheetNode?.name || doc.projectContext?.rootName || 'Schematic');
 	const modified = (schematicViewActive && schematicDirty) || (boardViewActive && boardDirty);
-	dom.breadcrumbSheetEl.classList.toggle('modified', modified);
-	dom.breadcrumbSheetEl.textContent = modified
+	editorChrome.setModified(modified);
+	editorChrome.setSheet(modified
 		? `${ baseSheetLabel } *`
-		: baseSheetLabel;
+		: baseSheetLabel);
 	document.title = modified ? '* KiOnline' : 'KiOnline';
 }
 
@@ -1005,7 +1017,8 @@ window.addEventListener('keydown', event => {
 		preferencesDialog.open();
 		return;
 	}
-	if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && router.route.screen === 'symbol') {
+	if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && router.route.screen === 'editor'
+		&& router.route.view === 'symbol') {
 		event.preventDefault();
 		void symbolEditorScreen.save();
 	}
@@ -1126,6 +1139,7 @@ wireMainAppInteractions({
 	propertiesController,
 	toolStateController,
 	sessionController,
+	hierarchyPanel,
 	getSession: () => doc.session,
 	getMode: () => doc.mode,
 	getCircuitDragMode: () => doc.circuitDragMode,
@@ -1402,8 +1416,8 @@ async function confirmLeaveBoardEditor(): Promise<boolean> {
 
 function routeLeavesSymbolEditor(next: Route): boolean {
 	const current = router.route;
-	return current.screen === 'symbol'
-		&& next.screen !== 'symbol'
+	return current.screen === 'editor' && current.view === 'symbol'
+		&& !(next.screen === 'editor' && next.view === 'symbol')
 		&& symbolEditorScreen.isDirty;
 }
 
@@ -1440,6 +1454,18 @@ async function navigateWithGuards(route: Route, options?: { replace?: boolean })
 // e.g. a zip-opened project reached via a fresh tab, which can't silently
 // reopen itself the way a folder project can via requestPermission()).
 dom.brandHomeButton.addEventListener('click', () => {
+	const current = router.route;
+	// Symbol editing isn't backed by `doc`/ActiveDocument (see
+	// ActiveDocument.ts's DocumentKind doc comment) — its own project
+	// association lives on the route itself, matching the standalone
+	// back-navigation the old, separate `RouteSymbolEditor` screen used to
+	// have before it was folded into RouteEditor.
+	if (current.screen === 'editor' && current.view === 'symbol') {
+		void navigateWithGuards(current.projectId
+			? { screen: 'project', projectId: current.projectId }
+			: { screen: 'home' });
+		return;
+	}
 	void navigateWithGuards(doc.projectContext
 		? { screen: 'project', projectId: doc.projectContext.key }
 		: { screen: 'home' });
@@ -1563,30 +1589,69 @@ const projectOverviewScreen = new ProjectOverviewScreen(dom.screenProjectEl, reg
 		const params = new URLSearchParams({ project: projectId, view });
 		window.open(`${ window.location.pathname }?${ params.toString() }`, '_blank');
 	},
-	openSymbolEditor: projectId => { void navigateWithGuards({ screen: 'symbol', projectId, fileId: null }); },
+	openSymbolEditor: projectId => {
+		void navigateWithGuards({ screen: 'editor', projectId, view: 'symbol', sheet: null, symbolFileId: null });
+	},
 	back: () => { void navigateWithGuards({ screen: 'home' }); }
 });
 
-const symbolEditorScreen = new SymbolEditorScreen(dom.screenSymbolEl, symbolLibraryCache, {
-	saveFile: async (fileId, text) => {
-		await symbolLibraryCache.updateFileText(fileId, text);
+const symbolEditorScreen = new SymbolEditorScreen(
+	{
+		stage: dom.stage,
+		canvas: dom.symbolStageCanvas,
+		librariesEl: dom.editLibrariesEl,
+		propertiesEl: dom.editPropertiesEl,
+		saveButton: dom.symbolSaveButton,
+		revertButton: dom.symbolRevertButton,
+		toolPanel: dom.symbolToolPanel,
+		textInput: dom.symbolTextInput,
+		mirrorHButton: dom.symbolMirrorHButton,
+		mirrorVButton: dom.symbolMirrorVButton,
+		rotateCcwButton: dom.symbolRotateCcwButton,
+		rotateCwButton: dom.symbolRotateCwButton,
+		pinTableButton: dom.symbolPinTableButton,
+		propertiesButton: dom.symbolPropertiesButton,
+		unitSelect: dom.symbolUnitSelect,
+		propertiesDialog,
 	},
-	onBack: () => {
-		const current = router.route;
-		if (current.screen === 'symbol' && current.projectId) {
-			void navigateWithGuards({ screen: 'project', projectId: current.projectId });
-		}
-		else {
-			void navigateWithGuards({ screen: 'home' });
-		}
+	editorChrome,
+	symbolLibraryCache,
+	{
+		saveFile: async (fileId, text) => {
+			await symbolLibraryCache.updateFileText(fileId, text);
+		},
+		setStatus: message => statusBar.setStatus(message)
 	}
-});
+);
 
 function showScreen(name: Route['screen']): void {
 	dom.screenHomeEl.classList.toggle('hidden', name !== 'home');
 	dom.screenProjectEl.classList.toggle('hidden', name !== 'project');
-	dom.screenSymbolEl.classList.toggle('hidden', name !== 'symbol');
 	dom.screenEditorEl.classList.toggle('hidden', name !== 'editor');
+}
+
+/** Symbol editing shares `#screen-editor`'s chrome (menu bar/toolbar/tool-
+ *  panel/left-dock/status-bar) exactly like PCB already does, but it never
+ *  flows through SessionController's view/edit/circuit AppMode state
+ *  machine — SessionController.setMode() independently owns toolPanel/
+ *  boardToolPanel/boardTogglePanel/boardAppearanceEl/mainEl's edit-mode/
+ *  board-mode classes for the schematic/board/project-settings path (it
+ *  runs again on the very next schematic/board route via
+ *  openFromRegistryRoute), so deactivating here only needs to undo what
+ *  THIS function itself sets. */
+function applySymbolShell(active: boolean): void {
+	dom.mainEl.classList.toggle('symbol-mode', active);
+	dom.symbolToolPanel.classList.toggle('hidden', !active);
+	dom.symbolActionsEl.classList.toggle('hidden', !active);
+	dom.editLibrariesPaneEl.classList.toggle('hidden', !active);
+	dom.symbolStageCanvas.classList.toggle('hidden', !active);
+	if (active) {
+		dom.toolPanel.classList.add('hidden');
+		dom.boardToolPanel.classList.add('hidden');
+		dom.boardTogglePanel.classList.add('hidden');
+		dom.boardAppearanceEl.classList.add('hidden');
+		dom.mainEl.classList.remove('edit-mode', 'board-mode', 'board-appearance-hidden');
+	}
 }
 
 async function applyRoute(route: Route): Promise<void> {
@@ -1600,11 +1665,16 @@ async function applyRoute(route: Route): Promise<void> {
 		void projectOverviewScreen.load(route.projectId);
 		return;
 	}
-	if (route.screen === 'symbol') {
-		showScreen('symbol');
-		await symbolEditorScreen.open(route.fileId);
+	if (route.view === 'symbol') {
+		showScreen('editor');
+		activeEditorView = 'symbol';
+		dom.mainEl.classList.toggle('project-setup-mode', false);
+		dom.screenEditorEl.dataset.documentKind = 'symbol';
+		applySymbolShell(true);
+		await symbolEditorScreen.open(route.symbolFileId ?? null);
 		return;
 	}
+	applySymbolShell(false);
 	// .stage is display:none until this line runs, so resizeCanvas() here
 	// (before openFromRegistryRoute's own loadText → resizeCanvas call) is
 	// what gives the canvas its real dimensions instead of the 1×1 fallback
@@ -1634,7 +1704,7 @@ async function applyRoute(route: Route): Promise<void> {
 		else {
 			await sessionController.openFromRegistryRoute(
 				route.projectId,
-				route.view as Exclude<EditorView, 'project-settings'>,
+				route.view as Exclude<EditorView, 'project-settings' | 'symbol'>,
 				route.sheet);
 			updateBreadcrumb();
 		}

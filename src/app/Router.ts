@@ -16,27 +16,29 @@ export interface RouteEditor {
 	/** null = "scratch" editor — a single loose file opened with no project
 	 *  behind it (the pre-project-support `Open .kicad_sch / .kicad_pcb`
 	 *  entry point), reached from Home's "Open a single file" action so it
-	 *  stays usable without inventing a registry entry for it. */
+	 *  stays usable without inventing a registry entry for it. Also how a
+	 *  loose symbol library file (view === 'symbol') is opened outside a
+	 *  project. */
 	projectId: string | null;
 	view: EditorView;
 	sheet: string | null;
 	category?: string | null;
+	/** Which `.kicad_sym` library file is open when `view === 'symbol'` —
+	 *  the symbol-editor analog of `sheet`. Unused for every other view. */
+	symbolFileId?: string | null;
 }
 
-export interface RouteSymbolEditor {
-	screen: 'symbol';
-	projectId: string | null;
-	fileId: string | null;
-}
-
-export type Route = RouteHome | RouteProject | RouteEditor | RouteSymbolEditor;
+export type Route = RouteHome | RouteProject | RouteEditor;
 
 function parseRoute(search: string): Route {
 	const params = new URLSearchParams(search);
 	const projectId = params.get('project');
 	const view = params.get('view');
 	if (view === 'symbol') {
-		return { screen: 'symbol', projectId: projectId ?? null, fileId: params.get('symbol') ?? null };
+		return {
+			screen: 'editor', projectId: projectId ?? null, view: 'symbol', sheet: null,
+			symbolFileId: params.get('symbol') ?? null
+		};
 	}
 	if (!projectId) {
 		if (view === 'schematic' || view === 'board') {
@@ -64,27 +66,30 @@ function routeToUrl(route: Route): string {
 		if (route.view === 'project-settings' && route.category) {
 			params.set('category', route.category);
 		}
-		if (route.sheet) {
-			params.set('sheet', route.sheet);
+		if (route.view === 'symbol') {
+			if (route.symbolFileId) {
+				params.set('symbol', route.symbolFileId);
+			}
 		}
-	}
-	if (route.screen === 'symbol') {
-		params.set('view', 'symbol');
-		if (route.fileId) {
-			params.set('symbol', route.fileId);
+		else if (route.sheet) {
+			params.set('sheet', route.sheet);
 		}
 	}
 	return `${ window.location.pathname }?${ params.toString() }`;
 }
 
 /**
- * No framework — parses `location.search` into one of four screens (home /
- * project / editor / symbol) and drives `history.pushState`/`popstate`.
- * This is the unit MainApp.ts hangs SessionController calls and screen
- * visibility off of; see the harmonic-munching-trinket plan's Phase 2.
- * `view` reuses ActiveDocument's own DocumentKind ('schematic' | 'board')
+ * No framework — parses `location.search` into one of three screens (home /
+ * project / editor) and drives `history.pushState`/`popstate`. This is the
+ * unit MainApp.ts hangs SessionController calls and screen visibility off
+ * of; see the harmonic-munching-trinket plan's Phase 2. `view` reuses
+ * ActiveDocument's own DocumentKind ('schematic' | 'board' | 'symbol')
  * rather than inventing separate URL vocabulary (e.g. 'pcb') for the same
- * concept.
+ * concept. The symbol editor used to be a fourth, disjoint `RouteSymbolEditor`
+ * screen routed to a separate `#screen-symbol` container — folded into
+ * `RouteEditor` (view: 'symbol') once the symbol editor started sharing
+ * `#screen-editor`'s chrome like PCB already does (see the harmonic-
+ * munching-trinket plan's "Real Symbol Editor" write-up).
  */
 export class Router {
 	protected current: Route;

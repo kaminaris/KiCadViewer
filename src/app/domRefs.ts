@@ -22,7 +22,6 @@ export interface MainDomRefs {
 	screenHomeEl: HTMLElement;
 	screenProjectEl: HTMLElement;
 	screenEditorEl: HTMLElement;
-	screenSymbolEl: HTMLElement;
 	brandHomeButton: HTMLButtonElement;
 	stage: HTMLElement;
 	canvas: HTMLCanvasElement;
@@ -52,10 +51,28 @@ export interface MainDomRefs {
 	footprintDirectoryInput: HTMLInputElement;
 	editPropertiesEl: HTMLElement;
 	editUndoStackEl: HTMLElement;
+	editLibrariesPaneEl: HTMLElement;
+	editLibrariesEl: HTMLElement;
+	editHierarchyPaneEl: HTMLElement;
+	editHierarchyEl: HTMLElement;
 	toolPanel: HTMLElement;
+	schematicTogglePanel: HTMLElement;
 	boardTogglePanel: HTMLElement;
 	boardToolPanel: HTMLElement;
 	boardAppearanceEl: HTMLElement;
+	symbolToolPanel: HTMLElement;
+	symbolActionsEl: HTMLElement;
+	symbolSaveButton: HTMLButtonElement;
+	symbolRevertButton: HTMLButtonElement;
+	symbolStageCanvas: HTMLCanvasElement;
+	symbolTextInput: HTMLInputElement;
+	symbolMirrorHButton: HTMLButtonElement;
+	symbolMirrorVButton: HTMLButtonElement;
+	symbolRotateCcwButton: HTMLButtonElement;
+	symbolRotateCwButton: HTMLButtonElement;
+	symbolPinTableButton: HTMLButtonElement;
+	symbolPropertiesButton: HTMLButtonElement;
+	symbolUnitSelect: HTMLSelectElement;
 	highlightNetButton: HTMLButtonElement;
 	mainEl: HTMLElement;
 	editTextInput: HTMLInputElement;
@@ -101,7 +118,6 @@ export function createMainDomRefs(): MainDomRefs {
 		screenHomeEl: requiredById<HTMLElement>('screen-home'),
 		screenProjectEl: requiredById<HTMLElement>('screen-project'),
 		screenEditorEl: requiredById<HTMLElement>('screen-editor'),
-		screenSymbolEl: requiredById<HTMLElement>('screen-symbol'),
 		brandHomeButton: requiredById<HTMLButtonElement>('brand-home-btn'),
 		stage: requiredById<HTMLElement>('stage'),
 		canvas: requiredById<HTMLCanvasElement>('canvas2d'),
@@ -126,10 +142,28 @@ export function createMainDomRefs(): MainDomRefs {
 		footprintDirectoryInput: requiredById<HTMLInputElement>('footprint-directory-input'),
 		editPropertiesEl: requiredById<HTMLElement>('edit-properties'),
 		editUndoStackEl: requiredById<HTMLElement>('edit-undo-stack'),
+		editLibrariesPaneEl: requiredById<HTMLElement>('edit-libraries-pane'),
+		editLibrariesEl: requiredById<HTMLElement>('edit-libraries'),
+		editHierarchyPaneEl: requiredById<HTMLElement>('edit-hierarchy-pane'),
+		editHierarchyEl: requiredById<HTMLElement>('edit-hierarchy'),
 		toolPanel: requiredById<HTMLElement>('tool-panel'),
+		schematicTogglePanel: requiredById<HTMLElement>('schematic-toggle-panel'),
 		boardTogglePanel: requiredById<HTMLElement>('board-toggle-panel'),
 		boardToolPanel: requiredById<HTMLElement>('board-tool-panel'),
 		boardAppearanceEl: requiredById<HTMLElement>('board-appearance'),
+		symbolToolPanel: requiredById<HTMLElement>('symbol-tool-panel'),
+		symbolActionsEl: requiredById<HTMLElement>('symbol-actions'),
+		symbolSaveButton: requiredById<HTMLButtonElement>('btn-symbol-save'),
+		symbolRevertButton: requiredById<HTMLButtonElement>('btn-symbol-revert'),
+		symbolStageCanvas: requiredById<HTMLCanvasElement>('symbol-stage-canvas'),
+		symbolTextInput: requiredById<HTMLInputElement>('symbol-text-input'),
+		symbolMirrorHButton: requiredById<HTMLButtonElement>('btn-symbol-mirror-h'),
+		symbolMirrorVButton: requiredById<HTMLButtonElement>('btn-symbol-mirror-v'),
+		symbolRotateCcwButton: requiredById<HTMLButtonElement>('btn-symbol-rotate-ccw'),
+		symbolRotateCwButton: requiredById<HTMLButtonElement>('btn-symbol-rotate-cw'),
+		symbolPinTableButton: requiredById<HTMLButtonElement>('btn-symbol-pin-table'),
+		symbolPropertiesButton: requiredById<HTMLButtonElement>('btn-symbol-properties'),
+		symbolUnitSelect: requiredById<HTMLSelectElement>('symbol-unit-select'),
 		highlightNetButton: requiredById<HTMLButtonElement>('btn-highlight-net'),
 		mainEl: requiredSelector<HTMLElement>('main'),
 		editTextInput: requiredById<HTMLInputElement>('edit-text-input'),

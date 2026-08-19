@@ -18,6 +18,10 @@ export interface KdGridColumn {
 export interface KdGridHandlers {
 	onCellChange: (rowIndex: number, key: string, value: string | boolean) => void;
 	onAddRow?: () => void;
+	/** Label for the "+ Add …" button `onAddRow` renders. Defaults to
+	 *  "+ Add Field" (the Fields-grid's own original wording) so every
+	 *  pre-existing caller keeps its current text unchanged. */
+	addRowLabel?: string;
 	onRemoveRow?: (rowIndex: number) => void;
 	canRemoveRow?: (rowIndex: number) => boolean;
 }
@@ -358,7 +362,7 @@ export class PropertiesDialog {
 		wrap.appendChild(table);
 		container.appendChild(wrap);
 		if (handlers.onAddRow) {
-			this.button(this.buttonRow(container), '+ Add Field', handlers.onAddRow);
+			this.button(this.buttonRow(container), handlers.addRowLabel ?? '+ Add Field', handlers.onAddRow);
 		}
 	}
 
