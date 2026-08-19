@@ -1,10 +1,11 @@
-import type { PolygonDraft } from '@kicad-render/KicadRenderSession';
-import { colorForLayer } from '@kicad-render/paint/LayerColors';
+import type { PolygonDraft }    from '@kicad-render/KicadRenderSession';
+import { colorForLayer }        from '@kicad-render/paint/LayerColors';
 import type { GrShapeFillMode } from '@kicad-io/KicadElementPolygon';
 import type { KicadStrokeType } from '@kicad-io/KicadElementStroke';
 
 export interface PolygonPropertiesDialogCallbacks {
 	getLayers(): string[];
+
 	isCopperLayer(layer: string): boolean;
 }
 
@@ -63,7 +64,8 @@ export class PolygonPropertiesDialog {
 		const body = document.createElement('div');
 		body.className = 'polygon-props-body';
 		body.append(
-			this.field('Line width:', this.numberInput(draft.lineWidthMm, value => { draft.lineWidthMm = value; }), 'mm'),
+			this.field(
+				'Line width:', this.numberInput(draft.lineWidthMm, value => { draft.lineWidthMm = value; }), 'mm'),
 			this.field('Line style:', this.strokeStyleSelect(draft)),
 			this.field('Fill:', this.fillSelect(draft)),
 			this.field('Layer:', this.layerSelect(draft))
@@ -81,7 +83,9 @@ export class PolygonPropertiesDialog {
 		const spacer = document.createElement('span');
 		spacer.className = 'preferences-spacer';
 		footer.append(spacer, this.button('Cancel', () => this.close()), this.button('OK', () => {
-			if (!this.onCommit || !draft.layer) return;
+			if (!this.onCommit || !draft.layer) {
+				return;
+			}
 			this.onCommit({ ...draft });
 			this.close();
 		}));
@@ -126,7 +130,8 @@ export class PolygonPropertiesDialog {
 		], value => { draft.fillMode = value; });
 	}
 
-	protected selectField<T extends string>(value: T, options: [T, string][], onChange: (value: T) => void): HTMLSelectElement {
+	protected selectField<T extends string>(
+		value: T, options: [T, string][], onChange: (value: T) => void): HTMLSelectElement {
 		const select = document.createElement('select');
 		for (const [optionValue, label] of options) {
 			select.appendChild(new Option(label, optionValue, false, optionValue === value));

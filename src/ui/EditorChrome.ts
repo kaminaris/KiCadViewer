@@ -55,7 +55,9 @@ export class EditorChrome {
 
 	protected require<T extends HTMLElement>(root: HTMLElement, selector: string): T {
 		const element = root.querySelector<T>(selector);
-		if (!element) throw new Error(`Editor chrome control ${ selector } is unavailable.`);
+		if (!element) {
+			throw new Error(`Editor chrome control ${ selector } is unavailable.`);
+		}
 		return element;
 	}
 }

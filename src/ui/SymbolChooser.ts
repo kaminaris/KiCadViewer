@@ -1,12 +1,12 @@
-import { KicadRenderSession } from '@kicad-render/KicadRenderSession';
-import { Vec2 }               from '@kicad-render/math/Vec2';
+import { KicadRenderSession }                            from '@kicad-render/KicadRenderSession';
+import { Vec2 }                                          from '@kicad-render/math/Vec2';
 import {
 	SymbolLibraryCache,
 	type CachedSymbolFile,
 	type CachedSymbolSummary
-}                             from '../io/SymbolLibraryCache';
-import { LibraryChooser, type ChooserGroup } from './LibraryChooser';
-import { fitPreviewCameraToContents } from './PreviewCamera';
+}                                                        from '../io/SymbolLibraryCache';
+import { LibraryChooser, type ChooserGroup }             from './LibraryChooser';
+import { fitPreviewCameraToContents }                    from './PreviewCamera';
 import { type ScoreField, type ScoredGroupCompareInput } from './search/TextScore';
 
 type PendingSymbol = { file: CachedSymbolFile; summary: CachedSymbolSummary; libId: string };
@@ -58,7 +58,7 @@ export class SymbolChooser extends LibraryChooser<PendingSymbol> {
 			previewPlaceholder: 'symbol-preview-placeholder',
 			ok: 'symbol-chooser-ok',
 			cancel: 'symbol-chooser-cancel',
-			close: 'symbol-chooser-close',
+			close: 'symbol-chooser-close'
 		});
 		this.cancelEl.addEventListener('click', () => this.cancelPlacement());
 		this.closeEl.addEventListener('click', () => this.cancelPlacement());
@@ -101,7 +101,8 @@ export class SymbolChooser extends LibraryChooser<PendingSymbol> {
 
 	protected async fetchRows(): Promise<PendingSymbol[]> {
 		const files = await this.cache.getFiles();
-		return files.flatMap(file => file.symbols.map(summary => ({ file, summary, libId: this.libraryId(file, summary) })));
+		return files.flatMap(
+			file => file.symbols.map(summary => ({ file, summary, libId: this.libraryId(file, summary) })));
 	}
 
 	protected itemKey(item: PendingSymbol): string { return item.libId; }
@@ -149,7 +150,7 @@ export class SymbolChooser extends LibraryChooser<PendingSymbol> {
 			{ text: this.libraryNickname(item), weight: 4, isName: false },
 			{ text: item.summary.keywords, weight: 4, isName: false },
 			{ text: item.summary.value, weight: 4, isName: false },
-			{ text: item.summary.description, weight: 1, isName: false },
+			{ text: item.summary.description, weight: 1, isName: false }
 		];
 	}
 
@@ -183,10 +184,15 @@ export class SymbolChooser extends LibraryChooser<PendingSymbol> {
 	 * tie-break only — not in scoring — to reproduce that same outcome here,
 	 * where there is no real per-project sym-lib-table order to preserve.
 	 */
-	protected override compareLibraryGroups(a: ScoredGroupCompareInput, b: ScoredGroupCompareInput, searching: boolean): number {
+	protected override compareLibraryGroups(
+		a: ScoredGroupCompareInput, b: ScoredGroupCompareInput, searching: boolean): number {
 		if (searching && a.bestExact === b.bestExact && a.bestScore === b.bestScore) {
-			if (a.label === SymbolChooser.DEVICE_LIBRARY_NICKNAME) return -1;
-			if (b.label === SymbolChooser.DEVICE_LIBRARY_NICKNAME) return 1;
+			if (a.label === SymbolChooser.DEVICE_LIBRARY_NICKNAME) {
+				return -1;
+			}
+			if (b.label === SymbolChooser.DEVICE_LIBRARY_NICKNAME) {
+				return 1;
+			}
 		}
 		return super.compareLibraryGroups(a, b, searching);
 	}

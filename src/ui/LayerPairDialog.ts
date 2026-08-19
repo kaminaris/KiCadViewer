@@ -1,6 +1,8 @@
 export interface LayerPairDialogCallbacks {
 	getBoardCopperLayers(): string[];
+
 	getViaLayerPair(): [string, string];
+
 	setViaLayerPair(pair: [string, string]): void;
 }
 
@@ -68,7 +70,8 @@ export class LayerPairDialog {
 		this.element.replaceChildren(title, body, footer);
 	}
 
-	protected layerField(label: string, value: string, layers: string[], onChange: (layer: string) => void): HTMLElement {
+	protected layerField(
+		label: string, value: string, layers: string[], onChange: (layer: string) => void): HTMLElement {
 		const field = document.createElement('label');
 		field.className = 'preferences-field';
 		field.append(label);

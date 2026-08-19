@@ -20,18 +20,28 @@ export function el<K extends keyof HTMLElementTagNameMap>(
 	const node = document.createElement(tag);
 	if (props) {
 		const { class: className, style, dataset, ...rest } = props;
-		if (className !== undefined) node.className = className;
-		if (style) Object.assign(node.style, style);
-		if (dataset) Object.assign(node.dataset, dataset);
+		if (className !== undefined) {
+			node.className = className;
+		}
+		if (style) {
+			Object.assign(node.style, style);
+		}
+		if (dataset) {
+			Object.assign(node.dataset, dataset);
+		}
 		Object.assign(node, rest);
 	}
-	if (children !== undefined) append(node, children);
+	if (children !== undefined) {
+		append(node, children);
+	}
 	return node;
 }
 
 export function append(parent: Node, children: ElChild | ElChild[]): void {
 	for (const child of Array.isArray(children) ? children : [children]) {
-		if (child === null || child === undefined || child === false) continue;
+		if (child === null || child === undefined || child === false) {
+			continue;
+		}
 		parent.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
 	}
 }

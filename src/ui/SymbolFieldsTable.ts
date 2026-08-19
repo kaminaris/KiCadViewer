@@ -1,9 +1,9 @@
-import { KicadRenderSession }   from '@kicad-render/KicadRenderSession';
-import { KicadSchematic }       from '@kicad-io/Project/KicadSchematic';
-import { KicadElementSymbol }   from '@kicad-io/KicadElementSymbol';
+import { KicadRenderSession } from '@kicad-render/KicadRenderSession';
+import { KicadSchematic } from '@kicad-io/Project/KicadSchematic';
+import { KicadElementSymbol } from '@kicad-io/KicadElementSymbol';
 import { KicadElementLibSymbols } from '@kicad-io/KicadElementLibSymbols';
-import { KicadParser }          from '@kicad-io/KicadParser';
-import type { ProjectContext }  from '../app/ProjectContext';
+import { KicadParser } from '@kicad-io/KicadParser';
+import type { ProjectContext } from '../app/ProjectContext';
 import { makeDraggableResizable } from './DraggableResizable';
 
 /** One column in both the left field-list panel and the main grid.
@@ -33,11 +33,17 @@ interface GroupRow {
 
 export interface SymbolFieldsTableCallbacks {
 	setStatus(message: string): void;
+
 	getSession(): KicadRenderSession | null;
+
 	getProjectContext(): ProjectContext | null;
+
 	getCurrentSheetNode(): KicadSchematic | null;
+
 	saveProject(): Promise<void>;
+
 	refreshSidebar(): void;
+
 	openFootprintChooser(context: { fpFilters: string[]; pinCount: number }): Promise<string | null>;
 }
 
@@ -110,7 +116,10 @@ export class SymbolFieldsTable {
 		this.addFieldEl.addEventListener('click', () => this.addField());
 		this.tabEditEl.addEventListener('click', () => this.setActiveTab('edit'));
 		this.tabExportEl.addEventListener('click', () => this.setActiveTab('export'));
-		this.filterEl.addEventListener('input', () => { this.filterText = this.filterEl.value; this.renderGrid(); });
+		this.filterEl.addEventListener('input', () => {
+			this.filterText = this.filterEl.value;
+			this.renderGrid();
+		});
 		this.scopeEl.addEventListener('change', () => {
 			this.scope = this.scopeEl.value === 'sheet' ? 'sheet' : 'project';
 			this.renderGrid();
@@ -220,7 +229,8 @@ export class SymbolFieldsTable {
 	protected buildFieldConfigs(rows: SymbolRow[]): FieldConfig[] {
 		const configs = new Map<string, FieldConfig>();
 		for (const name of MANDATORY_FIELDS) {
-			configs.set(name, { name, show: true, groupBy: DEFAULT_GROUP_BY.has(name), mandatory: true, originalName: name });
+			configs.set(
+				name, { name, show: true, groupBy: DEFAULT_GROUP_BY.has(name), mandatory: true, originalName: name });
 		}
 		for (const row of rows) {
 			for (const name of Object.keys(row.symbol.getAllProperties())) {
@@ -363,13 +373,20 @@ export class SymbolFieldsTable {
 			showCheck.type = 'checkbox';
 			showCheck.checked = field.show;
 			showCheck.title = 'Include';
-			showCheck.addEventListener('change', () => { field.show = showCheck.checked; this.renderGrid(); this.renderExportSummary(); });
+			showCheck.addEventListener('change', () => {
+				field.show = showCheck.checked;
+				this.renderGrid();
+				this.renderExportSummary();
+			});
 
 			const groupCheck = document.createElement('input');
 			groupCheck.type = 'checkbox';
 			groupCheck.checked = field.groupBy;
 			groupCheck.title = 'Group by';
-			groupCheck.addEventListener('change', () => { field.groupBy = groupCheck.checked; this.renderGrid(); });
+			groupCheck.addEventListener('change', () => {
+				field.groupBy = groupCheck.checked;
+				this.renderGrid();
+			});
 
 			const nameInput = document.createElement('input');
 			nameInput.className = 'sft-field-name';
@@ -426,7 +443,8 @@ export class SymbolFieldsTable {
 			this.gridWrapEl.appendChild(empty);
 			return;
 		}
-		const groups = this.groupSymbols ? this.buildGroups(rows) : rows.map(row => ({ key: row.uuid, members: [row] }));
+		const groups = this.groupSymbols ? this.buildGroups(rows) :
+			rows.map(row => ({ key: row.uuid, members: [row] }));
 
 		const table = document.createElement('table');
 		table.className = 'sft-grid';
@@ -487,7 +505,11 @@ export class SymbolFieldsTable {
 				else {
 					td.appendChild(this.buildCellContent(
 						field, group.members[0]!, this.getValue(group.members[0]!, field), false,
-						value => { this.setValue(group.members[0]!, field, value); this.renderGrid(); }));
+						value => {
+							this.setValue(group.members[0]!, field, value);
+							this.renderGrid();
+						}
+					));
 				}
 				tr.appendChild(td);
 				continue;
@@ -496,7 +518,13 @@ export class SymbolFieldsTable {
 			const mixed = new Set(values).size > 1;
 			td.appendChild(this.buildCellContent(
 				field, group.members[0]!, mixed ? '' : values[0]!, mixed,
-				value => { for (const member of group.members) this.setValue(member, field, value); this.renderGrid(); }));
+				value => {
+					for (const member of group.members) {
+						this.setValue(member, field, value);
+					}
+					this.renderGrid();
+				}
+			));
 			tr.appendChild(td);
 		}
 		return tr;
@@ -510,7 +538,11 @@ export class SymbolFieldsTable {
 			const td = document.createElement('td');
 			td.appendChild(this.buildCellContent(
 				field, row, this.getValue(row, field), false,
-				value => { this.setValue(row, field, value); this.renderGrid(); }));
+				value => {
+					this.setValue(row, field, value);
+					this.renderGrid();
+				}
+			));
 			tr.appendChild(td);
 		}
 		return tr;
@@ -555,13 +587,22 @@ export class SymbolFieldsTable {
 		return wrap;
 	}
 
-	protected buildCellInput(displayValue: string, mixed: boolean, onCommit: (value: string) => void): HTMLInputElement {
+	protected buildCellInput(
+		displayValue: string, mixed: boolean, onCommit: (value: string) => void): HTMLInputElement {
 		const input = document.createElement('input');
 		input.className = `sft-cell-input${ mixed ? ' sft-mixed' : '' }`;
 		input.value = mixed ? '-- mixed values --' : displayValue;
 		let dirty = false;
-		input.addEventListener('input', () => { dirty = true; input.classList.remove('sft-mixed'); });
-		const commit = () => { if (dirty) { onCommit(input.value); dirty = false; } };
+		input.addEventListener('input', () => {
+			dirty = true;
+			input.classList.remove('sft-mixed');
+		});
+		const commit = () => {
+			if (dirty) {
+				onCommit(input.value);
+				dirty = false;
+			}
+		};
 		input.addEventListener('change', commit);
 		input.addEventListener('keydown', event => {
 			if (event.key === 'Enter') {
@@ -576,17 +617,20 @@ export class SymbolFieldsTable {
 
 	protected renderExportSummary(): void {
 		const rows = this.scopedRows();
-		const groups = this.groupSymbols ? this.buildGroups(rows) : rows.map(row => ({ key: row.uuid, members: [row] }));
+		const groups = this.groupSymbols ? this.buildGroups(rows) :
+			rows.map(row => ({ key: row.uuid, members: [row] }));
 		const columns = this.visibleColumns();
 		this.exportSummaryEl.textContent = `${ groups.length } row${ groups.length === 1 ? '' : 's' } `
-			+ `(${ rows.length } symbol${ rows.length === 1 ? '' : 's' }), ${ columns.length } column${ columns.length === 1 ? '' : 's' } `
+			+ `(${ rows.length } symbol${ rows.length === 1 ? '' : 's' }), ${ columns.length } column${ columns.length
+			=== 1 ? '' : 's' } `
 			+ `will be exported using the field list and scope on the left.`;
 	}
 
 	protected buildCsv(): string {
 		const columns = this.visibleColumns();
 		const rows = this.scopedRows();
-		const groups = this.groupSymbols ? this.buildGroups(rows) : rows.map(row => ({ key: row.uuid, members: [row] }));
+		const groups = this.groupSymbols ? this.buildGroups(rows) :
+			rows.map(row => ({ key: row.uuid, members: [row] }));
 		const header = [...columns.map(f => f.name), 'Qty'].map(csvEscape).join(',');
 		const lines = [header];
 		for (const group of groups) {

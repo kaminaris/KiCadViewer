@@ -6,9 +6,13 @@ type FlatEntry<TItem> =
 
 export interface LibraryTreeListHooks<TItem> {
 	itemKey(item: TItem): string;
+
 	itemName(item: TItem): string;
+
 	rowDescription(item: TItem): string;
+
 	onSelect(item: TItem): void;
+
 	emptyMessage(hasAnyRows: boolean): string;
 }
 

@@ -1,11 +1,11 @@
-import { KicadRenderSession } from '@kicad-render/KicadRenderSession';
-import { buildFilterSearch } from './Dom';
-import { makeDraggableResizable } from './DraggableResizable';
+import { KicadRenderSession }                 from '@kicad-render/KicadRenderSession';
+import { buildFilterSearch }                  from './Dom';
+import { makeDraggableResizable }             from './DraggableResizable';
 import { LibraryTreeList, type ChooserGroup } from './LibraryTreeList';
 import {
 	normalizeText, scoreSearchQuery, scoreAndSort, buildScoredGroups, defaultCompareScoredGroups,
 	type ScoreField, type ScoreResult, type ScoredGroupCompareInput
-} from './search/TextScore';
+}                                             from './search/TextScore';
 
 export type { ChooserGroup } from './LibraryTreeList';
 
@@ -105,13 +105,16 @@ export abstract class LibraryChooser<TItem> {
 		]) {
 			this.el.addEventListener(eventName, event => event.stopPropagation());
 		}
-		this.filterEl.addEventListener('input', () => { this.userSelected = false; this.renderList(); });
+		this.filterEl.addEventListener('input', () => {
+			this.userSelected = false;
+			this.renderList();
+		});
 		this.tree = new LibraryTreeList<TItem>(this.listEl, {
 			itemKey: item => this.itemKey(item),
 			itemName: item => this.itemName(item),
 			rowDescription: item => this.rowDescription(item),
 			emptyMessage: hasAnyRows => this.emptyMessage(hasAnyRows),
-			onSelect: item => this.onTreeSelect(item),
+			onSelect: item => this.onTreeSelect(item)
 		});
 		makeDraggableResizable(this.el, headerEl, { minWidth: 480, minHeight: 360 });
 	}
@@ -121,17 +124,29 @@ export abstract class LibraryChooser<TItem> {
 	// --- Real differences a subclass must supply -----------------------
 
 	protected abstract fetchRows(): Promise<TItem[]>;
+
 	protected abstract itemKey(item: TItem): string;
+
 	protected abstract itemName(item: TItem): string;
+
 	protected abstract rowDescription(item: TItem): string;
+
 	protected abstract scoreFields(item: TItem): ScoreField[];
+
 	protected abstract libraryGroupKey(item: TItem): string;
+
 	protected abstract itemNounPlural(): string;
+
 	protected abstract recentStorageKey(): string;
+
 	protected abstract emptyMessage(hasAnyRows: boolean): string;
+
 	protected abstract previewEmptyMessage(): string;
+
 	protected abstract renderDetails(item: TItem): void;
+
 	protected abstract clearDetails(): void;
+
 	protected abstract onLoadError(error: unknown): void;
 
 	/** Loads whatever the preview needs into `this.previewSession` (which
@@ -203,7 +218,8 @@ export abstract class LibraryChooser<TItem> {
 		this.recentlyUsed = [item, ...this.recentlyUsed.filter(entry => this.itemKey(entry) !== key)]
 			.slice(0, LibraryChooser.RECENTLY_USED_MAX);
 		try {
-			localStorage.setItem(this.recentStorageKey(), JSON.stringify(this.recentlyUsed.map(entry => this.itemKey(entry))));
+			localStorage.setItem(
+				this.recentStorageKey(), JSON.stringify(this.recentlyUsed.map(entry => this.itemKey(entry))));
 		}
 		catch {
 			// Best-effort — losing the persisted MRU list (private browsing,
@@ -239,7 +255,8 @@ export abstract class LibraryChooser<TItem> {
 		groups.push(...this.extraGroups(query));
 		groups.push(...buildScoredGroups(
 			query, this.candidateRows(), row => this.libraryGroupKey(row), row => this.scoreFields(row),
-			row => this.itemName(row), (a, b, searching) => this.compareLibraryGroups(a, b, searching)));
+			row => this.itemName(row), (a, b, searching) => this.compareLibraryGroups(a, b, searching)
+		));
 		return groups;
 	}
 
@@ -280,7 +297,8 @@ export abstract class LibraryChooser<TItem> {
 		}
 		const dpr = window.devicePixelRatio || 1;
 		const rect = this.previewArtEl.getBoundingClientRect();
-		this.previewSession.resize(Math.max(1, Math.floor(rect.width * dpr)), Math.max(1, Math.floor(rect.height * dpr)));
+		this.previewSession.resize(
+			Math.max(1, Math.floor(rect.width * dpr)), Math.max(1, Math.floor(rect.height * dpr)));
 		return this.previewSession;
 	}
 

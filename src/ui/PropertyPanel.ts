@@ -147,7 +147,9 @@ export class PropertyPanel {
 	}
 
 	refreshSidebar(
-		session: { getUndoStackDebug(): { undo: { label: string; bytes: number }[]; undoDepth: number; redoDepth: number } },
+		session: {
+			getUndoStackDebug(): { undo: { label: string; bytes: number }[]; undoDepth: number; redoDepth: number }
+		},
 		renderSelection: () => void
 	): void {
 		renderSelection();

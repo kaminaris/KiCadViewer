@@ -22,8 +22,11 @@ export interface EditorShellPane {
 
 export interface EditorShellActions {
 	onBack(): void;
+
 	onSave(): void;
+
 	onRevert(): void;
+
 	saveTitle: string;
 	revertTitle: string;
 }
@@ -55,33 +58,38 @@ export class EditorShell {
 		brandIcon.classList.add('brand-mark');
 		const brandButton = el('button', { type: 'button', class: 'brand', title: 'Back to Project overview' }, [
 			brandIcon,
-			el('span', { textContent: 'KiOnline' }),
+			el('span', { textContent: 'KiOnline' })
 		]);
 
 		const saveIcon = svgIcon(SAVE_ICON_PATH);
-		const saveButton = el('button', { type: 'button', class: 'toolbar-button', dataset: { chrome: 'save' } }, saveIcon);
+		const saveButton = el(
+			'button', { type: 'button', class: 'toolbar-button', dataset: { chrome: 'save' } }, saveIcon);
 		const revertIcon = svgIcon(REVERT_ICON_PATH);
-		const revertButton = el('button', { type: 'button', class: 'toolbar-button', dataset: { chrome: 'revert' } }, revertIcon);
+		const revertButton = el(
+			'button', { type: 'button', class: 'toolbar-button', dataset: { chrome: 'revert' } }, revertIcon);
 
 		const breadcrumb = el('nav', { class: 'breadcrumb' }, [
 			el('span', { class: 'breadcrumb-project' }),
 			el('span', { class: 'breadcrumb-sep', textContent: '/' }),
-			el('span', { class: 'breadcrumb-sheet' }),
+			el('span', { class: 'breadcrumb-sheet' })
 		]);
 
 		const header = el('header', { class: 'top' }, [
 			el('div', { class: 'top-title-row' }, [brandButton, breadcrumb]),
 			el('div', { class: 'command-toolbar' }, [
-				el('div', { class: 'toolbar-section' }, [saveButton, revertButton]),
-			]),
+				el('div', { class: 'toolbar-section' }, [saveButton, revertButton])
+			])
 		]);
 
 		this.panes = new PaneStack(config.panes.map((pane): PaneStackEntry => pane));
 		this.stage = el('div', { class: 'stage' });
 		this.tools = config.tools ? new ToolPalette(config.tools, () => {}) : null;
 
-		const main = el('main', { class: this.tools ? 'editor-shell-main editor-shell-main-with-tools' : 'editor-shell-main' },
-			[this.panes.element, this.stage, this.tools?.element].filter((node): node is HTMLElement => !!node));
+		const main = el(
+			'main',
+			{ class: this.tools ? 'editor-shell-main editor-shell-main-with-tools' : 'editor-shell-main' },
+			[this.panes.element, this.stage, this.tools?.element].filter((node): node is HTMLElement => !!node)
+		);
 
 		const statusMessage = el('span', { class: 'status-message', textContent: 'Ready' });
 		this.status = new EditorStatusBar(statusMessage);

@@ -1,5 +1,5 @@
 import type { KicadRenderSession } from '@kicad-render/KicadRenderSession';
-import { colorForLayer } from '@kicad-render/paint/LayerColors';
+import { colorForLayer }           from '@kicad-render/paint/LayerColors';
 
 type AppearanceTab = 'layers' | 'objects' | 'nets';
 type DisplayMode = 'normal' | 'dim' | 'hide';
@@ -11,13 +11,21 @@ interface BoardScene {
 
 export interface BoardAppearancePanelCallbacks {
 	getSession(): KicadRenderSession | null;
+
 	setStatus(message: string): void;
+
 	getActiveLayer(): string;
+
 	setActiveLayer(layer: string): void;
+
 	/** Optional: called whenever the user changes per-layer visibility/opacity */
 	onLayerStateChange?: (state: Record<string, { visible: boolean; opacity: number }>) => void;
 	/** Optional: called when any Objects-tab setting changes. Passes an object with visible_items (string[]), opacity (board opacity object), and displayModes */
-	onObjectsStateChange?: (state: { visible_items?: string[]; opacity?: Record<string, number>; displayModes?: Record<string, any> }) => void;
+	onObjectsStateChange?: (state: {
+		visible_items?: string[];
+		opacity?: Record<string, number>;
+		displayModes?: Record<string, any>
+	}) => void;
 }
 
 /** KiCad-style PCB Appearance dock. Layer controls are live today; the
@@ -104,7 +112,10 @@ export class BoardAppearancePanel {
 			button.type = 'button';
 			button.className = `appearance-tab${ this.tab === id ? ' active' : '' }`;
 			button.textContent = label;
-			button.addEventListener('click', () => { this.tab = id; this.render(session, scene); });
+			button.addEventListener('click', () => {
+				this.tab = id;
+				this.render(session, scene);
+			});
 			tabs.appendChild(button);
 		}
 		const content = document.createElement('div');
@@ -151,8 +162,10 @@ export class BoardAppearancePanel {
 			const opacity = document.createElement('select');
 			opacity.title = `${ layer } opacity`;
 			for (const value of [100, 75, 50, 25, 10]) {
-				opacity.appendChild(new Option(`${ value }%`, String(value), false,
-					Math.round((this.baseOpacity.get(layer) ?? 1) * 100) === value));
+				opacity.appendChild(new Option(
+					`${ value }%`, String(value), false,
+					Math.round((this.baseOpacity.get(layer) ?? 1) * 100) === value
+				));
 			}
 			opacity.addEventListener('click', event => event.stopPropagation());
 			opacity.addEventListener('change', () => {
@@ -189,98 +202,132 @@ export class BoardAppearancePanel {
 		flip.type = 'button';
 		flip.className = 'appearance-flip';
 		flip.textContent = `${ session.isFlipped ? '✓ ' : '' }Flip board view`;
-		flip.addEventListener('click', () => { session.setFlipped(!session.isFlipped); this.refresh(); });
+		flip.addEventListener('click', () => {
+			session.setFlipped(!session.isFlipped);
+			this.refresh();
+		});
 		section.append(heading, options, flip);
 		return section;
 	}
 
 	protected objectsContent(session: KicadRenderSession, scene: BoardScene): HTMLElement {
 		const content = document.createElement('div');
-			// Controls: Tracks / Vias / Pads / Zones display modes
-			const makeModeRow = (labelText: string, getMode: () => 'filled' | 'outline', setMode: (m: 'filled'|'outline') => void) => {
-				const row = document.createElement('div');
-				row.className = 'appearance-mode-row';
-				const label = document.createElement('span');
-				label.textContent = labelText;
-				const select = document.createElement('select');
-				select.dataset.modeKey = labelText.toLowerCase();
-				select.appendChild(new Option('Filled', 'filled', false, getMode() === 'filled'));
-				select.appendChild(new Option('Outline', 'outline', false, getMode() === 'outline'));
-				select.addEventListener('change', () => {
-					const val = select.value as 'filled'|'outline';
-					setMode(val);
-					this.emitObjectsStateChange();
-				});
-				row.append(label, select);
-				return row;
-			};
-			content.appendChild(makeModeRow('Tracks', () => session.currentTrackDisplayMode ?? 'filled', m => session.setTrackDisplayMode(m)));
-			content.appendChild(makeModeRow('Vias', () => session.currentViaDisplayMode ?? 'filled', m => session.setViaDisplayMode(m)));
-			content.appendChild(makeModeRow('Pads', () => session.currentPadDisplayMode ?? 'filled', m => session.setPadDisplayMode(m)));
-			content.appendChild(makeModeRow('Zones', () => session.currentZoneDisplayMode ?? 'filled', m => session.setZoneDisplayMode(m)));
+		// Controls: Tracks / Vias / Pads / Zones display modes
+		const makeModeRow = (
+			labelText: string, getMode: () => 'filled' | 'outline', setMode: (m: 'filled' | 'outline') => void) => {
+			const row = document.createElement('div');
+			row.className = 'appearance-mode-row';
+			const label = document.createElement('span');
+			label.textContent = labelText;
+			const select = document.createElement('select');
+			select.dataset.modeKey = labelText.toLowerCase();
+			select.appendChild(new Option('Filled', 'filled', false, getMode() === 'filled'));
+			select.appendChild(new Option('Outline', 'outline', false, getMode() === 'outline'));
+			select.addEventListener('change', () => {
+				const val = select.value as 'filled' | 'outline';
+				setMode(val);
+				this.emitObjectsStateChange();
+			});
+			row.append(label, select);
+			return row;
+		};
+		content.appendChild(makeModeRow(
+			'Tracks', () => session.currentTrackDisplayMode ?? 'filled',
+			m => session.setTrackDisplayMode(m)
+		));
+		content.appendChild(
+			makeModeRow('Vias', () => session.currentViaDisplayMode ?? 'filled', m => session.setViaDisplayMode(m)));
+		content.appendChild(
+			makeModeRow('Pads', () => session.currentPadDisplayMode ?? 'filled', m => session.setPadDisplayMode(m)));
+		content.appendChild(
+			makeModeRow('Zones', () => session.currentZoneDisplayMode ?? 'filled', m => session.setZoneDisplayMode(m)));
 
-			// Images opacity (mapped to PRL.board.opacity.images)
-			const imagesRow = document.createElement('div');
-			imagesRow.className = 'appearance-object-row';
-			const imagesLabel = document.createElement('span');
-			imagesLabel.textContent = 'Images';
-			const imagesSlider = document.createElement('input');
-			imagesSlider.type = 'range';
-						imagesSlider.dataset.opacityKey = 'images';
-						imagesSlider.min = '0'; imagesSlider.max = '100'; imagesSlider.value = String(Math.round(0.6 * 100));
-						imagesSlider.addEventListener('input', () => this.emitObjectsStateChange());
-						imagesRow.append(imagesLabel, imagesSlider);
-			content.appendChild(imagesRow);
-			// Common object toggles (visible_items keys). Default to session-known flags where possible.
-			const visibleKeys = [
-				['tracks','Tracks'], ['vias','Vias'], ['pads','Pads'], ['zones','Zones'], ['bitmaps','Images'],
-				['footprints_front','Footprints Front'], ['footprints_back','Footprints Back'], ['footprint_values','Values'],
-				['footprint_references','References'], ['footprint_text','Footprint Text'], ['drawing_sheet','Drawing Sheet'], ['grid','Grid'],
-				['drc_warnings','DRC Warnings'], ['drc_errors','DRC Errors'], ['drc_exclusions','DRC Exclusions'],
-				['locked_item_shadows','Locked Item Shadow'], ['conflict_shadows','Colliding Courtyards'], ['board_outline_area','Board Area Shadow'],
-				['ly_points','Points'], ['footprint_anchors','Anchors'], ['ratsnest','Ratsnest']
-			] as const;
-			const list = document.createElement('ul');
-			list.className = 'appearance-object-toggle-list';
-			for (const [key, labelText] of visibleKeys) {
-				const li = document.createElement('li');
-				li.className = 'appearance-object-toggle';
-				li.dataset.key = key;
-				const chk = document.createElement('input');
-				chk.type = 'checkbox';
-				// Heuristic defaults from session where available
-				if (key === 'ratsnest') chk.checked = session.isRatsnestVisible;
-				else if (key === 'grid') chk.checked = true;
-				else chk.checked = true;
-				chk.addEventListener('change', () => {
-					// apply immediate known effects
-					if (key === 'ratsnest') session.setRatsnestVisible(chk.checked);
-					if (key === 'grid') session.setGridVisible(chk.checked);
-					this.emitObjectsStateChange();
-				});
-				li.append(chk, ' ', labelText);
-				list.appendChild(li);
+		// Images opacity (mapped to PRL.board.opacity.images)
+		const imagesRow = document.createElement('div');
+		imagesRow.className = 'appearance-object-row';
+		const imagesLabel = document.createElement('span');
+		imagesLabel.textContent = 'Images';
+		const imagesSlider = document.createElement('input');
+		imagesSlider.type = 'range';
+		imagesSlider.dataset.opacityKey = 'images';
+		imagesSlider.min = '0';
+		imagesSlider.max = '100';
+		imagesSlider.value = String(Math.round(0.6 * 100));
+		imagesSlider.addEventListener('input', () => this.emitObjectsStateChange());
+		imagesRow.append(imagesLabel, imagesSlider);
+		content.appendChild(imagesRow);
+
+		// Common object toggles (visible_items keys). Default to session-known flags where possible.
+		const visibleKeys = [
+			['tracks', 'Tracks'], ['vias', 'Vias'], ['pads', 'Pads'], ['zones', 'Zones'], ['bitmaps', 'Images'],
+			['footprints_front', 'Footprints Front'], ['footprints_back', 'Footprints Back'],
+			['footprint_values', 'Values'],
+			['footprint_references', 'References'], ['footprint_text', 'Footprint Text'],
+			['drawing_sheet', 'Drawing Sheet'], ['grid', 'Grid'],
+			['drc_warnings', 'DRC Warnings'], ['drc_errors', 'DRC Errors'], ['drc_exclusions', 'DRC Exclusions'],
+			['locked_item_shadows', 'Locked Item Shadow'], ['conflict_shadows', 'Colliding Courtyards'],
+			['board_outline_area', 'Board Area Shadow'],
+			['ly_points', 'Points'], ['footprint_anchors', 'Anchors'], ['ratsnest', 'Ratsnest']
+		] as const;
+		const list = document.createElement('ul');
+		list.className = 'appearance-object-toggle-list';
+		for (const [key, labelText] of visibleKeys) {
+			const li = document.createElement('li');
+			li.className = 'appearance-object-toggle';
+			li.dataset.key = key;
+			const chk = document.createElement('input');
+			chk.type = 'checkbox';
+			// Heuristic defaults from session where available
+			if (key === 'ratsnest') {
+				chk.checked = session.isRatsnestVisible;
 			}
-			content.appendChild(list);
-			// Count summary (existing behavior)
-			const countByKind = new Map<string, number>();
-			for (const item of scene.hitTestItems) {
-				countByKind.set(item.kind, (countByKind.get(item.kind) ?? 0) + 1);
+			else if (key === 'grid') {
+				chk.checked = true;
 			}
-			if (countByKind.size) {
-				const counts = document.createElement('ul');
-				counts.className = 'appearance-list';
-				const labels: Record<string, string> = { 'footprint-ref': 'Footprints', pad: 'Pads', track: 'Tracks', via: 'Vias', zone: 'Zones', graphic: 'Graphics' };
-				for (const [kind, count] of countByKind) {
-					const row = document.createElement('li');
-					row.className = 'appearance-object-row';
-					row.append(labels[kind] ?? kind, this.count(count));
-					counts.appendChild(row);
+			else {
+				chk.checked = true;
+			}
+			chk.addEventListener('change', () => {
+				// apply immediate known effects
+				if (key === 'ratsnest') {
+					session.setRatsnestVisible(chk.checked);
 				}
-				content.appendChild(counts);
-			}
-			return content;
+				if (key === 'grid') {
+					session.setGridVisible(chk.checked);
+				}
+				this.emitObjectsStateChange();
+			});
+			li.append(chk, ' ', labelText);
+			list.appendChild(li);
 		}
+		content.appendChild(list);
+
+		// Count summary (existing behavior)
+		const countByKind = new Map<string, number>();
+		for (const item of scene.hitTestItems) {
+			countByKind.set(item.kind, (countByKind.get(item.kind) ?? 0) + 1);
+		}
+		if (countByKind.size) {
+			const counts = document.createElement('ul');
+			counts.className = 'appearance-list';
+			const labels: Record<string, string> = {
+				'footprint-ref': 'Footprints',
+				pad: 'Pads',
+				track: 'Tracks',
+				via: 'Vias',
+				zone: 'Zones',
+				graphic: 'Graphics'
+			};
+			for (const [kind, count] of countByKind) {
+				const row = document.createElement('li');
+				row.className = 'appearance-object-row';
+				row.append(labels[kind] ?? kind, this.count(count));
+				counts.appendChild(row);
+			}
+			content.appendChild(counts);
+		}
+		return content;
+	}
 
 	protected netsContent(scene: BoardScene): HTMLElement {
 		const content = document.createElement('div');
@@ -309,32 +356,38 @@ export class BoardAppearancePanel {
 	}
 
 	protected applyLayerState(session: KicadRenderSession, layers: string[]): void {
-			const state: Record<string, { visible: boolean; opacity: number }> = {};
-			for (const layer of layers) {
-				const visible = (this.baseVisibility.get(layer) ?? true) &&
-					(this.displayMode !== 'hide' || layer === this.activeLayer);
-				const opacity = this.displayMode === 'dim' && layer !== this.activeLayer
-					? Math.min(this.baseOpacity.get(layer) ?? 1, 0.18) : (this.baseOpacity.get(layer) ?? 1);
-				session.setLayerVisible(layer, visible);
-				session.setLayerOpacity(layer, opacity);
-				state[layer] = { visible, opacity };
-			}
-			if (typeof this.callbacks.onLayerStateChange === 'function') {
-				this.callbacks.onLayerStateChange(state);
-			}
+		const state: Record<string, { visible: boolean; opacity: number }> = {};
+		for (const layer of layers) {
+			const visible = (this.baseVisibility.get(layer) ?? true) &&
+				(this.displayMode !== 'hide' || layer === this.activeLayer);
+			const opacity = this.displayMode === 'dim' && layer !== this.activeLayer
+				? Math.min(this.baseOpacity.get(layer) ?? 1, 0.18) : (this.baseOpacity.get(layer) ?? 1);
+			session.setLayerVisible(layer, visible);
+			session.setLayerOpacity(layer, opacity);
+			state[layer] = { visible, opacity };
 		}
+		if (typeof this.callbacks.onLayerStateChange === 'function') {
+			this.callbacks.onLayerStateChange(state);
+		}
+	}
 
 	protected emitObjectsStateChange(): void {
-		if (typeof this.callbacks.onObjectsStateChange !== 'function') return;
+		if (typeof this.callbacks.onObjectsStateChange !== 'function') {
+			return;
+		}
 		const container = this.element;
-		const visible_items: string[] = [];		// gather toggles from list
+		const visible_items: string[] = [];
+		// gather toggles from list
 		for (const li of Array.from(container.querySelectorAll('.appearance-object-toggle-list li'))) {
 			const key = (li as HTMLElement).dataset.key;
 			const chk = li.querySelector('input[type=checkbox]') as HTMLInputElement | null;
-			if (key && chk && chk.checked) visible_items.push(key);
+			if (key && chk && chk.checked) {
+				visible_items.push(key);
+			}
 		}
 		// gather opacity sliders
-		const opacity: Record<string, number> = {};		for (const input of Array.from(container.querySelectorAll('input[type=range]'))) {
+		const opacity: Record<string, number> = {};
+		for (const input of Array.from(container.querySelectorAll('input[type=range]'))) {
 			const k = (input as HTMLElement).dataset.opacityKey;
 			if (k) {
 				opacity[k] = (Number((input as HTMLInputElement).value) || 0) / 100;
@@ -342,12 +395,17 @@ export class BoardAppearancePanel {
 		}
 		// display modes
 		const displayModes: Record<string, any> = {};
-		for (const sel of Array.from(container.querySelectorAll('.appearance-mode-row select')) as HTMLSelectElement[]) {
-			const key = (sel as HTMLElement).dataset.modeKey ?? (sel.previousSibling && (sel.previousSibling as HTMLElement).textContent?.trim().toLowerCase());
-			if (key) displayModes[key as string] = sel.value;
+		for (const sel of Array.from(
+			container.querySelectorAll('.appearance-mode-row select')) as HTMLSelectElement[]) {
+			const key = (sel as HTMLElement).dataset.modeKey ?? (sel.previousSibling
+				&& (sel.previousSibling as HTMLElement).textContent?.trim().toLowerCase());
+			if (key) {
+				displayModes[key as string] = sel.value;
+			}
 		}
 		this.callbacks.onObjectsStateChange({ visible_items, opacity, displayModes });
 	}
+
 	protected count(value: number): HTMLElement {
 		const count = document.createElement('span');
 		count.className = 'appearance-count';

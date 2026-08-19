@@ -63,7 +63,11 @@ export function makeDraggableResizable(
 		startY = event.clientY;
 		startLeft = modal.offsetLeft;
 		startTop = modal.offsetTop;
-		try { dragHandle.setPointerCapture(event.pointerId); } catch { /* best-effort */ }
+		try {
+			dragHandle.setPointerCapture(event.pointerId);
+		}
+		catch { /* best-effort */
+		}
 		document.body.classList.add('modal-dragging');
 		event.preventDefault();
 	});
@@ -77,7 +81,10 @@ export function makeDraggableResizable(
 		modal.style.left = `${ Math.min(Math.max(0, startLeft + dx), maxLeft) }px`;
 		modal.style.top = `${ Math.min(Math.max(0, startTop + dy), maxTop) }px`;
 	});
-	const endDrag = () => { mode = null; document.body.classList.remove('modal-dragging'); };
+	const endDrag = () => {
+		mode = null;
+		document.body.classList.remove('modal-dragging');
+	};
 	dragHandle.addEventListener('pointerup', endDrag);
 	dragHandle.addEventListener('pointercancel', endDrag);
 
@@ -92,7 +99,11 @@ export function makeDraggableResizable(
 		startY = event.clientY;
 		startW = modal.offsetWidth;
 		startH = modal.offsetHeight;
-		try { resizeHandle.setPointerCapture(event.pointerId); } catch { /* best-effort */ }
+		try {
+			resizeHandle.setPointerCapture(event.pointerId);
+		}
+		catch { /* best-effort */
+		}
 		document.body.classList.add('modal-dragging');
 		event.preventDefault();
 		event.stopPropagation();

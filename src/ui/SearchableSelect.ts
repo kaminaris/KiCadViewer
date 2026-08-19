@@ -1,4 +1,4 @@
-import { el } from './Dom';
+import { el }                            from './Dom';
 import { scoreAndSort, type ScoreField } from './search/TextScore';
 
 export interface SearchableSelectOption {
@@ -40,7 +40,9 @@ export class SearchableSelect {
 	protected highlightIndex = -1;
 	protected filtered: SearchableSelectOption[] = [];
 	protected readonly onDocClick = (event: MouseEvent) => {
-		if (!this.element.contains(event.target as Node)) this.close();
+		if (!this.element.contains(event.target as Node)) {
+			this.close();
+		}
 	};
 
 	constructor(protected config: SearchableSelectConfig, protected readonly onChange: (value: string | null) => void) {
@@ -50,7 +52,7 @@ export class SearchableSelect {
 		this.triggerLabel = el('span', { class: 'kd-select-label' });
 		this.trigger = el('button', { type: 'button', class: 'kd-select-trigger' }, [
 			this.triggerLabel,
-			el('span', { class: 'kd-select-caret', textContent: '▾' }),
+			el('span', { class: 'kd-select-caret', textContent: '▾' })
 		]);
 		this.searchInput = el('input', { type: 'search', class: 'kd-select-search', placeholder: 'Search…' });
 		this.listEl = el('div', { class: 'kd-select-list', role: 'listbox' });
@@ -71,7 +73,9 @@ export class SearchableSelect {
 	setOptions(options: readonly SearchableSelectOption[]): void {
 		this.options = options;
 		this.updateTrigger();
-		if (this.isOpen) this.renderList();
+		if (this.isOpen) {
+			this.renderList();
+		}
 	}
 
 	setValue(value: string | null): void {
@@ -80,7 +84,9 @@ export class SearchableSelect {
 	}
 
 	open(): void {
-		if (this.isOpen) return;
+		if (this.isOpen) {
+			return;
+		}
 		this.popup.classList.remove('hidden');
 		this.searchInput.value = '';
 		this.renderList();
@@ -89,27 +95,31 @@ export class SearchableSelect {
 	}
 
 	close(): void {
-		if (!this.isOpen) return;
+		if (!this.isOpen) {
+			return;
+		}
 		this.popup.classList.add('hidden');
 		document.removeEventListener('mousedown', this.onDocClick, true);
 	}
 
 	protected updateTrigger(): void {
 		const selected = this.options.find(option => option.value === this.currentValue);
-		this.triggerLabel.textContent = selected?.label ?? this.config.emptyLabel ?? this.config.placeholder ?? 'Select…';
+		this.triggerLabel.textContent = selected?.label ?? this.config.emptyLabel ?? this.config.placeholder
+			?? 'Select…';
 		this.triggerLabel.classList.toggle('kd-select-placeholder', !selected);
 	}
 
 	protected scoreFields(option: SearchableSelectOption): ScoreField[] {
 		return [
 			{ text: option.label, weight: 8, isName: true },
-			{ text: option.description, weight: 2, isName: false },
+			{ text: option.description, weight: 2, isName: false }
 		];
 	}
 
 	protected renderList(): void {
 		const query = this.searchInput.value;
-		this.filtered = scoreAndSort(query, [...this.options], option => this.scoreFields(option), option => option.label);
+		this.filtered = scoreAndSort(
+			query, [...this.options], option => this.scoreFields(option), option => option.label);
 		this.listEl.replaceChildren();
 		if (this.config.emptyLabel && !query) {
 			this.listEl.appendChild(this.buildRow({ value: '', label: this.config.emptyLabel }, -1));
@@ -126,10 +136,10 @@ export class SearchableSelect {
 		const row = el('button', {
 			type: 'button',
 			class: `kd-select-option${ option.value === this.currentValue ? ' is-selected' : '' }`,
-			role: 'option',
+			role: 'option'
 		}, [
 			el('span', { class: 'kd-select-option-label', textContent: option.label }),
-			option.description ? el('span', { class: 'kd-select-option-desc', textContent: option.description }) : null,
+			option.description ? el('span', { class: 'kd-select-option-desc', textContent: option.description }) : null
 		]);
 		row.addEventListener('click', () => this.commit(isEmptyRow ? null : option.value));
 		return row;
@@ -152,7 +162,9 @@ export class SearchableSelect {
 		}
 		if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
 			event.preventDefault();
-			if (!rows.length) return;
+			if (!rows.length) {
+				return;
+			}
 			this.highlightIndex = event.key === 'ArrowDown'
 				? Math.min(this.highlightIndex + 1, rows.length - 1)
 				: Math.max(this.highlightIndex - 1, 0);

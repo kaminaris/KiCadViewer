@@ -1,26 +1,26 @@
-import { KicadElement } from '@kicad-io/KicadElement';
-import { KicadElementArc } from '@kicad-io/KicadElementArc';
+import { KicadElement }                                                   from '@kicad-io/KicadElement';
+import { KicadElementArc }                                                from '@kicad-io/KicadElementArc';
 import {
 	KicadElementExcludeFromSim, KicadElementInBom, KicadElementInPosFiles, KicadElementOnBoard
-}                             from '@kicad-io/KicadElementBoolean';
-import { KicadElementCircle } from '@kicad-io/KicadElementCircle';
-import { KicadElementBezier } from '@kicad-io/KicadElementPolyline';
-import { KicadElementPin } from '@kicad-io/KicadElementPin';
-import { KicadElementRectangle } from '@kicad-io/KicadElementStartEnd';
-import { KicadElementSymbol } from '@kicad-io/KicadElementSymbol';
-import { KicadElementText } from '@kicad-io/KicadElementText';
-import { KicadParser } from '@kicad-io/KicadParser';
-import { KicadRenderSession } from '@kicad-render/KicadRenderSession';
-import { Vec2 } from '@kicad-render/math/Vec2';
-import { PendingShapeTracker } from '../editor/PendingShape';
+}                                                                         from '@kicad-io/KicadElementBoolean';
+import { KicadElementCircle }                                             from '@kicad-io/KicadElementCircle';
+import { KicadElementBezier }                                             from '@kicad-io/KicadElementPolyline';
+import { KicadElementPin }                                                from '@kicad-io/KicadElementPin';
+import { KicadElementRectangle }                                          from '@kicad-io/KicadElementStartEnd';
+import { KicadElementSymbol }                                             from '@kicad-io/KicadElementSymbol';
+import { KicadElementText }                                               from '@kicad-io/KicadElementText';
+import { KicadParser }                                                    from '@kicad-io/KicadParser';
+import { KicadRenderSession }                                             from '@kicad-render/KicadRenderSession';
+import { Vec2 }                                                           from '@kicad-render/math/Vec2';
+import { PendingShapeTracker }                                            from '../editor/PendingShape';
 import type { CachedSymbolFile, CachedSymbolSummary, SymbolLibraryCache } from '../io/SymbolLibraryCache';
-import { buildFilterSearch } from './Dom';
-import type { EditorChrome } from './EditorChrome';
-import { LibraryTreeList, type ChooserGroup } from './LibraryTreeList';
-import { fitPreviewCameraToContents } from './PreviewCamera';
-import { PropertiesDialog, type KdGridColumn } from './PropertiesDialog';
-import { PropertyPanel } from './PropertyPanel';
-import { normalizeText, buildScoredGroups, type ScoreField } from './search/TextScore';
+import { buildFilterSearch }                                              from './Dom';
+import type { EditorChrome }                                              from './EditorChrome';
+import { LibraryTreeList, type ChooserGroup }                             from './LibraryTreeList';
+import { fitPreviewCameraToContents }                                     from './PreviewCamera';
+import { PropertiesDialog, type KdGridColumn }                            from './PropertiesDialog';
+import { PropertyPanel }                                                  from './PropertyPanel';
+import { normalizeText, buildScoredGroups, type ScoreField }              from './search/TextScore';
 
 const PIN_ELECTRICAL_TYPE_OPTIONS = [
 	'input', 'output', 'bidirectional', 'tri_state', 'passive', 'power_in', 'power_out', 'open_collector',
@@ -80,6 +80,7 @@ export interface SymbolEditorScreenDom {
 
 export interface SymbolEditorScreenCallbacks {
 	saveFile(fileId: string, text: string): Promise<void>;
+
 	setStatus(message: string): void;
 }
 
@@ -88,7 +89,17 @@ export interface SymbolEditorScreenCallbacks {
  *  active tool and show a status message; wiring them up (they need
  *  inline text-entry UI, unlike every other tool here) is a later phase
  *  (see this class's own doc comment). */
-export type SymbolTool = 'select' | 'pin' | 'text' | 'text-box' | 'rect' | 'circle' | 'arc' | 'bezier' | 'anchor' | 'delete';
+export type SymbolTool =
+	'select'
+	| 'pin'
+	| 'text'
+	| 'text-box'
+	| 'rect'
+	| 'circle'
+	| 'arc'
+	| 'bezier'
+	| 'anchor'
+	| 'delete';
 
 const SYMBOL_TOOL_LABELS: Record<Exclude<SymbolTool, 'select' | 'pin' | 'delete'>, string> = {
 	text: 'Symbol Text',
@@ -97,7 +108,7 @@ const SYMBOL_TOOL_LABELS: Record<Exclude<SymbolTool, 'select' | 'pin' | 'delete'
 	circle: 'Circle',
 	arc: 'Arc',
 	bezier: 'Bezier Curve',
-	anchor: 'Anchor',
+	anchor: 'Anchor'
 };
 
 /** Symbol editor — mounted into the shared `#screen-editor` shell (see the
@@ -197,7 +208,7 @@ export class SymbolEditorScreen {
 			itemName: row => row.summary.name,
 			rowDescription: row => row.summary.description || '',
 			emptyMessage: hasAnyRows => hasAnyRows ? 'No matching symbols' : 'No symbol library file is indexed yet.',
-			onSelect: row => { void this.selectLibraryRow(row); },
+			onSelect: row => { void this.selectLibraryRow(row); }
 		});
 		this.librariesFilterEl.addEventListener('input', () => this.renderLibraryTree());
 
@@ -230,7 +241,8 @@ export class SymbolEditorScreen {
 	}
 
 	get isDirty(): boolean {
-		return !!this.fileId && this.normalizeEditorText(this.currentSourceText) !== this.normalizeEditorText(this.initialText);
+		return !!this.fileId && this.normalizeEditorText(this.currentSourceText) !== this.normalizeEditorText(
+			this.initialText);
 	}
 
 	protected normalizeEditorText(text: string): string {
@@ -272,8 +284,9 @@ export class SymbolEditorScreen {
 		this.currentRoot = this.parseRootText(sourceText);
 		this.currentSymbol = this.currentRoot
 			? (preferredSymbolName
-				? this.currentRoot.findChildrenByClass(KicadElementSymbol).find(candidate => candidate.symbolName === preferredSymbolName)
-					?? this.findPrimarySymbol(this.currentRoot)
+				? this.currentRoot.findChildrenByClass(KicadElementSymbol)
+					.find(candidate => candidate.symbolName === preferredSymbolName)
+				?? this.findPrimarySymbol(this.currentRoot)
 				: this.findPrimarySymbol(this.currentRoot))
 			: null;
 		this.currentSymbolName = this.currentSymbol?.symbolName ?? this.extractSymbolName(sourceText);
@@ -334,7 +347,8 @@ export class SymbolEditorScreen {
 		const rect = this.dom.stage.getBoundingClientRect();
 		return new Vec2(
 			(event.clientX - rect.left) * (this.dom.canvas.width / Math.max(1, rect.width)),
-			(event.clientY - rect.top) * (this.dom.canvas.height / Math.max(1, rect.height)));
+			(event.clientY - rect.top) * (this.dom.canvas.height / Math.max(1, rect.height))
+		);
 	}
 
 	protected onCanvasMouseDown(event: MouseEvent): void {
@@ -1192,29 +1206,34 @@ export class SymbolEditorScreen {
 			value => {
 				symbol.setExcludeFromSim(value);
 				this.refreshTextFromAst();
-			});
+			}
+		);
 		this.propertyPanel.checkbox(
 			attributes, 'Exclude from board', symbol.findFirstChildByClass(KicadElementOnBoard)?.value === false,
 			value => {
 				symbol.setOnBoard(!value);
 				this.refreshTextFromAst();
-			});
+			}
+		);
 		this.propertyPanel.checkbox(attributes, 'Do not populate', !!symbol.isDnp(), value => {
 			symbol.setDnp(value);
 			this.refreshTextFromAst();
 		});
 		this.propertyPanel.checkbox(
-			attributes, 'Exclude from bill of materials', symbol.findFirstChildByClass(KicadElementInBom)?.value === false,
+			attributes, 'Exclude from bill of materials',
+			symbol.findFirstChildByClass(KicadElementInBom)?.value === false,
 			value => {
 				symbol.setInBom(!value);
 				this.refreshTextFromAst();
-			});
+			}
+		);
 		this.propertyPanel.checkbox(
 			attributes, 'Exclude from position files',
 			symbol.findFirstChildByClass(KicadElementInPosFiles)?.value === false, value => {
 				symbol.setInPosFiles(!value);
 				this.refreshTextFromAst();
-			});
+			}
+		);
 
 		const pinsSection = this.propertyPanel.section('Pins');
 		const pins = this.collectPins(symbol);
@@ -1290,7 +1309,8 @@ export class SymbolEditorScreen {
 		const seen = new Set<string>();
 		const walk = (node: KicadElementSymbol) => {
 			for (const pin of node.findChildrenByClass(KicadElementPin)) {
-				const key = pin.getUuid?.() ?? `${ pin.getPin().number }-${ pin.getPin().name }-${ pin.getOrigin().x }-${ pin.getOrigin().y }`;
+				const key = pin.getUuid?.()
+					?? `${ pin.getPin().number }-${ pin.getPin().name }-${ pin.getOrigin().x }-${ pin.getOrigin().y }`;
 				if (!seen.has(key)) {
 					seen.add(key);
 					pins.push(pin);
@@ -1456,7 +1476,8 @@ export class SymbolEditorScreen {
 		// this one staying pinned to alphabetical file order during a search.
 		const groups: ChooserGroup<LibrarySymbolRow>[] = buildScoredGroups(
 			query, rows, row => row.file.relativePath || row.file.name, row => this.librarySymbolScoreFields(row),
-			row => row.summary.name);
+			row => row.summary.name
+		);
 		this.librariesTree.setGroups(
 			groups, { searching, hasAnyRows: this.libraryFiles.some(file => file.symbols.length > 0) });
 		if (this.fileId && !searching) {
@@ -1473,7 +1494,7 @@ export class SymbolEditorScreen {
 		return [
 			{ text: row.summary.name, weight: 8, isName: true },
 			{ text: row.summary.keywords, weight: 4, isName: false },
-			{ text: row.summary.description, weight: 1, isName: false },
+			{ text: row.summary.description, weight: 1, isName: false }
 		];
 	}
 

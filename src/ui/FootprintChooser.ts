@@ -2,8 +2,8 @@ import {
 	FootprintLibraryCache,
 	type CachedFootprintFile,
 	type CachedFootprintSummary
-}                             from '../io/FootprintLibraryCache';
-import { LibraryChooser } from './LibraryChooser';
+}                          from '../io/FootprintLibraryCache';
+import { LibraryChooser }  from './LibraryChooser';
 import { type ScoreField } from './search/TextScore';
 
 type PendingFootprint = { file: CachedFootprintFile; summary: CachedFootprintSummary; fpId: string };
@@ -29,19 +29,24 @@ export interface FootprintChooserCallbacks {
  *  chosen "Library:Name" footprint id (or null on cancel) for the caller
  *  (a Footprint field's browse button) to write wherever it likes. */
 export class FootprintChooser extends LibraryChooser<PendingFootprint> {
-	protected readonly applyFiltersLabelEl = document.getElementById('footprint-apply-filters-label') as HTMLLabelElement;
+	protected readonly applyFiltersLabelEl = document.getElementById(
+		'footprint-apply-filters-label') as HTMLLabelElement;
 	protected readonly applyFiltersEl = document.getElementById('footprint-apply-filters') as HTMLInputElement;
-	protected readonly applyFiltersCountEl = document.getElementById('footprint-apply-filters-count') as HTMLSpanElement;
-	protected readonly filterPinCountLabelEl = document.getElementById('footprint-filter-pin-count-label') as HTMLLabelElement;
+	protected readonly applyFiltersCountEl = document.getElementById(
+		'footprint-apply-filters-count') as HTMLSpanElement;
+	protected readonly filterPinCountLabelEl = document.getElementById(
+		'footprint-filter-pin-count-label') as HTMLLabelElement;
 	protected readonly filterPinCountEl = document.getElementById('footprint-filter-pin-count') as HTMLInputElement;
-	protected readonly filterPinCountCountEl = document.getElementById('footprint-filter-pin-count-count') as HTMLSpanElement;
+	protected readonly filterPinCountCountEl = document.getElementById(
+		'footprint-filter-pin-count-count') as HTMLSpanElement;
 
 	protected context: FootprintChooserContext = { fpFilters: [], pinCount: 0 };
 	protected resolveOpen: ((value: string | null) => void) | null = null;
 
 	protected static readonly RECENT_STORAGE_KEY = 'kionline-recent-footprint-ids';
 
-	constructor(protected readonly cache: FootprintLibraryCache, protected readonly callbacks: FootprintChooserCallbacks) {
+	constructor(
+		protected readonly cache: FootprintLibraryCache, protected readonly callbacks: FootprintChooserCallbacks) {
 		super({
 			modal: 'footprint-chooser-modal',
 			title: 'footprint-chooser-title',
@@ -53,10 +58,16 @@ export class FootprintChooser extends LibraryChooser<PendingFootprint> {
 			previewPlaceholder: 'footprint-preview-placeholder',
 			ok: 'footprint-chooser-ok',
 			cancel: 'footprint-chooser-cancel',
-			close: 'footprint-chooser-close',
+			close: 'footprint-chooser-close'
 		});
-		this.applyFiltersEl.addEventListener('change', () => { this.userSelected = false; this.renderList(); });
-		this.filterPinCountEl.addEventListener('change', () => { this.userSelected = false; this.renderList(); });
+		this.applyFiltersEl.addEventListener('change', () => {
+			this.userSelected = false;
+			this.renderList();
+		});
+		this.filterPinCountEl.addEventListener('change', () => {
+			this.userSelected = false;
+			this.renderList();
+		});
 		this.cancelEl.addEventListener('click', () => this.finish(null));
 		this.closeEl.addEventListener('click', () => this.finish(null));
 		this.okEl.addEventListener('click', () => this.finish(this.pendingItem?.fpId ?? null));
@@ -86,7 +97,8 @@ export class FootprintChooser extends LibraryChooser<PendingFootprint> {
 	protected async fetchRows(): Promise<PendingFootprint[]> {
 		const files = await this.cache.getFiles();
 		return files.flatMap(
-			file => file.footprints.map(summary => ({ file, summary, fpId: `${ summary.library }:${ summary.name }` })));
+			file => file.footprints.map(
+				summary => ({ file, summary, fpId: `${ summary.library }:${ summary.name }` })));
 	}
 
 	protected itemKey(item: PendingFootprint): string { return item.fpId; }
@@ -152,7 +164,7 @@ export class FootprintChooser extends LibraryChooser<PendingFootprint> {
 			{ text: item.summary.name, weight: 8, isName: true },
 			{ text: item.summary.library, weight: 4, isName: false },
 			{ text: item.summary.keywords, weight: 4, isName: false },
-			{ text: item.summary.description, weight: 1, isName: false },
+			{ text: item.summary.description, weight: 1, isName: false }
 		];
 	}
 

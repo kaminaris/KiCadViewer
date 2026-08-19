@@ -1,5 +1,5 @@
 import { EditorPane } from './EditorPane';
-import { el } from './Dom';
+import { el }         from './Dom';
 
 export interface PaneStackEntry {
 	id: string;
@@ -30,13 +30,17 @@ export class PaneStack {
 
 	mount(id: string, title: string, content: HTMLElement): void {
 		const pane = this.panes.find(candidate => candidate.id === id);
-		if (!pane) throw new Error(`Editor pane ${ id } is unavailable.`);
+		if (!pane) {
+			throw new Error(`Editor pane ${ id } is unavailable.`);
+		}
 		pane.mount(title, content);
 	}
 
 	setVisible(id: string, visible: boolean): void {
 		const pane = this.panes.find(candidate => candidate.id === id);
-		if (!pane) throw new Error(`Editor pane ${ id } is unavailable.`);
+		if (!pane) {
+			throw new Error(`Editor pane ${ id } is unavailable.`);
+		}
 		pane.setVisible(visible);
 	}
 

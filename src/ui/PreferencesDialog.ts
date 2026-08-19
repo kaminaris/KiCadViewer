@@ -66,8 +66,14 @@ export class PreferencesDialog {
 
 		const navigation = document.createElement('nav');
 		navigation.className = 'preferences-nav';
-		for (const [id, label] of [['common', 'Common'], ['mouse', 'Mouse and Touchpad'], ['editor', 'Schematic Editor'], ['pcb-editor', 'PCB Editor'], ['colors', 'Colors'], ['hotkeys', 'Hotkeys']] as const) {
-			const button = this.button(label, () => { this.page = id; this.render(); });
+		for (const [id, label] of [
+			['common', 'Common'], ['mouse', 'Mouse and Touchpad'], ['editor', 'Schematic Editor'],
+			['pcb-editor', 'PCB Editor'], ['colors', 'Colors'], ['hotkeys', 'Hotkeys']
+		] as const) {
+			const button = this.button(label, () => {
+				this.page = id;
+				this.render();
+			});
 			button.className = `preferences-nav-item${ this.page === id ? ' active' : '' }`;
 			navigation.appendChild(button);
 		}
@@ -77,7 +83,7 @@ export class PreferencesDialog {
 			: this.page === 'mouse' ? this.mousePage()
 				: this.page === 'editor' ? this.editorPage()
 					: this.page === 'pcb-editor' ? this.pcbEditorPage()
-					: this.page === 'colors' ? this.colorsPage() : this.hotkeysPage());
+						: this.page === 'colors' ? this.colorsPage() : this.hotkeysPage());
 		const body = document.createElement('div');
 		body.className = 'preferences-body';
 		body.append(navigation, this.pageContent);
@@ -90,8 +96,13 @@ export class PreferencesDialog {
 		});
 		const spacer = document.createElement('span');
 		spacer.className = 'preferences-spacer';
-		footer.append(reset, spacer, this.button('Cancel', () => this.close()), this.button('Apply', () => this.apply()),
-			this.button('OK', () => { this.apply(); this.close(); }));
+		footer.append(
+			reset, spacer, this.button('Cancel', () => this.close()), this.button('Apply', () => this.apply()),
+			this.button('OK', () => {
+				this.apply();
+				this.close();
+			})
+		);
 
 		this.element.replaceChildren(title, body, footer);
 	}
@@ -108,8 +119,10 @@ export class PreferencesDialog {
 			this.radioGroup<DisplayUnit>('Coordinate display units', 'display-unit', [
 				['mm', 'Millimetres'], ['mil', 'Mils']
 			], value => { this.draft.displayUnit = value; }),
-			this.checkbox('Show status bar', this.draft.showStatusBar,
-				checked => { this.draft.showStatusBar = checked; })
+			this.checkbox(
+				'Show status bar', this.draft.showStatusBar,
+				checked => { this.draft.showStatusBar = checked; }
+			)
 		);
 		const description = document.createElement('p');
 		description.className = 'preferences-note';
@@ -124,7 +137,8 @@ export class PreferencesDialog {
 		theme.className = 'preferences-field';
 		theme.append('Schematic color theme');
 		const select = document.createElement('select');
-		for (const [id, preset] of Object.entries(SCHEMATIC_THEME_PRESETS) as [SchematicThemeId, typeof SCHEMATIC_THEME_PRESETS[SchematicThemeId]][]) {
+		for (const [id, preset] of Object.entries(
+			SCHEMATIC_THEME_PRESETS) as [SchematicThemeId, typeof SCHEMATIC_THEME_PRESETS[SchematicThemeId]][]) {
 			select.appendChild(new Option(preset.label, id, false, id === this.draft.schematicTheme));
 		}
 		select.addEventListener('change', () => {
@@ -172,12 +186,18 @@ export class PreferencesDialog {
 			this.radioGroup<ZoomSpeed>('Mouse wheel zoom speed', 'zoom-speed', [
 				['slow', 'Slow'], ['normal', 'Normal'], ['fast', 'Fast']
 			], value => { this.draft.zoomSpeed = value; }),
-			this.checkbox('Invert mouse wheel zoom direction', this.draft.invertZoom,
-				checked => { this.draft.invertZoom = checked; }),
-			this.checkbox('Center and warp cursor on zoom', this.draft.centerAndWarpCursorOnZoom,
-				checked => { this.draft.centerAndWarpCursorOnZoom = checked; }),
-			this.checkbox('Use a crosshair cursor on the canvas', this.draft.crosshairCursor,
-				checked => { this.draft.crosshairCursor = checked; })
+			this.checkbox(
+				'Invert mouse wheel zoom direction', this.draft.invertZoom,
+				checked => { this.draft.invertZoom = checked; }
+			),
+			this.checkbox(
+				'Center and warp cursor on zoom', this.draft.centerAndWarpCursorOnZoom,
+				checked => { this.draft.centerAndWarpCursorOnZoom = checked; }
+			),
+			this.checkbox(
+				'Use a crosshair cursor on the canvas', this.draft.crosshairCursor,
+				checked => { this.draft.crosshairCursor = checked; }
+			)
 		);
 		const note = document.createElement('p');
 		note.className = 'preferences-note';
@@ -192,16 +212,20 @@ export class PreferencesDialog {
 		grid.className = 'preferences-field';
 		grid.append('Default grid spacing');
 		const select = document.createElement('select');
-		for (const [value, label] of [['0.635', '0.635 mm (25 mil)'], ['1.27', '1.27 mm (50 mil)'],
-			['2.54', '2.54 mm (100 mil)'], ['5.08', '5.08 mm (200 mil)']]) {
+		for (const [value, label] of [
+			['0.635', '0.635 mm (25 mil)'], ['1.27', '1.27 mm (50 mil)'],
+			['2.54', '2.54 mm (100 mil)'], ['5.08', '5.08 mm (200 mil)']
+		]) {
 			const option = new Option(label, value, false, Number(value) === this.draft.schematicGridSpacingMm);
 			select.appendChild(option);
 		}
 		select.addEventListener('change', () => { this.draft.schematicGridSpacingMm = Number(select.value); });
 		grid.appendChild(select);
 
-		const snap = this.checkbox('Snap newly placed and edited items to the grid', this.draft.schematicGridSnapping,
-			checked => { this.draft.schematicGridSnapping = checked; });
+		const snap = this.checkbox(
+			'Snap newly placed and edited items to the grid', this.draft.schematicGridSnapping,
+			checked => { this.draft.schematicGridSnapping = checked; }
+		);
 		const power = document.createElement('label');
 		power.className = 'preferences-field';
 		power.append('Default power symbol');
@@ -209,7 +233,8 @@ export class PreferencesDialog {
 		for (const [value, label] of [['gnd', 'GND'], ['flag', 'PWR_FLAG'], ['rail', 'Power rail']]) {
 			powerSelect.appendChild(new Option(label, value, false, value === this.draft.powerKind));
 		}
-		powerSelect.addEventListener('change', () => { this.draft.powerKind = powerSelect.value as AppSettings['powerKind']; });
+		powerSelect.addEventListener(
+			'change', () => { this.draft.powerKind = powerSelect.value as AppSettings['powerKind']; });
 		power.appendChild(powerSelect);
 		page.append(grid, snap, power);
 		return page;
@@ -221,13 +246,19 @@ export class PreferencesDialog {
 		grid.className = 'preferences-field';
 		grid.append('Default PCB grid spacing');
 		const select = document.createElement('select');
-		for (const [value, label] of [['0.05', '0.05 mm'], ['0.1', '0.10 mm'], ['0.2', '0.20 mm'], ['0.25', '0.25 mm'], ['0.5', '0.50 mm'], ['1', '1.00 mm']]) {
+		for (const [value, label] of [
+			['0.05', '0.05 mm'], ['0.1', '0.10 mm'], ['0.2', '0.20 mm'], ['0.25', '0.25 mm'], ['0.5', '0.50 mm'],
+			['1', '1.00 mm']
+		]) {
 			select.appendChild(new Option(label, value, false, Number(value) === this.draft.boardGridSpacingMm));
 		}
 		select.addEventListener('change', () => { this.draft.boardGridSpacingMm = Number(select.value); });
 		grid.appendChild(select);
-		page.append(grid, this.checkbox('Snap moved footprints, tracks, and vias to the PCB grid', this.draft.boardGridSnapping,
-			checked => { this.draft.boardGridSnapping = checked; }));
+		page.append(
+			grid, this.checkbox(
+				'Snap moved footprints, tracks, and vias to the PCB grid', this.draft.boardGridSnapping,
+				checked => { this.draft.boardGridSnapping = checked; }
+			));
 		return page;
 	}
 
@@ -237,7 +268,10 @@ export class PreferencesDialog {
 		note.className = 'preferences-note';
 		note.textContent = 'Click a shortcut and press the new key combination. A shortcut cannot be assigned to more than one action.';
 		page.appendChild(note);
-		const reset = this.button('Reset Hotkeys to Defaults', () => { this.draft.shortcuts = defaultShortcuts(); this.render(); });
+		const reset = this.button('Reset Hotkeys to Defaults', () => {
+			this.draft.shortcuts = defaultShortcuts();
+			this.render();
+		});
 		reset.className = 'preferences-secondary-action';
 		page.appendChild(reset);
 		for (const category of ['Common', 'Schematic Editor'] as const) {
@@ -274,9 +308,12 @@ export class PreferencesDialog {
 			if (!binding) {
 				return;
 			}
-			const conflict = Object.entries(this.draft.shortcuts).find(([id, value]) => id !== action && value === binding);
+			const conflict = Object.entries(this.draft.shortcuts)
+				.find(([id, value]) => id !== action && value === binding);
 			if (conflict) {
-				input.setCustomValidity(`Already assigned to ${ SHORTCUT_ACTIONS.find(item => item.id === conflict[0])?.label ?? 'another action' }.`);
+				input.setCustomValidity(
+					`Already assigned to ${ SHORTCUT_ACTIONS.find(item => item.id === conflict[0])?.label
+					?? 'another action' }.`);
 				input.reportValidity();
 				return;
 			}
@@ -296,7 +333,8 @@ export class PreferencesDialog {
 		return page;
 	}
 
-	protected radioGroup<T extends string>(label: string, name: string, options: readonly [T, string][], onChange: (value: T) => void): HTMLElement {
+	protected radioGroup<T extends string>(
+		label: string, name: string, options: readonly [T, string][], onChange: (value: T) => void): HTMLElement {
 		const group = document.createElement('fieldset');
 		group.className = 'preferences-radio-group';
 		const legend = document.createElement('legend');

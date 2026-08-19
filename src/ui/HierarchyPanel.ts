@@ -1,5 +1,5 @@
 import { KicadSchematic } from '@kicad-io/Project/KicadSchematic';
-import { el } from './Dom';
+import { el }             from './Dom';
 
 export interface HierarchyPanelCallbacks {
 	getRootSheet(): KicadSchematic | null;

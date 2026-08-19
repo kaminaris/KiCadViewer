@@ -34,7 +34,7 @@ export class ToolButton {
 			class: 'tool-btn',
 			title: config.hotkey ? `${ config.label } (${ config.hotkey })` : config.label,
 			disabled: !!config.disabled,
-			dataset: { tool: config.id },
+			dataset: { tool: config.id }
 		});
 		this.element.setAttribute('aria-label', config.label);
 		this.element.setAttribute('aria-pressed', 'false');
@@ -43,7 +43,9 @@ export class ToolButton {
 		icon.classList.add('tool-icon');
 		this.element.appendChild(icon);
 		this.element.addEventListener('click', () => {
-			if (!this.element.disabled) onActivate(this.id);
+			if (!this.element.disabled) {
+				onActivate(this.id);
+			}
 		});
 	}
 
@@ -81,9 +83,11 @@ export class ToolPalette {
 
 	constructor(config: ToolPaletteConfig, onSelect: (id: string) => void) {
 		this.element = el('aside', {
-			class: config.orientation === 'horizontal' ? 'tool-panel tool-panel-horizontal' : 'tool-panel',
+			class: config.orientation === 'horizontal' ? 'tool-panel tool-panel-horizontal' : 'tool-panel'
 		});
-		if (config.label) this.element.setAttribute('aria-label', config.label);
+		if (config.label) {
+			this.element.setAttribute('aria-label', config.label);
+		}
 		for (const tool of config.tools) {
 			const button = new ToolButton(tool, id => {
 				this.setActiveTool(id);
@@ -98,7 +102,9 @@ export class ToolPalette {
 
 	setActiveTool(id: string | null): void {
 		this.activeId = id;
-		for (const [toolId, button] of this.buttons) button.setActive(toolId === id);
+		for (const [toolId, button] of this.buttons) {
+			button.setActive(toolId === id);
+		}
 	}
 
 	setToolDisabled(id: string, disabled: boolean): void {

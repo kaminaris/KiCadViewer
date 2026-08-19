@@ -47,10 +47,16 @@ export function openNewProjectDialog(defaultName = 'NewProject'): Promise<string
 		};
 
 		function onKeyDown(event: KeyboardEvent): void {
-			if (event.key === 'Escape') finish(null);
+			if (event.key === 'Escape') {
+				finish(null);
+			}
 		}
 
-		input.addEventListener('keydown', event => { if (event.key === 'Enter') submit(); });
+		input.addEventListener('keydown', event => {
+			if (event.key === 'Enter') {
+				submit();
+			}
+		});
 
 		const actions = document.createElement('div');
 		actions.className = 'table-modal-actions';
@@ -67,7 +73,11 @@ export function openNewProjectDialog(defaultName = 'NewProject'): Promise<string
 
 		dialog.append(heading, label, error, actions);
 		backdrop.append(dialog);
-		backdrop.addEventListener('mousedown', event => { if (event.target === backdrop) finish(null); });
+		backdrop.addEventListener('mousedown', event => {
+			if (event.target === backdrop) {
+				finish(null);
+			}
+		});
 		document.addEventListener('keydown', onKeyDown);
 		document.body.append(backdrop);
 		input.focus();

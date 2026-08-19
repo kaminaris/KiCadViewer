@@ -240,7 +240,9 @@ export class PropertiesDialog {
 			button.className = 'kd-tab-btn';
 			button.textContent = tab.label;
 			button.addEventListener('click', () => {
-				if (index === activeIndex) return;
+				if (index === activeIndex) {
+					return;
+				}
 				onTabChange(index);
 			});
 			buttons.push(button);

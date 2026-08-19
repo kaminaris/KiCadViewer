@@ -1,9 +1,14 @@
 import type { ZoneDraft } from '@kicad-render/KicadRenderSession';
-import { colorForLayer } from '@kicad-render/paint/LayerColors';
-import type { ZonePadConnectionType, ZoneSmoothingType, ZoneIslandRemovalMode, ZoneHatchStyle } from '@kicad-io/KicadElementZone';
+import {
+	colorForLayer
+}                         from '@kicad-render/paint/LayerColors';
+import type {
+	ZonePadConnectionType, ZoneSmoothingType, ZoneIslandRemovalMode, ZoneHatchStyle
+}                         from '@kicad-io/KicadElementZone';
 
 export interface ZonePropertiesDialogCallbacks {
 	getCopperLayers(): string[];
+
 	getNets(): { id: number; name: string }[];
 }
 
@@ -78,7 +83,9 @@ export class ZonePropertiesDialog {
 		const spacer = document.createElement('span');
 		spacer.className = 'preferences-spacer';
 		const okBtn = this.button('OK', () => {
-			if (this.draft.layers.length === 0 || !this.onCommit) return;
+			if (this.draft.layers.length === 0 || !this.onCommit) {
+				return;
+			}
 			this.onCommit(this.draft);
 			this.close();
 		});
@@ -165,27 +172,56 @@ export class ZonePropertiesDialog {
 	protected clearancesTab(): HTMLElement {
 		const wrap = document.createElement('div');
 		wrap.append(
-			this.field('Clearance:', this.numberField(this.draft.clearanceMm, value => { this.draft.clearanceMm = value; }), 'mm'),
-			this.field('Minimum width:', this.numberField(this.draft.minThicknessMm, value => { this.draft.minThicknessMm = value; }), 'mm'),
+			this.field(
+				'Clearance:', this.numberField(this.draft.clearanceMm, value => { this.draft.clearanceMm = value; }),
+				'mm'
+			),
+			this.field(
+				'Minimum width:',
+				this.numberField(this.draft.minThicknessMm, value => { this.draft.minThicknessMm = value; }), 'mm'
+			),
 			this.field('Pad connections:', this.selectField<ZonePadConnectionType>(this.draft.padConnection, [
-				['thermal', 'Thermal reliefs'], ['full', 'Solid'], ['thru_hole_only', 'Thru-hole only'], ['none', 'None']
-			], value => { this.draft.padConnection = value; this.render(); })),
-			this.field('Thermal relief gap:', this.numberField(this.draft.thermalGapMm, value => { this.draft.thermalGapMm = value; }), 'mm')
+				['thermal', 'Thermal reliefs'], ['full', 'Solid'], ['thru_hole_only', 'Thru-hole only'],
+				['none', 'None']
+			], value => {
+				this.draft.padConnection = value;
+				this.render();
+			})),
+			this.field(
+				'Thermal relief gap:',
+				this.numberField(this.draft.thermalGapMm, value => { this.draft.thermalGapMm = value; }), 'mm'
+			)
 		);
 		if (this.draft.padConnection === 'thermal') {
-			wrap.append(this.field('Thermal spoke width:', this.numberField(this.draft.thermalSpokeWidthMm, value => { this.draft.thermalSpokeWidthMm = value; }), 'mm'));
+			wrap.append(this.field(
+				'Thermal spoke width:',
+				this.numberField(this.draft.thermalSpokeWidthMm, value => { this.draft.thermalSpokeWidthMm = value; }),
+				'mm'
+			));
 		}
 		wrap.append(this.field('Corner smoothing:', this.selectField<ZoneSmoothingType>(this.draft.cornerSmoothing, [
 			['none', 'None'], ['chamfer', 'Chamfer'], ['fillet', 'Fillet']
-		], value => { this.draft.cornerSmoothing = value; this.render(); })));
+		], value => {
+			this.draft.cornerSmoothing = value;
+			this.render();
+		})));
 		if (this.draft.cornerSmoothing !== 'none') {
-			wrap.append(this.field('Smoothing amount:', this.numberField(this.draft.cornerRadiusMm, value => { this.draft.cornerRadiusMm = value; }), 'mm'));
+			wrap.append(this.field(
+				'Smoothing amount:',
+				this.numberField(this.draft.cornerRadiusMm, value => { this.draft.cornerRadiusMm = value; }), 'mm'
+			));
 		}
 		wrap.append(this.field('Remove islands:', this.selectField<ZoneIslandRemovalMode>(this.draft.islandRemoval, [
 			['always', 'Always'], ['never', 'Never'], ['area', 'Below area limit']
-		], value => { this.draft.islandRemoval = value; this.render(); })));
+		], value => {
+			this.draft.islandRemoval = value;
+			this.render();
+		})));
 		if (this.draft.islandRemoval === 'area') {
-			wrap.append(this.field('Minimum island area:', this.numberField(this.draft.islandAreaMinMm, value => { this.draft.islandAreaMinMm = value; }), 'mm²'));
+			wrap.append(this.field(
+				'Minimum island area:',
+				this.numberField(this.draft.islandAreaMinMm, value => { this.draft.islandAreaMinMm = value; }), 'mm²'
+			));
 		}
 		return wrap;
 	}
@@ -193,13 +229,22 @@ export class ZonePropertiesDialog {
 	protected displayTab(): HTMLElement {
 		const wrap = document.createElement('div');
 		wrap.append(
-			this.field('Zone priority level:', this.numberField(this.draft.priority, value => { this.draft.priority = value; }, '1')),
+			this.field(
+				'Zone priority level:',
+				this.numberField(this.draft.priority, value => { this.draft.priority = value; }, '1')
+			),
 			this.field('Outline display:', this.selectField<ZoneHatchStyle>(this.draft.hatchStyle, [
 				['none', 'No hatch'], ['edge', 'Edge hatch'], ['full', 'Full hatch']
-			], value => { this.draft.hatchStyle = value; this.render(); }))
+			], value => {
+				this.draft.hatchStyle = value;
+				this.render();
+			}))
 		);
 		if (this.draft.hatchStyle !== 'none') {
-			wrap.append(this.field('Hatch pitch:', this.numberField(this.draft.hatchPitchMm, value => { this.draft.hatchPitchMm = value; }), 'mm'));
+			wrap.append(this.field(
+				'Hatch pitch:',
+				this.numberField(this.draft.hatchPitchMm, value => { this.draft.hatchPitchMm = value; }), 'mm'
+			));
 		}
 		return wrap;
 	}
@@ -237,7 +282,8 @@ export class ZonePropertiesDialog {
 		return input;
 	}
 
-	protected selectField<T extends string>(value: T, options: [T, string][], onChange: (value: T) => void): HTMLSelectElement {
+	protected selectField<T extends string>(
+		value: T, options: [T, string][], onChange: (value: T) => void): HTMLSelectElement {
 		const select = document.createElement('select');
 		for (const [optionValue, label] of options) {
 			select.appendChild(new Option(label, optionValue, false, optionValue === value));
@@ -250,8 +296,11 @@ export class ZonePropertiesDialog {
 		const select = document.createElement('select');
 		select.appendChild(new Option('<no net>', '0', false, this.draft.netId === 0));
 		for (const net of this.callbacks.getNets()) {
-			if (net.id === 0 || !net.name) continue;
-			select.appendChild(new Option(`${ net.id } · ${ net.name }`, String(net.id), false, this.draft.netId === net.id));
+			if (net.id === 0 || !net.name) {
+				continue;
+			}
+			select.appendChild(
+				new Option(`${ net.id } · ${ net.name }`, String(net.id), false, this.draft.netId === net.id));
 		}
 		select.addEventListener('change', () => {
 			this.draft.netId = Number(select.value);

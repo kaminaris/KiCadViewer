@@ -5,18 +5,31 @@ export interface BoardAuxToolbarCallbacks {
 	 *  via_dimensions}, the same lists Project Setup's Track Widths/Via
 	 *  Dimensions pages edit. */
 	getProjectRaw(): Record<string, unknown> | null | undefined;
+
 	getTrackWidthIndex(): number;
+
 	setTrackWidthIndex(index: number): void;
+
 	getViaSizeIndex(): number;
+
 	setViaSizeIndex(index: number): void;
+
 	getUseConnectedTrackWidth(): boolean;
+
 	setUseConnectedTrackWidth(value: boolean): void;
+
 	getActiveBoardLayer(): string;
+
 	setActiveBoardLayer(layer: string): void;
+
 	getBoardCopperLayers(): string[];
+
 	getOverrideLocks(): boolean;
+
 	setOverrideLocks(value: boolean): void;
+
 	openLayerPairDialog(): void;
+
 	openProjectSetup(category?: string): void;
 }
 
@@ -71,7 +84,8 @@ export class BoardAuxToolbar {
 	protected boardDesignSettings(): Record<string, unknown> {
 		const raw = this.callbacks.getProjectRaw();
 		const board = raw && typeof raw === 'object' ? (raw as { board?: unknown }).board : null;
-		const settings = board && typeof board === 'object' ? (board as { design_settings?: unknown }).design_settings : null;
+		const settings = board && typeof board === 'object' ? (board as { design_settings?: unknown }).design_settings :
+			null;
 		return settings && typeof settings === 'object' ? settings as Record<string, unknown> : {};
 	}
 
@@ -101,7 +115,8 @@ export class BoardAuxToolbar {
 		viaDimensions.forEach((via, i) => {
 			const diameter = Number(via.diameter) || 0;
 			const drill = Number(via.drill) || 0;
-			this.viaSizeEl.appendChild(new Option(`Via: ${ diameter.toFixed(2) }/${ drill.toFixed(2) } mm`, String(i + 1)));
+			this.viaSizeEl.appendChild(
+				new Option(`Via: ${ diameter.toFixed(2) }/${ drill.toFixed(2) } mm`, String(i + 1)));
 		});
 		this.viaSizeEl.appendChild(new Option('── Edit Pre-defined Sizes… ──', 'edit'));
 		const viaSizeIndex = this.callbacks.getViaSizeIndex();

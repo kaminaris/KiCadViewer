@@ -49,7 +49,10 @@ export class BoardTextPropertiesDialog {
 		document.body.appendChild(this.element);
 	}
 
-	open(initial: BoardTextPropertiesDraft, layers: readonly string[], onCommit: (draft: BoardTextPropertiesDraft) => void): void {
+	open(
+		initial: BoardTextPropertiesDraft, layers: readonly string[],
+		onCommit: (draft: BoardTextPropertiesDraft) => void
+	): void {
 		this.draft = { ...initial };
 		this.onCommit = onCommit;
 		this.linkedSize = initial.widthMm === initial.heightMm;
@@ -66,7 +69,9 @@ export class BoardTextPropertiesDialog {
 
 	protected render(layers: readonly string[]): void {
 		const draft = this.draft;
-		if (!draft) return;
+		if (!draft) {
+			return;
+		}
 
 		const title = document.createElement('div');
 		title.className = 'preferences-titlebar';
@@ -96,7 +101,10 @@ export class BoardTextPropertiesDialog {
 
 		const basics = document.createElement('div');
 		basics.className = 'board-text-props-basics';
-		basics.append(this.checkbox('Locked', draft.locked, value => { draft.locked = value; }), this.field('Layer:', this.layerSelect(draft, layers)));
+		basics.append(
+			this.checkbox('Locked', draft.locked, value => { draft.locked = value; }),
+			this.field('Layer:', this.layerSelect(draft, layers))
+		);
 		if (!draft.isTextBox) {
 			basics.append(this.checkbox('Knockout', draft.knockout, value => { draft.knockout = value; }));
 		}
@@ -111,12 +119,36 @@ export class BoardTextPropertiesDialog {
 		styleButtons.append(
 			this.toggleButton('B', 'Bold', draft.bold, value => { draft.bold = value; }),
 			this.toggleButton('I', 'Italic', draft.italic, value => { draft.italic = value; }),
-			this.alignmentButton('≡', 'Align left', draft.horizontalAlignment === 'left', () => { draft.horizontalAlignment = 'left'; this.render(layers); }),
-			this.alignmentButton('≡', 'Align centre', draft.horizontalAlignment === 'middle', () => { draft.horizontalAlignment = 'middle'; this.render(layers); }),
-			this.alignmentButton('≡', 'Align right', draft.horizontalAlignment === 'right', () => { draft.horizontalAlignment = 'right'; this.render(layers); }),
-			this.alignmentButton('↥', 'Align top', draft.verticalAlignment === 'top', () => { draft.verticalAlignment = 'top'; this.render(layers); }),
-			this.alignmentButton('↕', 'Align middle', draft.verticalAlignment === 'middle', () => { draft.verticalAlignment = 'middle'; this.render(layers); }),
-			this.alignmentButton('↧', 'Align bottom', draft.verticalAlignment === 'bottom', () => { draft.verticalAlignment = 'bottom'; this.render(layers); }),
+			this.alignmentButton(
+				'≡', 'Align left', draft.horizontalAlignment === 'left', () => {
+					draft.horizontalAlignment = 'left';
+					this.render(layers);
+				}),
+			this.alignmentButton(
+				'≡', 'Align centre', draft.horizontalAlignment === 'middle', () => {
+					draft.horizontalAlignment = 'middle';
+					this.render(layers);
+				}),
+			this.alignmentButton(
+				'≡', 'Align right', draft.horizontalAlignment === 'right', () => {
+					draft.horizontalAlignment = 'right';
+					this.render(layers);
+				}),
+			this.alignmentButton(
+				'↥', 'Align top', draft.verticalAlignment === 'top', () => {
+					draft.verticalAlignment = 'top';
+					this.render(layers);
+				}),
+			this.alignmentButton(
+				'↕', 'Align middle', draft.verticalAlignment === 'middle', () => {
+					draft.verticalAlignment = 'middle';
+					this.render(layers);
+				}),
+			this.alignmentButton(
+				'↧', 'Align bottom', draft.verticalAlignment === 'bottom', () => {
+					draft.verticalAlignment = 'bottom';
+					this.render(layers);
+				}),
 			this.toggleButton('↔', 'Mirror text', draft.mirrored, value => { draft.mirrored = value; })
 		);
 		font.append(this.field('Font:', fontSelect), styleButtons);
@@ -142,28 +174,41 @@ export class BoardTextPropertiesDialog {
 		metrics.append(
 			this.field('Width:', widthInput, 'mm'),
 			this.field('Height:', heightInput, 'mm'),
-			this.field('Thickness:', this.numberInput(draft.thicknessMm, value => { draft.thicknessMm = value; }), 'mm'),
+			this.field(
+				'Thickness:', this.numberInput(draft.thicknessMm, value => { draft.thicknessMm = value; }), 'mm'),
 			this.linkSizeToggle()
 		);
 		const geometry = document.createElement('div');
 		geometry.className = 'board-text-props-position';
 		if (draft.isTextBox) {
 			geometry.append(
-				this.checkbox('Border', draft.border, value => { draft.border = value; this.render(layers); }),
-				this.field('Border width:', this.numberInput(draft.borderWidthMm, value => { draft.borderWidthMm = value; }), 'mm'),
+				this.checkbox('Border', draft.border, value => {
+					draft.border = value;
+					this.render(layers);
+				}),
+				this.field(
+					'Border width:', this.numberInput(draft.borderWidthMm, value => { draft.borderWidthMm = value; }),
+					'mm'
+				),
 				this.field('Border style:', this.strokeStyleSelect(draft))
 			);
-			for (const input of Array.from(geometry.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select'))) {
+			for (const input of Array.from(
+				geometry.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select'))) {
 				input.disabled = !draft.border;
 			}
 		}
 		else {
 			geometry.append(
-				this.field('Position X:', this.numberInput(draft.positionX, value => { draft.positionX = value; }), 'mm'),
-				this.field('Position Y:', this.numberInput(draft.positionY, value => { draft.positionY = value; }), 'mm')
+				this.field(
+					'Position X:', this.numberInput(draft.positionX, value => { draft.positionX = value; }), 'mm'),
+				this.field(
+					'Position Y:', this.numberInput(draft.positionY, value => { draft.positionY = value; }), 'mm')
 			);
 		}
-		geometry.append(this.field('Orientation:', this.numberInput(draft.orientation, value => { draft.orientation = value; }, '1'), '°'));
+		geometry.append(this.field(
+			'Orientation:',
+			this.numberInput(draft.orientation, value => { draft.orientation = value; }, '1'), '°'
+		));
 
 		body.append(textLabel, text, syntaxHelp, basics, font, metrics, geometry);
 		const footer = document.createElement('footer');
@@ -171,7 +216,9 @@ export class BoardTextPropertiesDialog {
 		const spacer = document.createElement('span');
 		spacer.className = 'preferences-spacer';
 		footer.append(spacer, this.button('Cancel', () => this.close()), this.button('OK', () => {
-			if (!this.draft || !this.onCommit || !this.draft.text.trim()) return;
+			if (!this.draft || !this.onCommit || !this.draft.text.trim()) {
+				return;
+			}
 			this.onCommit({ ...this.draft });
 			this.close();
 		}));
@@ -247,7 +294,8 @@ export class BoardTextPropertiesDialog {
 		return row;
 	}
 
-	protected toggleButton(label: string, title: string, checked: boolean, onChange: (value: boolean) => void): HTMLButtonElement {
+	protected toggleButton(
+		label: string, title: string, checked: boolean, onChange: (value: boolean) => void): HTMLButtonElement {
 		const button = this.button(label, () => {
 			const next = !button.classList.contains('active');
 			onChange(next);
@@ -263,7 +311,9 @@ export class BoardTextPropertiesDialog {
 
 	protected alignmentButton(label: string, title: string, checked: boolean, onClick: () => void): HTMLButtonElement {
 		const button = this.button(label, onClick);
-		button.className = `board-text-props-icon-button board-text-props-align-${ title.split(' ').at(-1)?.toLowerCase() }${ checked ? ' active' : '' }`;
+		button.className = `board-text-props-icon-button board-text-props-align-${ title.split(' ')
+			.at(-1)
+			?.toLowerCase() }${ checked ? ' active' : '' }`;
 		button.title = title;
 		button.setAttribute('aria-label', title);
 		button.setAttribute('aria-pressed', String(checked));

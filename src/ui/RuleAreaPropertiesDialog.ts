@@ -89,7 +89,8 @@ export class RuleAreaPropertiesDialog {
 			checkbox.type = 'checkbox';
 			checkbox.checked = this.draft.layers.includes(layer);
 			checkbox.addEventListener('change', () => {
-				this.draft.layers = checkbox.checked ? [...this.draft.layers, layer] : this.draft.layers.filter(value => value !== layer);
+				this.draft.layers = checkbox.checked ? [...this.draft.layers, layer] :
+					this.draft.layers.filter(value => value !== layer);
 				this.render();
 			});
 			const swatch = document.createElement('span');
@@ -121,7 +122,10 @@ export class RuleAreaPropertiesDialog {
 			pane,
 			this.field('Outline display:', this.selectField<ZoneHatchStyle>(this.draft.hatchStyle, [
 				['none', 'Line'], ['edge', 'Hatched'], ['full', 'Fully hatched']
-			], value => { this.draft.hatchStyle = value; this.render(); }))
+			], value => {
+				this.draft.hatchStyle = value;
+				this.render();
+			}))
 		);
 		if (this.draft.hatchStyle !== 'none') {
 			column.append(this.field('Outline hatch pitch:', this.numberField(
@@ -151,7 +155,10 @@ export class RuleAreaPropertiesDialog {
 	}
 
 	protected tabButton(label: string, tab: Tab): HTMLButtonElement {
-		const button = this.button(label, () => { this.activeTab = tab; this.render(); });
+		const button = this.button(label, () => {
+			this.activeTab = tab;
+			this.render();
+		});
 		button.className = `zone-props-tab${ this.activeTab === tab ? ' active' : '' }`;
 		return button;
 	}
@@ -189,7 +196,8 @@ export class RuleAreaPropertiesDialog {
 		return input;
 	}
 
-	protected selectField<T extends string>(value: T, options: [T, string][], onChange: (value: T) => void): HTMLSelectElement {
+	protected selectField<T extends string>(
+		value: T, options: [T, string][], onChange: (value: T) => void): HTMLSelectElement {
 		const select = document.createElement('select');
 		for (const [optionValue, label] of options) {
 			select.appendChild(new Option(label, optionValue, false, optionValue === value));
