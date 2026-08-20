@@ -824,7 +824,9 @@ export class BoardPointerController {
 				// the "undo" target ends up being this frame's post-move
 				// state instead of the drag's true starting position.
 				this.captureUndoOnce(session, 'Move item');
+				session.beginBoardDragPerformance();
 				const usedFastPath = !!dragTargets && session.translateBoardDragFast(dragTargets, dx, dy);
+				session.noteBoardDragFrame(usedFastPath);
 				if (!usedFastPath) {
 					// Either resolveBoardDragTargets found nothing it can
 					// fast-path (a bare track/graphic/dimension-text paintId),
@@ -922,7 +924,9 @@ export class BoardPointerController {
 				// Snapshot BEFORE mutating — see the 'single' branch above for
 				// why this must precede the fast-path attempt, not follow it.
 				this.captureUndoOnce(session, 'Move footprints');
+				session.beginBoardDragPerformance();
 				const usedFastPath = !!dragTargets && session.translateBoardDragFast(dragTargets, dx, dy);
+				session.noteBoardDragFrame(usedFastPath);
 				if (!usedFastPath) {
 					dragTargets = null;
 					if (!this.gesture.moved) {
@@ -1126,6 +1130,7 @@ export class BoardPointerController {
 			if (session && wasDragging) {
 				this.deps.refreshBoardText(session);
 			}
+			session?.endBoardDragPerformance();
 			return;
 		}
 		if (gesture.kind === 'resize') {
@@ -1208,12 +1213,9 @@ export class BoardPointerController {
 		if (gesture.kind === 'track-body') {
 			const session = this.deps.getSession();
 			session?.setEditPreview(null);
-			// Unconditional, like endBoardDragPreview's own contract - the
-			// hide from beginTrackDragPreview must come back whether this
-			// drag commits, gets refused below, or never moved at all.
-			session?.endTrackDragPreview();
 			if (!session || !gesture.lastPreview) {
 				// Never moved (a plain click on a track body) — nothing to commit.
+				session?.endTrackDragPreview();
 				return;
 			}
 			const { line } = gesture;
@@ -1229,6 +1231,7 @@ export class BoardPointerController {
 				// the track at its pre-drag shape (see commitRouteTo's
 				// identical "stay put" behavior on a blocked commit).
 				this.deps.setStatus(`Can't drop track here on ${ line.layer } — clearance violation (enable "Allow DRC violations" in Router Settings to override).`);
+				session.endTrackDragPreview();
 				return;
 			}
 			// NOT calling simplifyWalkedPath here (stated simplification,
@@ -1253,6 +1256,9 @@ export class BoardPointerController {
 				? mergeCollinear(gesture.lastPreview)
 				: gesture.lastPreview;
 			const committed = session.dragTrackLine(line.segmentIds, commitPoints, line.width, line.layer, line.netId);
+			// A successful incremental commit consumes the hidden original track
+			// set itself. On any failure restore those originals normally.
+			if (!committed) session.endTrackDragPreview();
 			if (committed) {
 				this.deps.refreshBoardText(session);
 				this.deps.refreshAppearance();
