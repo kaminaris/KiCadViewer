@@ -1,5 +1,6 @@
 import type { KicadRenderSession } from '@kicad-render/KicadRenderSession';
 import { colorForLayer }           from '@kicad-render/paint/LayerColors';
+import { layerPanelOrder }         from '@kicad-render/paint/LayerOrder';
 
 type AppearanceTab = 'layers' | 'objects' | 'nets';
 type DisplayMode = 'normal' | 'dim' | 'hide';
@@ -133,7 +134,20 @@ export class BoardAppearancePanel {
 		// its own Pad Numbers/Net Names checkboxes (Objects tab) control it;
 		// listing it here would let per-layer dim/hide controls fight with
 		// BoardPainter.paint()'s deliberate always-on-top exemption for it.
-		for (const layer of scene.layersPresent.filter(l => l !== 'PadNumbers')) {
+		//
+		// Row order is real KiCad's own Layers-panel order (layerPanelOrder —
+		// see its own doc comment), NOT scene.layersPresent's array order,
+		// which is the bottom-to-top WebGL/Canvas PAINT z-order
+		// (layerPaintOrder) — a genuinely different sequence real KiCad
+		// never uses for its own panel. Any present layer layerPanelOrder
+		// doesn't know about (e.g. a future/synthetic bucket) still falls
+		// through via `extra`, appended at the end in its original paint
+		// order, so nothing that used to show can silently disappear.
+		const present = scene.layersPresent.filter(l => l !== 'PadNumbers');
+		const presentSet = new Set(present);
+		const known = layerPanelOrder.filter(l => presentSet.has(l));
+		const extra = present.filter(l => !layerPanelOrder.includes(l));
+		for (const layer of [...known, ...extra]) {
 			const row = document.createElement('li');
 			row.className = `appearance-layer-row${ layer === this.activeLayer ? ' active' : '' }`;
 			row.title = `Set ${ layer } as active layer`;

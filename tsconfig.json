@@ -49,5 +49,9 @@
 		"shared/kicad-io/src/**/*.ts",
 		"shared/clipper2-ts/src/**/*.ts",
 		"shared/zstd-ts/src/**/*.ts"
+	],
+	"exclude": [
+		"../../shared/kicad-render/tests/**",
+		"shared/kicad-render/tests/**"
 	]
 }

@@ -34,11 +34,34 @@ interface ViaDragPreviewFix extends ViaDragFix {
 	chain: Vec2[];
 }
 
+/** Mirrors KicadRenderSession.resolveBoardDragTargets' own return shape —
+ *  see BoardGesture's `dragTargets` field for how a 'single'/'group'
+ *  footprint drag caches this across frames. */
+type BoardDragTargets = { itemIds: string[]; origins: any[]; bboxOnlyItems: any[] };
+
 type BoardGesture =
 	| { kind: 'none' }
 	| { kind: 'pan'; lastScreen: Vec2; moved: boolean }
-	| { kind: 'single'; paintId: string; lastSnapped: Vec2 }
-	| { kind: 'group'; lastSnapped: Vec2 }
+	// `moved` mirrors 'pan'/'rect's own flag: false until the first real
+	// displacement — beginBoardDragPreview (which pulls a footprint out of
+	// the static WebGL buffer) is deferred until then instead of running
+	// eagerly on mousedown, so a plain click-to-select never pays a drag
+	// setup/teardown cost it doesn't need. See onMouseMove's 'single'/
+	// 'group' handling and endBoardDragPreview's own cheap no-op guard for
+	// why this is safe.
+	// `dragTargets`: undefined = not yet resolved (resolved lazily on the
+	// first real move, see onMouseMove); null = resolved once and found
+	// not to apply (a bare track/via/graphic in the selection, or a
+	// renderer without incremental-translate support) — cached so the rest
+	// of the gesture doesn't keep re-attempting it every frame; an object
+	// = the fast path applies and this is what
+	// KicadRenderSession.translateBoardDragFast needs each frame. See
+	// that method's own doc comment for why this exists: without it, a
+	// footprint drag's FIRST move still paid a full static-buffer rebuild
+	// (via beginBoardDragPreview) even after plain click-to-select got
+	// moved off that path.
+	| { kind: 'single'; paintId: string; lastSnapped: Vec2; moved: boolean; dragTargets?: BoardDragTargets | null }
+	| { kind: 'group'; lastSnapped: Vec2; moved: boolean; dragTargets?: BoardDragTargets | null }
 	| { kind: 'resize'; paintId: string; handle: Exclude<ResizeHandle, 'center'>; original: SelectionResizeBox }
 	| {
 	kind: 'via'; paintId: string; viaSize: number; fixes: ViaDragFix[];
@@ -469,7 +492,7 @@ export class BoardPointerController {
 					// (see BoardPainter.buildDimension's doc comment).
 					const textPaintId = dimHandle.paintId.replace(/:(line|text)$/, ':text');
 					session.pushUndoSnapshot('Move dimension text');
-					this.gesture = { kind: 'single', paintId: textPaintId, lastSnapped: this.snappedWorld(session, screenPos) };
+					this.gesture = { kind: 'single', paintId: textPaintId, lastSnapped: this.snappedWorld(session, screenPos), moved: false };
 				}
 				e.preventDefault();
 				return;
@@ -499,7 +522,7 @@ export class BoardPointerController {
 				}
 				session.pushUndoSnapshot('Resize item');
 				this.gesture = resizeHandle.handle === 'center'
-					? { kind: 'single', paintId: resizeHandle.box.id, lastSnapped: this.snappedWorld(session, screenPos) }
+					? { kind: 'single', paintId: resizeHandle.box.id, lastSnapped: this.snappedWorld(session, screenPos), moved: false }
 					: {
 						kind: 'resize', paintId: resizeHandle.box.id,
 						handle: resizeHandle.handle, original: resizeHandle.box
@@ -695,7 +718,7 @@ export class BoardPointerController {
 			}
 			else {
 				this.gesture = allowGesture
-					? { kind: 'single', paintId: hit.id, lastSnapped: this.snappedWorld(session, screenPos) }
+					? { kind: 'single', paintId: hit.id, lastSnapped: this.snappedWorld(session, screenPos), moved: false }
 					: { kind: 'none' };
 			}
 			e?.preventDefault();
@@ -716,11 +739,13 @@ export class BoardPointerController {
 				e?.preventDefault();
 				return;
 			}
-			this.gesture = { kind: 'group', lastSnapped: this.snappedWorld(session, screenPos) };
-			// See KicadRenderSession.beginBoardDragPreview's doc comment —
-			// pulls every selected footprint out of the real (static-buffer)
-			// scene up front so the drag's per-frame cost stays cheap.
-			session.beginBoardDragPreview(session.selectionIds);
+			// beginBoardDragPreview (KicadRenderSession.ts) — which pulls every
+			// selected footprint out of the real static-buffer scene — is
+			// deferred to onMouseMove's first actual displacement (see
+			// BoardGesture's own doc comment on `moved`), not run here: a
+			// plain click that never moves would otherwise still pay that
+			// full static-geometry rebuild for nothing.
+			this.gesture = { kind: 'group', lastSnapped: this.snappedWorld(session, screenPos), moved: false };
 			e?.preventDefault();
 			return;
 		}
@@ -732,12 +757,11 @@ export class BoardPointerController {
 			e?.preventDefault();
 			return;
 		}
+		// beginBoardDragPreview deferred to the first real mousemove
+		// displacement, same reasoning as the 'group' branch above.
 		this.gesture = allowGesture
-			? { kind: 'single', paintId: footprintId, lastSnapped: this.snappedWorld(session, screenPos) }
+			? { kind: 'single', paintId: footprintId, lastSnapped: this.snappedWorld(session, screenPos), moved: false }
 			: { kind: 'none' };
-		if (allowGesture) {
-			session.beginBoardDragPreview([footprintId]);
-		}
 		e?.preventDefault();
 	}
 
@@ -787,24 +811,57 @@ export class BoardPointerController {
 			const dx = snapped.x - this.gesture.lastSnapped.x;
 			const dy = snapped.y - this.gesture.lastSnapped.y;
 			if (dx !== 0 || dy !== 0) {
-				this.captureUndoOnce(session, 'Move item');
-				// Delta from the last frame's snapped position, exactly like
-				// 'group' below — NOT moveFootprintByPaintId(paintId,
-				// snapped.x, snapped.y), which sets the footprint's ORIGIN
-				// directly to the cursor's world position. That silently
-				// snapped the part so its origin (its center/reference
-				// point, not wherever on the footprint was actually
-				// clicked) jumped to the cursor on the very first mousemove
-				// — the part should track the cursor's MOVEMENT, keeping
-				// whatever offset existed between the click point and the
-				// origin when the drag started.
-				const moved = session.translateBoardSelection([this.gesture.paintId], dx, dy);
-				if (moved) {
-					// See the 'group' branch below — no per-frame text
-					// refresh during the drag.
-					session.updateBoardDragPreview();
+				const paintId = this.gesture.paintId;
+				// Resolved lazily, once, on this gesture's first real move —
+				// see BoardDragTargets/BoardGesture's own doc comments.
+				let dragTargets = this.gesture.dragTargets;
+				if (dragTargets === undefined) {
+					dragTargets = session.resolveBoardDragTargets([paintId]);
 				}
-				this.gesture = { kind: 'single', paintId: this.gesture.paintId, lastSnapped: snapped };
+				// Snapshot BEFORE mutating — captureUndoOnce only pushes once
+				// per gesture (on the first real move), so this must run
+				// before translateBoardDragFast actually moves anything, or
+				// the "undo" target ends up being this frame's post-move
+				// state instead of the drag's true starting position.
+				this.captureUndoOnce(session, 'Move item');
+				const usedFastPath = !!dragTargets && session.translateBoardDragFast(dragTargets, dx, dy);
+				if (!usedFastPath) {
+					// Either resolveBoardDragTargets found nothing it can
+					// fast-path (a bare track/graphic/dimension-text paintId),
+					// or translateBoardDragFast itself declined — cache `null`
+					// either way so the rest of this gesture doesn't keep
+					// re-attempting it every frame.
+					dragTargets = null;
+					if (!this.gesture.moved) {
+						// First real displacement of this gesture — only now
+						// pull any footprint out of the static WebGL buffer (a
+						// no-op for a non-footprint paintId — see
+						// footprintOwnerOfHit). Matches the 'via'/'track-body'
+						// gestures' own identical "defer past a plain click"
+						// pattern elsewhere in this file — see BoardGesture's
+						// doc comment on `moved`.
+						session.beginBoardDragPreview([paintId]);
+					}
+					// captureUndoOnce already ran above, before the fast-path
+					// attempt — gated by dragUndoCaptured, so it's a no-op here.
+					// Delta from the last frame's snapped position, exactly like
+					// 'group' below — NOT moveFootprintByPaintId(paintId,
+					// snapped.x, snapped.y), which sets the footprint's ORIGIN
+					// directly to the cursor's world position. That silently
+					// snapped the part so its origin (its center/reference
+					// point, not wherever on the footprint was actually
+					// clicked) jumped to the cursor on the very first mousemove
+					// — the part should track the cursor's MOVEMENT, keeping
+					// whatever offset existed between the click point and the
+					// origin when the drag started.
+					const moved = session.translateBoardSelection([paintId], dx, dy);
+					if (moved) {
+						// See the 'group' branch below — no per-frame text
+						// refresh during the drag.
+						session.updateBoardDragPreview();
+					}
+				}
+				this.gesture = { kind: 'single', paintId, lastSnapped: snapped, moved: true, dragTargets };
 			}
 			this.deps.updateStatusBar(screenPos);
 			return;
@@ -856,14 +913,33 @@ export class BoardPointerController {
 			const dx = snapped.x - this.gesture.lastSnapped.x;
 			const dy = snapped.y - this.gesture.lastSnapped.y;
 			if (dx !== 0 || dy !== 0) {
-				this.captureUndoOnce(session, 'Move footprints');
-				const moved = session.translateBoardSelection([...session.selectionIds], dx, dy);
-				if (moved) {
-					// See the 'single' branch above — no per-frame text refresh
-					// during the drag.
-					session.updateBoardDragPreview();
+				// See the 'single' branch above for the full reasoning — same
+				// lazy-resolve-once-then-cache pattern.
+				let dragTargets = this.gesture.dragTargets;
+				if (dragTargets === undefined) {
+					dragTargets = session.resolveBoardDragTargets([...session.selectionIds]);
 				}
-				this.gesture = { kind: 'group', lastSnapped: snapped };
+				// Snapshot BEFORE mutating — see the 'single' branch above for
+				// why this must precede the fast-path attempt, not follow it.
+				this.captureUndoOnce(session, 'Move footprints');
+				const usedFastPath = !!dragTargets && session.translateBoardDragFast(dragTargets, dx, dy);
+				if (!usedFastPath) {
+					dragTargets = null;
+					if (!this.gesture.moved) {
+						// See the 'single' branch above — deferred past a plain
+						// click, same reasoning.
+						session.beginBoardDragPreview(session.selectionIds);
+					}
+					// captureUndoOnce already ran above, before the fast-path
+					// attempt — gated by dragUndoCaptured, so it's a no-op here.
+					const moved = session.translateBoardSelection([...session.selectionIds], dx, dy);
+					if (moved) {
+						// See the 'single' branch above — no per-frame text refresh
+						// during the drag.
+						session.updateBoardDragPreview();
+					}
+				}
+				this.gesture = { kind: 'group', lastSnapped: snapped, moved: true, dragTargets };
 			}
 			this.deps.updateStatusBar(screenPos);
 			return;
@@ -1008,13 +1084,39 @@ export class BoardPointerController {
 		}
 		if (gesture.kind === 'single' || gesture.kind === 'group') {
 			// Bakes the drag-preview footprint(s) back into the real scene —
-			// see KicadRenderSession.endBoardDragPreview's doc comment. Must
-			// run even for a plain click with no actual movement, since
-			// onMouseDown's beginBoardDragPreview already pulled them out of
-			// it. No separate ratsnest resync needed here: every mousemove
-			// during the drag already kept it correct (endBoardDragPreview
-			// itself does one last net-scoped incremental refresh).
+			// see KicadRenderSession.endBoardDragPreview's doc comment.
+			// Unconditional (not gated on gesture.moved) but cheap for a
+			// plain click: beginBoardDragPreview is only ever called lazily
+			// on the first real mousemove displacement now (see BoardGesture's
+			// doc comment on `moved`), so for a click that never moved,
+			// dragPreviewFootprints stayed empty and endBoardDragPreview's own
+			// early-return guard makes this a genuine no-op — nothing was
+			// ever pulled out of the static scene to bake back in. No
+			// separate ratsnest resync needed here: every mousemove during an
+			// actual drag already kept it correct (endBoardDragPreview itself
+			// does one last net-scoped incremental refresh).
 			const session = this.deps.getSession();
+			if (gesture.dragTargets) {
+				// The fast path was used for this whole gesture — the GPU
+				// buffer is already exactly right (translateBoardDragFast kept
+				// it in sync every frame), this only catches up the CPU-side
+				// scene/hit-test data. beginBoardDragPreview was never called
+				// (dragPreviewFootprints stayed empty), so endBoardDragPreview
+				// below is still safe to call unconditionally — it just no-ops.
+				session?.commitBoardDragFast(gesture.dragTargets);
+			}
+			// Bakes the drag-preview footprint(s) back into the real scene —
+			// see KicadRenderSession.endBoardDragPreview's doc comment.
+			// Unconditional (not gated on gesture.moved) but cheap for a
+			// plain click: beginBoardDragPreview is only ever called lazily
+			// on the first real mousemove displacement now (see BoardGesture's
+			// doc comment on `moved`), so for a click that never moved,
+			// dragPreviewFootprints stayed empty and endBoardDragPreview's own
+			// early-return guard makes this a genuine no-op — nothing was
+			// ever pulled out of the static scene to bake back in. No
+			// separate ratsnest resync needed here: every mousemove during an
+			// actual drag already kept it correct (endBoardDragPreview itself
+			// does one last net-scoped incremental refresh).
 			session?.endBoardDragPreview();
 			// The one text-refresh (full AST serialize + save/sync) for this
 			// whole gesture — see onMouseMove's 'single'/'group' branches for
