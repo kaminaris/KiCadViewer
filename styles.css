@@ -206,420 +206,8 @@ html, body {
 	flex-direction: column;
 }
 
-.symbol-editor-shell {
-	display: flex;
-	flex-direction: column;
-	height: 100%;
-	background: #0b1117;
-	color: var(--text);
-	padding: 0;
-	border-top: 1px solid var(--line);
-}
-
-.symbol-editor-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 0.9rem;
-	min-height: 58px;
-	padding: 0.5rem 0.9rem;
-	background: rgba(19, 26, 34, 0.96);
-	border-bottom: 1px solid var(--line);
-}
-
-.symbol-editor-title-row {
-	display: flex;
-	align-items: center;
-	gap: 0.8rem;
-	min-width: 0;
-	flex: 1;
-}
-
-.symbol-editor-back {
-	appearance: none;
-	border: 1px solid var(--line);
-	border-radius: 4px;
-	background: rgba(26, 34, 44, 0.9);
-	color: var(--text);
-	padding: 0.36rem 0.7rem;
-	font: 12px var(--font);
-	cursor: pointer;
-}
-
-.symbol-editor-back:hover {
-	border-color: var(--accent);
-	background: rgba(31, 45, 59, 0.96);
-}
-
-.symbol-editor-title {
-	margin: 0;
-	font-size: clamp(1.3rem, 1.8vw, 2rem);
-	font-weight: 700;
-	line-height: 1.1;
-	letter-spacing: -0.03em;
-	color: var(--text-strong);
-}
-
-.symbol-editor-status {
-	padding: 0.22rem 0.58rem;
-	border-radius: 999px;
-	background: rgba(61, 156, 240, 0.12);
-	border: 1px solid rgba(61, 156, 240, 0.28);
-	color: var(--accent);
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0.08em;
-	text-transform: uppercase;
-}
-
-.symbol-editor-status.is-dirty {
-	background: rgba(240, 184, 75, 0.1);
-	border-color: rgba(240, 184, 75, 0.35);
-	color: var(--warning);
-}
-
-.symbol-editor-status.is-error {
-	background: rgba(242, 162, 162, 0.08);
-	border-color: rgba(242, 162, 162, 0.35);
-	color: var(--danger);
-}
-
-.symbol-editor-meta {
-	color: var(--muted);
-	font-size: 12px;
-	line-height: 1.4;
-}
-
-.symbol-editor-actions {
-	display: flex;
-	align-items: center;
-	justify-content: flex-end;
-	gap: 0.5rem;
-	padding: 0 0.1rem;
-}
-
-.symbol-editor-actions button {
-	appearance: none;
-	border: 1px solid var(--line);
-	border-radius: 4px;
-	background: rgba(32, 40, 49, 0.9);
-	color: var(--text);
-	padding: 0.45rem 0.9rem;
-	font: 12px var(--font);
-	cursor: pointer;
-}
-
-.symbol-editor-actions button:hover:not(:disabled) {
-	border-color: var(--accent);
-	background: rgba(39, 50, 63, 0.96);
-}
-
-.symbol-editor-actions button:disabled {
-	opacity: 0.4;
-	cursor: not-allowed;
-}
-
-.symbol-editor-save {
-	background: var(--accent) !important;
-	border-color: var(--accent) !important;
-	color: #fff !important;
-}
-
-.symbol-editor-layout {
-	display: grid;
-	grid-template-columns: 220px minmax(0, 1fr) minmax(260px, 340px);
-	gap: 0.75rem;
-	flex: 1;
-	min-height: 0;
-	padding: 0.75rem;
-	box-sizing: border-box;
-}
-
-.symbol-editor-sidebar {
-	display: flex;
-	flex-direction: column;
-	gap: 0.75rem;
-	min-width: 0;
-}
-
-.symbol-editor-section {
-	display: flex;
-	flex-direction: column;
-	gap: 0.45rem;
-	padding: 0.7rem;
-	background: rgba(18, 25, 32, 0.92);
-	border: 1px solid var(--line);
-	border-radius: 7px;
-	min-height: 0;
-}
-
-.symbol-editor-section-title {
-	color: var(--muted);
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0.08em;
-	text-transform: uppercase;
-}
-
-.symbol-editor-list {
-	display: flex;
-	flex-direction: column;
-	gap: 0.15rem;
-	max-height: 220px;
-	overflow: auto;
-	padding: 0.15rem;
-	background: rgba(11, 17, 22, 0.9);
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	border-radius: 5px;
-}
-
-.symbol-editor-list-item,
-.symbol-editor-empty-item {
-	appearance: none;
-	display: block;
-	width: 100%;
-	box-sizing: border-box;
-	border: 1px solid transparent;
-	border-radius: 4px;
-	background: transparent;
-	color: var(--text);
-	padding: 0.42rem 0.55rem;
-	text-align: left;
-	font-size: 11px;
-	line-height: 1.25;
-	font-family: var(--font);
-	cursor: pointer;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
-
-.symbol-editor-list-item:hover {
-	background: rgba(36, 53, 70, 0.9);
-	border-color: rgba(255, 255, 255, 0.06);
-}
-
-.symbol-editor-list-item.is-selected {
-	background: rgba(61, 156, 240, 0.9);
-	border-color: rgba(61, 156, 240, 0.9);
-	color: #fff;
-}
-
-.symbol-editor-empty-item {
-	cursor: default;
-	color: var(--muted);
-	background: transparent;
-	border-style: dashed;
-	border-color: rgba(255, 255, 255, 0.08);
-}
-
-.symbol-editor-form {
-	flex: 1;
-	min-height: 0;
-	display: flex;
-	flex-direction: column;
-	background: rgba(12, 17, 22, 0.82);
-	border: 1px solid var(--line);
-	border-radius: 7px;
-	overflow: hidden;
-}
-
-.symbol-editor-surface {
-	display: grid;
-	grid-template-columns: minmax(0, 1.6fr) minmax(260px, 320px);
-	gap: 0.75rem;
-	flex: 1;
-	min-height: 0;
-	padding: 0.5rem;
-	box-sizing: border-box;
-}
-
-.symbol-editor-code-panel {
-	display: flex;
-	flex-direction: column;
-	min-width: 0;
-	min-height: 0;
-	background: rgba(6, 9, 13, 0.85);
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	border-radius: 6px;
-	overflow: hidden;
-}
-
-.symbol-editor-textarea {
-	flex: 1;
-	min-height: 0;
-	width: 100%;
-	padding: 0.8rem 0.9rem;
-	border: 0;
-	background: transparent;
-	color: var(--text);
-	font: 12px/1.5 "Cascadia Code", "SFMono-Regular", Consolas, monospace;
-	resize: vertical;
-	outline: none;
-}
-
-.symbol-editor-empty {
-	display: grid;
-	place-items: center;
-	flex: 1;
-	padding: 1.5rem;
-	color: var(--muted);
-	background: rgba(17, 23, 30, 0.6);
-	font-size: 13px;
-}
-
-.symbol-editor-inspector {
-	display: flex;
-	flex-direction: column;
-	gap: 0.7rem;
-	min-width: 0;
-	min-height: 0;
-	padding: 0.7rem;
-	background: rgba(18, 25, 32, 0.92);
-	border: 1px solid var(--line);
-	border-radius: 6px;
-	overflow: auto;
-}
-
-.symbol-editor-inspector-section {
-	display: flex;
-	flex-direction: column;
-	gap: 0.55rem;
-}
-
-.symbol-editor-inspector-card {
-	display: flex;
-	flex-direction: column;
-	gap: 0.5rem;
-	padding: 0.6rem 0.7rem;
-	background: rgba(255, 255, 255, 0.02);
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	border-radius: 5px;
-}
-
-.symbol-editor-inspector-title {
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0.08em;
-	text-transform: uppercase;
-	color: var(--muted);
-}
-
-.symbol-editor-field-row {
-	display: grid;
-	grid-template-columns: minmax(78px, 90px) minmax(0, 1fr);
-	align-items: center;
-	gap: 0.5rem;
-	font-size: 12px;
-	color: var(--text);
-}
-
-.symbol-editor-field-label {
-	color: var(--muted);
-	font-size: 11px;
-}
-
-.symbol-editor-field-row input,
-.symbol-editor-field-row select,
-.symbol-editor-property-row input,
-.symbol-editor-pin-editor input,
-.symbol-editor-pin-editor select {
-	width: 100%;
-	box-sizing: border-box;
-	background: #0d141b;
-	border: 1px solid rgba(112, 126, 146, 0.7);
-	border-radius: 4px;
-	color: var(--text);
-	padding: 0.38rem 0.5rem;
-	font: inherit;
-}
-
-.symbol-editor-field-row input:focus,
-.symbol-editor-field-row select:focus,
-.symbol-editor-property-row input:focus,
-.symbol-editor-pin-editor input:focus,
-.symbol-editor-pin-editor select:focus {
-	outline: none;
-	border-color: var(--accent);
-	box-shadow: 0 0 0 1px rgba(61, 156, 240, 0.25);
-}
-
-.symbol-editor-property-list,
-.symbol-editor-pin-list {
-	display: flex;
-	flex-direction: column;
-	gap: 0.35rem;
-}
-
-.symbol-editor-property-row {
-	display: grid;
-	grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) auto;
-	align-items: center;
-	gap: 0.38rem;
-}
-
-.symbol-editor-mini-button {
-	appearance: none;
-	background: rgba(61, 156, 240, 0.12);
-	border: 1px solid rgba(61, 156, 240, 0.3);
-	border-radius: 4px;
-	color: var(--text);
-	padding: 0.35rem 0.55rem;
-	font: 11px var(--font);
-	cursor: pointer;
-}
-
-.symbol-editor-mini-button:hover {
-	background: rgba(61, 156, 240, 0.18);
-	border-color: rgba(61, 156, 240, 0.52);
-}
-
-.symbol-editor-pin-list {
-	margin-top: 0.1rem;
-}
-
-.symbol-editor-pin-item {
-	appearance: none;
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	border-radius: 4px;
-	background: rgba(255, 255, 255, 0.02);
-	color: var(--text);
-	padding: 0.38rem 0.5rem;
-	text-align: left;
-	font: 11px var(--font);
-	cursor: pointer;
-}
-
-.symbol-editor-pin-item:hover {
-	background: rgba(61, 156, 240, 0.08);
-	border-color: rgba(61, 156, 240, 0.28);
-}
-
-.symbol-editor-pin-item.is-selected {
-	background: rgba(61, 156, 240, 0.18);
-	border-color: rgba(61, 156, 240, 0.55);
-	color: #fff;
-}
-
-.symbol-editor-pin-editor {
-	display: flex;
-	flex-direction: column;
-	gap: 0.45rem;
-	padding-top: 0.6rem;
-	border-top: 1px dashed rgba(255, 255, 255, 0.1);
-}
-
-@media (max-width: 900px) {
-	.symbol-editor-layout {
-		grid-template-columns: 1fr;
-	}
-	.symbol-editor-sidebar {
-		max-height: 220px;
-	}
-	.symbol-editor-surface {
-		grid-template-columns: 1fr;
-	}
-}
+.status-message.editor-status-dirty { color: #f0b84b; }
+.status-message.editor-status-error { color: #f2a2a2; }
 
 .top {
 	flex: 0 0 auto;
@@ -742,7 +330,10 @@ html, body {
 #screen-editor[data-document-kind="board"] .menu-schematic,
 #screen-editor[data-document-kind="schematic"] .menu-board,
 #screen-editor[data-document-kind="project-settings"] .menu-schematic,
-#screen-editor[data-document-kind="project-settings"] .menu-board { display: none; }
+#screen-editor[data-document-kind="project-settings"] .menu-board,
+#screen-editor[data-document-kind="symbol"] .menu-schematic,
+#screen-editor[data-document-kind="symbol"] .menu-board,
+#screen-editor:not([data-document-kind="symbol"]) .menu-symbol { display: none; }
 #screen-editor[data-document-kind="project-settings"] #edit-actions { display: none; }
 #screen-editor[data-document-kind="project-settings"] #coord-status,
 #screen-editor[data-document-kind="project-settings"] .grid-select-label,
@@ -945,6 +536,15 @@ main {
 }
 
 main.edit-mode {
+	grid-template-columns: minmax(240px, 320px) 48px 1fr 56px;
+}
+
+/* Symbol editor — same 3-column shape as schematic edit-mode (left dock +
+   stage + 56px tool rail), kept as its own class since the symbol editor
+   isn't part of SessionController's view/edit/circuit AppMode state
+   machine that owns .edit-mode (see ActiveDocument.ts's DocumentKind doc
+   comment). */
+main.symbol-mode {
 	grid-template-columns: minmax(240px, 320px) 1fr 56px;
 }
 
@@ -1218,7 +818,11 @@ main.project-setup-mode > :not(.project-setup-workspace) { display: none !import
 
 .edit-left-pane { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 .edit-pane { min-height: 60px; flex: 1 1 0; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); background: var(--panel); }
-.edit-pane:first-child { flex: 1.9 1 0; }
+.edit-pane.hidden { display: none; }
+/* Properties gets extra flex height — used to be ".edit-pane:first-child",
+   but the new Libraries pane (symbol editor only) is now the literal first
+   child, so target Properties by its data-pane instead of DOM position. */
+.edit-pane[data-pane="properties"], .edit-pane[data-pane="libraries"] { flex: 1.9 1 0; }
 .edit-pane header { height: 28px; min-height: 28px; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; background: var(--panel-strong); color: var(--text); font-size: 12px; font-weight: 600; border-bottom: 1px solid var(--line); }
 .edit-pane header button { border: 0; background: transparent; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 2px; }
 .edit-pane header button:hover { color: var(--accent); }
@@ -1227,6 +831,14 @@ main.project-setup-mode > :not(.project-setup-workspace) { display: none !import
 .edit-filter-grid { padding: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 6px; color: var(--text); font-size: 11px; }
 .edit-filter-grid label { white-space: nowrap; }
 .edit-filter-grid input { accent-color: #42b9e8; vertical-align: middle; margin: 0 3px 0 0; }
+
+.hierarchy-empty { padding: 8px; color: var(--muted); font-size: 11px; }
+.hierarchy-row { display: flex; align-items: center; gap: 4px; padding: 4px 7px 4px 6px; cursor: pointer; font-size: 11px; border-bottom: 1px solid rgba(255,255,255,.05); }
+.hierarchy-row:hover { background: #263447; }
+.hierarchy-row.active { background: var(--accent); color: #fff; }
+.hierarchy-caret { display: inline-block; width: 10px; text-align: center; color: var(--muted); font-size: 9px; flex: none; }
+.hierarchy-row.active .hierarchy-caret { color: #e8f2ff; }
+.hierarchy-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stage {
 	position: relative;
 	overflow: hidden;
@@ -1234,7 +846,8 @@ main.project-setup-mode > :not(.project-setup-workspace) { display: none !import
 }
 
 #canvas2d,
-#canvas-gl {
+#canvas-gl,
+#symbol-stage-canvas {
 	display: block;
 	position: absolute;
 	inset: 0;
@@ -1242,9 +855,9 @@ main.project-setup-mode > :not(.project-setup-workspace) { display: none !import
 	height: 100%;
 	touch-action: none;
 }
-
 #canvas2d.hidden,
-#canvas-gl.hidden {
+#canvas-gl.hidden,
+#symbol-stage-canvas.hidden {
 	display: none;
 }
 
@@ -1260,7 +873,20 @@ main.project-setup-mode > :not(.project-setup-workspace) { display: none !import
 }
 
 .tool-panel.hidden { display: none; }
-.board-toggle-panel { padding-inline: 0.25rem; border-left: 0; border-right: 1px solid var(--line); }
+.tool-panel-horizontal { flex-direction: row; border-left: 0; border-bottom: 1px solid var(--line); }
+
+/* EditorShell's own root — #screen-symbol (its mount point) is already a
+   flex column filling the viewport (see the #screen-symbol:not(.hidden)
+   rule), so this just needs to fill THAT and lay out its own header/main/
+   footer the same way #screen-editor's ID-scoped rule does, but as a
+   reusable class instead of an ID tied to one specific screen. */
+.editor-shell { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.editor-shell-main { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(240px, 320px) 1fr; }
+.editor-shell-main-with-tools { grid-template-columns: minmax(240px, 320px) 1fr 56px; }
+.board-toggle-panel, .schematic-toggle-panel { padding-inline: 0.25rem; border-left: 0; border-right: 1px solid var(--line); }
+main.edit-mode .schematic-toggle-panel { grid-column: 2; }
+main.edit-mode .stage { grid-column: 3; }
+main.edit-mode #tool-panel { grid-column: 4; }
 .board-tool-panel { border-left: 1px solid var(--line); }
 
 .board-appearance { min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: #20252d; border-left: 1px solid var(--line); }
@@ -1705,12 +1331,39 @@ main.project-setup-mode > :not(.project-setup-workspace) { display: none !import
 .symbol-chooser-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: 12px inherit; }
 .symbol-chooser-body { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(280px, 1fr); gap: 8px; min-height: 0; flex: 1; padding: 0 10px 8px; }
 .symbol-chooser-list { min-height: 0; overflow: auto; border: 1px solid var(--line); background: #171a20; padding: 3px; }
-.symbol-chooser-row { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(100px, 1fr); gap: 8px; padding: 5px 7px; border-bottom: 1px solid rgba(255,255,255,.05); cursor: pointer; font-size: 11px; }
+/* The Symbol Editor's always-visible Libraries pane hosts the same
+   LibraryTreeList inside `.edit-pane-body` (a flex item of `.edit-pane`,
+   which is itself `overflow: hidden`) instead of the modal chooser's own
+   sized `.symbol-chooser-body`. Without an explicit flex column + min-
+   height:0 here, `#edit-libraries` grows to fit its FULL virtualized
+   content height instead of the pane's available space — its own
+   `.symbol-chooser-list` never becomes the actual scrolling element (an
+   ancestor with `overflow:hidden` just clips it), so `scrollTop` stays 0
+   forever and LibraryTreeList's windowed render() never advances past the
+   first page while an ancestor visually "scrolls" nothing. */
+#edit-libraries { display: flex; flex-direction: column; min-height: 0; }
+#edit-libraries .symbol-chooser-list { flex: 1 1 auto; min-height: 0; }
+.symbol-chooser-row { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(100px, 1fr); gap: 8px; padding: 5px 7px 5px 22px; border-bottom: 1px solid rgba(255,255,255,.05); cursor: pointer; font-size: 11px; }
 .symbol-chooser-row:hover { background: #263447; }
 .symbol-chooser-row.selected { background: var(--accent); color: #fff; }
 .symbol-chooser-row small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .symbol-chooser-row.selected small { color: #e8f2ff; }
-.symbol-chooser-group { padding: 6px 7px 3px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.symbol-chooser-group { padding: 5px 7px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+/* Collapsible library-group header — a real tree row (KiCad's Symbol/
+   Footprint Chooser and Symbol Editor Libraries pane both render through
+   the same LibraryTreeList, so this single rule covers every consumer). */
+.symbol-chooser-group-collapsible {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	cursor: pointer;
+	text-transform: none;
+	letter-spacing: normal;
+	font-size: 11px;
+	color: var(--text);
+}
+.symbol-chooser-group-collapsible:hover { background: #263447; }
+.symbol-chooser-caret { display: inline-block; width: 10px; text-align: center; color: var(--muted); font-size: 9px; }
 .symbol-chooser-preview { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .symbol-preview-art { min-height: 250px; flex: 1; display: grid; place-items: center; padding: 12px; border: 1px solid var(--line); background: #121a26; color: var(--muted); text-align: center; position: relative; }
 .symbol-preview-art strong { color: #e47786; font: 22px ui-monospace, monospace; }
@@ -1877,6 +1530,32 @@ body.modal-dragging { user-select: none; }
 .kd-radio-row { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 11px; color: var(--text); }
 .kd-radio-row input { accent-color: var(--accent); }
 
+.kd-tabs { display: flex; flex-direction: column; }
+.kd-tab-strip { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid rgba(255,255,255,.08); }
+.kd-tab-btn { appearance: none; border: 1px solid transparent; border-bottom: none; border-radius: 3px 3px 0 0; background: transparent; color: var(--muted); padding: 5px 12px; font-size: 11px; cursor: pointer; }
+.kd-tab-btn:hover { color: var(--text); }
+.kd-tab-btn.active { color: var(--text); background: var(--panel-2); border-color: #454e5c; }
+.kd-tab-pane { padding-top: 2px; }
+
+.kd-select { position: relative; display: inline-flex; min-width: 0; }
+.kd-select-trigger { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid #454e5c; border-radius: 2px; background: var(--panel-2); color: var(--text); padding: 3px 6px; font: inherit; font-size: 11px; cursor: pointer; }
+.kd-select-trigger:hover, .kd-select.open .kd-select-trigger { border-color: var(--accent); }
+.kd-select-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.kd-select-label.kd-select-placeholder { color: var(--muted); }
+.kd-select-caret { color: var(--muted); font-size: 9px; }
+.kd-select-popup { position: absolute; top: calc(100% + 2px); left: 0; z-index: 40; min-width: 100%; width: max-content; max-width: 320px; background: var(--panel-2); border: 1px solid #454e5c; border-radius: 3px; box-shadow: 0 6px 18px rgba(0,0,0,.35); display: flex; flex-direction: column; }
+.kd-select-popup.hidden { display: none; }
+.kd-select-search { box-sizing: border-box; margin: 5px; border: 1px solid #454e5c; border-radius: 2px; background: var(--panel); color: var(--text); padding: 4px 6px; font: inherit; font-size: 11px; }
+.kd-select-search:focus { outline: none; border-color: var(--accent); }
+.kd-select-list { max-height: 260px; overflow-y: auto; padding: 0 4px 5px; }
+.kd-select-option { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; box-sizing: border-box; appearance: none; border: none; border-radius: 2px; background: transparent; color: var(--text); padding: 5px 7px; font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
+.kd-select-option:hover, .kd-select-option.is-highlighted { background: #293340; }
+.kd-select-option.is-selected { background: var(--accent-soft, rgba(88,166,255,.18)); }
+.kd-select-option-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.kd-select-option-desc { color: var(--muted); font-size: 10px; }
+.kd-select-empty { padding: 8px; color: var(--muted); font-size: 11px; font-style: italic; }
+.kd-col-heading { padding: 6px 8px 2px; font-size: 10.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+
 .kd-grid-wrap { padding: 6px 8px; overflow-x: auto; }
 .kd-grid { width: 100%; border-collapse: collapse; font-size: 11px; }
 .kd-grid th { text-align: left; padding: 4px 6px; background: #2b313c; color: var(--muted); font-weight: 600; border: 1px solid #3a414d; white-space: nowrap; }
@@ -1942,6 +1621,13 @@ body.modal-dragging { user-select: none; }
 	color: var(--text);
 }
 .property-check { accent-color: var(--accent); vertical-align: middle; }
+/* Symbol Editor's Pins list rows — same .property-row grid as every other
+   sidebar row, just clickable-row-as-selector (see SymbolEditorScreen.ts's
+   renderPinListRow doc comment). */
+.property-row.symbol-editor-pin-row { cursor: pointer; }
+.property-row.symbol-editor-pin-row:hover { background: rgba(255, 255, 255, 0.04); }
+.property-row.symbol-editor-pin-row.is-selected { background: var(--accent); }
+.property-row.symbol-editor-pin-row.is-selected .property-label { color: #fff; }
 .history-summary { padding: 5px 8px; color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--line); }
 .history-row { display: flex; gap: 6px; align-items: center; padding: 3px 8px; min-height: 18px; color: var(--text); font-size: 11px; border-top: 1px solid rgba(255,255,255,.05); }
 .history-row span { color: var(--accent); width: 10px; }

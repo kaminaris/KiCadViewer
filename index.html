@@ -5,12 +5,11 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 	<title>KiOnline</title>
 	<link rel="stylesheet" href="/KiCadViewer/styles.css" />
-  <script type="module" crossorigin src="/KiCadViewer/assets/index-QfAUMbRk.js"></script>
+  <script type="module" crossorigin src="/KiCadViewer/assets/index-huJm6Pi-.js"></script>
 </head>
 <body>
 	<div class="screen" id="screen-home"></div>
 	<div class="screen hidden" id="screen-project"></div>
-	<div class="screen hidden" id="screen-symbol"></div>
 	<div class="screen hidden" id="screen-editor">
 	<header class="top">
 		<div class="top-title-row">
@@ -103,6 +102,18 @@
 					<button type="button" class="menu-command menu-schematic" data-tool="bezier">Bezier Curve<span>B</span></button>
 					<button type="button" class="menu-command menu-schematic" data-tool="image">Image</button>
 					<button type="button" class="menu-command menu-schematic" data-tool="delete">Interactive Delete</button>
+					<button type="button" class="menu-command menu-symbol" data-tool="select">Select<span>S</span></button>
+					<div class="menu-divider menu-symbol"></div>
+					<button type="button" class="menu-command menu-symbol" data-tool="pin">Pin<span>P</span></button>
+					<button type="button" class="menu-command menu-symbol" data-tool="text">Symbol Text<span>T</span></button>
+					<button type="button" class="menu-command menu-symbol" data-tool="text-box">Symbol Text Box</button>
+					<button type="button" class="menu-command menu-symbol" data-tool="rect">Rectangle<span>R</span></button>
+					<button type="button" class="menu-command menu-symbol" data-tool="circle">Circle<span>C</span></button>
+					<button type="button" class="menu-command menu-symbol" data-tool="arc">Arc<span>A</span></button>
+					<button type="button" class="menu-command menu-symbol" data-tool="bezier">Bezier Curve<span>B</span></button>
+					<div class="menu-divider menu-symbol"></div>
+					<button type="button" class="menu-command menu-symbol" data-tool="anchor">Anchor</button>
+					<button type="button" class="menu-command menu-symbol" data-tool="delete">Interactive Delete</button>
 					<button type="button" class="menu-command menu-board" data-board-command="place-via">Add Via</button>
 					<button type="button" class="menu-command menu-board" data-board-command="draw-zone">Add Filled Zone</button>
 					<button type="button" class="menu-command menu-board" data-board-command="draw-rule-area">Add Rule Area</button>
@@ -144,6 +155,7 @@
 				<div class="menu-group menu-schematic"><button type="button" class="menu-trigger" aria-expanded="false">Tools</button><div class="menu-popover">
 					<button type="button" class="menu-command" data-action-target="btn-index-symbols">Manage Symbol Libraries…</button>
 					<button type="button" class="menu-command" data-action-target="btn-symbol-fields-table">Bulk Edit Symbol Fields…</button>
+					<button type="button" class="menu-command" data-action-target="btn-annotate-schematic">Annotate Schematic…</button>
 				</div></div>
 				<div class="menu-group menu-board"><button type="button" class="menu-trigger" aria-expanded="false">Tools</button><div class="menu-popover">
 					<button type="button" class="menu-command" data-action-target="btn-index-footprints">Manage Footprint Libraries…</button>
@@ -177,8 +189,8 @@
 				<button type="button" class="toolbar-button" data-input-target="file-input" title="Open Schematic or PCB"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8 H10 L12 10 H21 V19 H3 Z"/><path d="M3 8 V5 H10 L12 7 H18"/></svg></button>
 				<button type="button" class="toolbar-button" id="btn-open-project" title="Open Project Folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8 H10 L12 10 H21 V19 H3 Z"/><path d="M12 12 V17 M9.5 14.5 L12 12 L14.5 14.5"/></svg></button>
 				<button type="button" class="toolbar-button" data-input-target="zip-input" title="Open Project Archive"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8 H10 L12 10 H21 V19 H3 Z"/><path d="M12 11 V17 M9 14 L12 17 L15 14"/></svg></button>
-				<button type="button" class="toolbar-button" id="btn-save-project" title="Save Project" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4 H17 L20 7 V20 H5 Z M8 4 V10 H16 V4 M8 20 V14 H17 V20"/></svg></button>
-				<button type="button" class="toolbar-button" id="btn-export-project-zip" title="Export Project (.zip)" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8 H10 L12 10 H21 V19 H3 Z"/><path d="M12 17 V11 M9 14 L12 11 L15 14"/></svg></button>
+				<button type="button" class="toolbar-button" id="btn-save-project" data-chrome="save" title="Save Project" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4 H17 L20 7 V20 H5 Z M8 4 V10 H16 V4 M8 20 V14 H17 V20"/></svg></button>
+				<button type="button" class="toolbar-button" id="btn-export-project-zip" data-chrome="revert" title="Export Project (.zip)" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8 H10 L12 10 H21 V19 H3 Z"/><path d="M12 17 V11 M9 14 L12 11 L15 14"/></svg></button>
 			</div>
 			<div class="toolbar-divider" aria-hidden="true"></div>
 			<nav class="toolbar-section toolbar-view-switcher" aria-label="Editor views">
@@ -191,6 +203,28 @@
 				<button type="button" class="toolbar-button" id="btn-index-symbols" title="Manage Symbol Libraries"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5 H15 L20 10 V19 H4 Z M15 5 V10 H20"/><path d="M8 14 H16 M12 11 V17"/></svg></button>
 				<button type="button" class="toolbar-button" id="btn-index-footprints" title="Manage Footprint Libraries"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5 H19 V19 H5 Z M8 8 H16 V16 H8 Z"/><path d="M3 10 H5 M3 14 H5 M19 10 H21 M19 14 H21 M10 3 V5 M14 3 V5 M10 19 V21 M14 19 V21"/></svg></button>
 				<button type="button" class="toolbar-button" id="btn-export-edit" title="Export Schematic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4 H17 L20 7 V20 H5 Z M17 4 V8 H20"/><path d="M12 10 V17 M9 14 L12 17 L15 14"/></svg></button>
+			</div>
+			<!-- Symbol editor's own toolbar section — real KiCad's mirror/rotate/
+				unit/pin-table/symbol-properties row. Inert stub buttons for now
+				(harmonic-munching-trinket plan's Phase 0); Phase 5 wires the
+				click handlers and the unit dropdown's option list. -->
+			<div class="toolbar-section hidden" id="symbol-actions">
+				<button type="button" class="toolbar-button" id="btn-symbol-save" title="Save Symbol Library" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4 H17 L20 7 V20 H5 Z M8 4 V10 H16 V4 M8 20 V14 H17 V20"/></svg></button>
+				<button type="button" class="toolbar-button" id="btn-symbol-revert" title="Revert Symbol Library" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5 A7 7 0 1 1 5.5 9 M5 4 V9 H10"/></svg></button>
+				<div class="toolbar-divider" aria-hidden="true"></div>
+				<button type="button" class="toolbar-button" id="btn-symbol-mirror-h" title="Mirror Horizontally"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 V20"/><path d="M5 8 H10 L7 5 Z M5 16 H10 L7 19 Z"/><path d="M19 8 H14 L17 5 Z M19 16 H14 L17 19 Z"/></svg></button>
+				<button type="button" class="toolbar-button" id="btn-symbol-mirror-v" title="Mirror Vertically"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12 H20"/><path d="M8 5 V10 L5 7 Z M16 5 V10 L19 7 Z"/><path d="M8 19 V14 L5 17 Z M16 19 V14 L19 17 Z"/></svg></button>
+				<button type="button" class="toolbar-button" id="btn-symbol-rotate-ccw" title="Rotate Counterclockwise"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8 A7 7 0 1 1 5 15"/><path d="M9 5 L5 8 L9 11"/></svg></button>
+				<button type="button" class="toolbar-button" id="btn-symbol-rotate-cw" title="Rotate Clockwise"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8 A7 7 0 1 0 19 15"/><path d="M15 5 L19 8 L15 11"/></svg></button>
+				<div class="toolbar-divider" aria-hidden="true"></div>
+				<label class="aux-select-group" for="symbol-unit-select">Unit:
+					<select id="symbol-unit-select" title="Active symbol unit" disabled>
+						<option value="1" selected>Unit A</option>
+					</select>
+				</label>
+				<div class="toolbar-divider" aria-hidden="true"></div>
+				<button type="button" class="toolbar-button" id="btn-symbol-pin-table" title="Pin Table"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16"/><path d="M4 10 H20 M4 15 H20 M11 4 V20"/></svg></button>
+				<button type="button" class="toolbar-button" id="btn-symbol-properties" title="Symbol Properties"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5 H19 V19 H5 Z M8 9 H16 M8 13 H16 M8 17 H13"/></svg></button>
 			</div>
 			<input type="file" id="file-input" accept=".kicad_sch,.kicad_pcb,.kicad_pro" hidden />
 			<input type="file" id="zip-input" accept=".zip" hidden />
@@ -258,11 +292,22 @@
 		<button type="button" id="btn-redo" hidden></button>
 		<button type="button" id="btn-preferences" hidden></button>
 		<button type="button" id="btn-symbol-fields-table" hidden></button>
+		<button type="button" id="btn-annotate-schematic" hidden></button>
 		<button type="button" id="btn-update-pcb-from-schematic" hidden></button>
 		<button type="button" id="btn-router-settings" hidden></button>
 	</header>
 	<main>
 		<aside class="edit-left-pane" id="left-dock">
+			<section class="edit-pane hidden" data-pane="hierarchy" id="edit-hierarchy-pane">
+				<header>Hierarchy <button type="button" aria-label="Close">×</button></header>
+				<div id="edit-hierarchy" class="edit-pane-body">No project hierarchy available.</div>
+			</section>
+			<div class="pane-splitter" data-before="hierarchy"></div>
+			<section class="edit-pane hidden" data-pane="libraries" id="edit-libraries-pane">
+				<header>Libraries <button type="button" aria-label="Close">×</button></header>
+				<div id="edit-libraries" class="edit-pane-body">No symbol library file is indexed yet.</div>
+			</section>
+			<div class="pane-splitter" data-before="libraries"></div>
 			<section class="edit-pane" data-pane="properties">
 				<header>Properties <button type="button" aria-label="Close">×</button></header>
 				<div id="edit-properties" class="edit-pane-body">No objects selected</div>
@@ -283,6 +328,44 @@
 					<label><input type="checkbox" checked> Text</label><label><input type="checkbox" checked> Other items</label>
 				</div>
 			</section>
+		</aside>
+		<aside class="tool-panel schematic-toggle-panel hidden" id="schematic-toggle-panel" aria-label="Schematic display controls">
+			<button type="button" class="tool-btn active" data-sch-toggle="grid" title="Show Grid" aria-label="Show Grid" aria-pressed="true">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 5 H19 V19 H5 Z M9.7 5 V19 M14.3 5 V19 M5 9.7 H19 M5 14.3 H19"/></svg>
+			</button>
+			<button type="button" class="tool-btn" disabled title="Grid Overrides — not yet implemented" aria-label="Grid Overrides">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 5 H19 V19 H5 Z M5 15 L15 5 M9 19 L19 9"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-sch-toggle="units" title="Switch Units" aria-label="Units: Millimeters">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 7 V17 M5 12 H19 M10 9 V15 M14 9 V15 M18 9 V15"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-sch-toggle="crosshair" title="Crosshair Mode: Small Crosshairs" aria-label="Crosshair Mode: Small Crosshairs" aria-pressed="false">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M12 4 V20 M4 12 H20 M9 9 L15 15 M15 9 L9 15"/></svg>
+			</button>
+
+			<div class="tool-sep"></div>
+
+			<button type="button" class="tool-btn" data-sch-toggle="hidden-pins" title="Show Hidden Pins" aria-label="Show Hidden Pins" aria-pressed="false">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M2 12 C5 6 10 4 12 4 C14 4 19 6 22 12 C19 18 14 20 12 20 C10 20 5 18 2 12 Z"/><circle cx="12" cy="12" r="3"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-sch-toggle="line-mode" title="Line Mode: 90 Degree" aria-label="Line Mode: 90 Degree" aria-pressed="false">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 18 H12 V12 H19 M5 8 L9 12"/></svg>
+			</button>
+
+			<div class="tool-sep"></div>
+
+			<button type="button" class="tool-btn active" data-sch-toggle="annotate" title="Annotate Automatically" aria-label="Annotate Automatically" aria-pressed="true">
+				<svg class="tool-icon" viewBox="0 0 24 24"><circle cx="5" cy="6" r="1.3" fill="currentColor" stroke="none"/><path d="M9 6 H19"/><circle cx="5" cy="12" r="1.3" fill="currentColor" stroke="none"/><path d="M9 12 H19"/><circle cx="5" cy="18" r="1.3" fill="currentColor" stroke="none"/><path d="M9 18 H19"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-sch-toggle="hierarchy" title="Hierarchy Navigator" aria-label="Hierarchy Navigator" aria-pressed="false">
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="9" y="4" width="6" height="4"/><path d="M12 8 V11 M5 11 H19 M5 11 V15 M19 11 V15"/><rect x="2" y="15" width="6" height="4"/><rect x="16" y="15" width="6" height="4"/></svg>
+			</button>
+
+			<div class="tool-sep"></div>
+
+			<button type="button" class="tool-btn" data-sch-toggle="properties" title="Show Properties" aria-label="Show Properties" aria-pressed="true">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 5 H19 V19 H5 Z M8 9 H16 M8 13 H16 M8 17 H13"/></svg>
+			</button>
 		</aside>
 		<aside class="tool-panel board-toggle-panel hidden" id="board-toggle-panel" aria-label="PCB display controls">
 			<button type="button" class="tool-btn active" data-board-toggle="grid" title="Show Grid" aria-label="Show Grid" aria-pressed="true">
@@ -361,8 +444,23 @@
 		<div class="stage" id="stage">
 			<canvas id="canvas2d" class="hidden"></canvas>
 			<canvas id="canvas-gl"></canvas>
+			<!-- Symbol editor's own canvas + private KicadRenderSession — kept
+				separate from canvas-gl/SessionController's shared session
+				rather than reusing it, since that session holds the user's
+				actual open schematic/PCB document; a second WebGL context on
+				the SAME canvas competing with it while the user is mid-edit
+				would risk real state corruption for no real benefit (unlike
+				schematic/PCB, which legitimately share one session/canvas
+				because switching between them reloads the SAME document). -->
+			<canvas id="symbol-stage-canvas" class="hidden"></canvas>
 			<input type="text" id="edit-text-input" class="edit-text-input hidden" placeholder="Text…" autocomplete="off" />
 			<textarea id="edit-text-box-input" class="edit-text-input edit-text-box-input hidden" placeholder="Text…" autocomplete="off" rows="4"></textarea>
+			<!-- Symbol editor's own floating text input — a SEPARATE element from
+				#edit-text-input rather than reused, so typing into it can never
+				also trigger TextInputFlow's own listeners (bound once, at app
+				startup, to #edit-text-input specifically) against the wrong
+				session/tool. Same .edit-text-input class for identical styling. -->
+			<input type="text" id="symbol-text-input" class="edit-text-input hidden" placeholder="Text…" autocomplete="off" />
 			<div class="table-modal hidden" id="table-modal">
 				<h3>Insert table</h3>
 				<label>Rows <input id="table-rows" type="number" min="1" max="30" value="2" /></label>
@@ -397,7 +495,8 @@
 					<h3 id="symbol-chooser-title">Choose Symbol</h3>
 					<button type="button" class="symbol-chooser-close" id="symbol-chooser-close" aria-label="Close">×</button>
 				</div>
-				<div class="symbol-chooser-search"><span aria-hidden="true">⌕</span><input id="symbol-chooser-filter" type="search" placeholder="Filter symbols…" autocomplete="off" /></div>
+				<!-- Search box built by LibraryChooser's constructor (Dom.ts's
+				     buildFilterSearch) and inserted right here — not static markup. -->
 				<div class="symbol-chooser-body">
 					<div class="symbol-chooser-list" id="symbol-chooser-list"></div>
 					<div class="symbol-chooser-preview">
@@ -421,7 +520,8 @@
 						<h3 id="footprint-chooser-title">Choose Footprint</h3>
 						<button type="button" class="symbol-chooser-close" id="footprint-chooser-close" aria-label="Close">×</button>
 					</div>
-					<div class="symbol-chooser-search"><span aria-hidden="true">⌕</span><input id="footprint-chooser-filter" type="search" placeholder="Filter footprints…" autocomplete="off" /></div>
+					<!-- Search box built by LibraryChooser's constructor (Dom.ts's
+					     buildFilterSearch) and inserted right here — not static markup. -->
 					<div class="symbol-chooser-body">
 						<div class="symbol-chooser-list" id="footprint-chooser-list"></div>
 						<div class="symbol-chooser-preview">
@@ -656,6 +756,40 @@
 			</button>
 			<button type="button" class="tool-btn" data-tool="dimension-orthogonal" title="Add Orthogonal Dimension">
 				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 5 H19 M5 5 L8 2 M5 5 L8 8 M19 5 L16 2 M19 5 L16 8 M5 5 V19 M19 5 V19 M8 15 H16"/></svg>
+			</button>
+		</aside>
+		<aside class="tool-panel hidden" id="symbol-tool-panel" aria-label="Symbol editor tools">
+			<button type="button" class="tool-btn active" data-tool="select" title="Select (S)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M6 3 L6 19 L10 15.5 L13 21 L15.5 19.7 L12.5 14.2 L18 14.2 Z"/></svg>
+			</button>
+			<div class="tool-sep"></div>
+			<button type="button" class="tool-btn" data-tool="pin" title="Pin (P)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M6 12 H15"/><circle cx="18" cy="12" r="2.5"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="text" title="Symbol Text (T)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M6 6 H18 M12 6 V18"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="text-box" title="Symbol Text Box">
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14"/><path d="M7 9 H17 M7 12.5 H17 M7 16 H13"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="rect" title="Rectangle (R)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><rect x="5" y="6" width="14" height="12"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="circle" title="Circle (C)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="arc" title="Arc (A)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 17 A9 9 0 0 1 19 17"/><circle cx="5" cy="17" r="1.2" fill="currentColor" stroke="none"/><circle cx="19" cy="17" r="1.2" fill="currentColor" stroke="none"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="bezier" title="Bezier Curve (B)">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M4 17 C8 4 15 20 20 7"/><circle cx="4" cy="17" r="1.2" fill="currentColor" stroke="none"/><circle cx="20" cy="7" r="1.2" fill="currentColor" stroke="none"/></svg>
+			</button>
+			<div class="tool-sep"></div>
+			<button type="button" class="tool-btn" data-tool="anchor" title="Set Symbol Anchor">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M12 4 V20 M4 12 H20"/><circle cx="12" cy="12" r="3"/></svg>
+			</button>
+			<button type="button" class="tool-btn" data-tool="delete" title="Interactive Delete Tool">
+				<svg class="tool-icon" viewBox="0 0 24 24"><path d="M5 7 H19 M9 7 V5 H15 V7 M7 7 L8 20 H16 L17 7"/><path d="M10 10 V17 M14 10 V17"/></svg>
 			</button>
 		</aside>
 		<aside class="board-appearance hidden" id="board-appearance" aria-label="PCB appearance"></aside>
