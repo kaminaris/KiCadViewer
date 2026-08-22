@@ -952,35 +952,112 @@ export class SessionController {
 	 * Project works here too.
 	 */
 	async openProjectZip(file: File): Promise<string | null> {
+		const name = file.name;
+		let archive: ZipArchive | null = null;
 		try {
-			const archive = await ZipArchive.open(file);
+			archive = await ZipArchive.open(file);
+		}
+		catch (error) {
+			// Read a small head of the file for a quick signature check and
+			// include environment hints (DecompressionStream availability).
+			let headHex = '';
+			try {
+				const head = new Uint8Array(await file.slice(0, 64).arrayBuffer());
+				headHex = Array.from(head.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+			}
+			catch (e) {
+				// ignore
+			}
+			const decompressionAvailable = typeof (globalThis as any).DecompressionStream === 'function' || typeof DecompressionStream !== 'undefined';
+			this.statusBar.dbg('Zip open failed', { name, error, headHex, decompressionAvailable });
+			this.statusBar.setStatus(
+				`Could not open "${ name }" as a zip — ${ error instanceof Error ? error.message : String(error) }` +
+				(headHex ? `; first bytes: ${ headHex }` : '') +
+				(!decompressionAvailable ? ' (DecompressionStream unavailable in this browser)' : '')
+			);
+			return null;
+		}
+
+		// Archive opened — gather a quick summary for diagnostics if later
+		// steps fail.
+		const allEntries = archive.listEntries();
+		try {
 			const zipAdapter = new ZipFsAdapter(archive);
 			const proFile = zipAdapter.findProjectFile();
 			if (!proFile) {
-				this.statusBar.setStatus(`No .kicad_pro found inside "${ file.name }".`);
+				// Include a short sample of entries to help callers debug layout.
+				const sample = allEntries.slice(0, 25).join(', ');
+				this.statusBar.dbg('No .kicad_pro in archive', { name, entries: allEntries.length, sample });
+				this.statusBar.setStatus(`No .kicad_pro found inside "${ name }". Entries: ${ allEntries.length } (sample: ${ sample }${ allEntries.length > 25 ? ', ...' : '' })`);
 				return null;
 			}
-			const key = `imported:${ file.name }:${ file.size }`;
+			const key = `imported:${ name }:${ file.size }`;
 			const fsAdapter = new IndexedDbFsAdapter(key);
-			for (const path of archive.listEntries()) {
+			// Extract only the KiCad-relevant files and fail fast with diagnostics
+			// if any single entry can't be read.
+			for (const path of allEntries) {
 				if (/\.(kicad_pro|kicad_sch|kicad_pcb)$/i.test(path)) {
-					await fsAdapter.saveFile(path, await archive.readText(path));
+					try {
+						const text = await archive.readText(path);
+						await fsAdapter.saveFile(path, text);
+					}
+					catch (err) {
+						let meta: any = null;
+						try { meta = archive.debugEntriesMeta().find(m => m.name === path); } catch (e) { /* ignore */ }
+						this.statusBar.dbg('Failed to extract zip entry', { name, path, error: err, meta });
+						this.statusBar.setStatus(`Could not extract "${ path }" from "${ name }" — ${ err instanceof Error ? err.message : String(err) }`);
+						return null;
+					}
 				}
 			}
-			const project = await KicadProject.openFromProjectRoot(fsAdapter.loadFile, fsAdapter.pathUtils, proFile);
+			let project: any;
+			try {
+				// Quick sanity-check: ensure the extracted .kicad_pro is readable and
+				// capture a small sample of its contents for diagnostics.
+				let proText = '';
+				try {
+					proText = await fsAdapter.loadFile(proFile);
+					this.statusBar.dbg('Read .kicad_pro sample', { name, proFile, length: proText.length, sample: proText.slice(0, 800) });
+				}
+				catch (readErr) {
+					this.statusBar.dbg('Could not read .kicad_pro after extraction', { name, proFile, error: readErr });
+					this.statusBar.setStatus(`Could not read project file "${ proFile }" after extracting archive.`);
+					return null;
+				}
+
+				project = await KicadProject.openFromProjectRoot(fsAdapter.loadFile, fsAdapter.pathUtils, proFile);
+			}
+			catch (err) {
+				// Robustly serialize the thrown value for console diagnostics.
+				const errorInfo: any = {};
+				if (err instanceof Error) {
+					errorInfo.message = err.message;
+					errorInfo.stack = err.stack;
+					errorInfo.name = err.name;
+				}
+				else {
+					try { errorInfo.serialized = JSON.stringify(err); } catch (e) { errorInfo.value = String(err); }
+				}
+				let entriesMetaSample: any[] = [];
+				try { entriesMetaSample = archive.debugEntriesMeta().slice(0, 25); } catch (e) { /* ignore */ }
+				this.statusBar.dbg('KicadProject.openFromProjectRoot failed', { name, proFile, error: errorInfo, sampleEntries: allEntries.slice(0, 25), entriesMetaSample });
+				this.statusBar.setStatus(`Could not parse project from "${ name }" — ${ errorInfo.message ?? errorInfo.serialized ?? String(err) } (see console for archive sample)`);
+				return null;
+			}
 			if (!project.mainSchematic) {
+				this.statusBar.dbg('Imported project missing main schematic', { name, proFile, entries: allEntries.length });
 				this.statusBar.setStatus(`"${ proFile }" has no matching .kicad_sch next to it in the zip.`);
 				return null;
 			}
-			this.state.projectContext = new ProjectContext(key, project, fsAdapter, file.name);
+			this.state.projectContext = new ProjectContext(key, project, fsAdapter, name);
 			this.state.currentSheetNode = project.mainSchematic;
 			this.dom.saveProjectButton.disabled = false;
 			this.dom.exportProjectZipButton.disabled = false;
 			const sheetCount = this.countSheetsRecursive(project.mainSchematic);
-			void this.registry.upsertProject({ id: key, name: file.name, kind: 'imported', proFile, lastOpenedAt: Date.now(), sheetCount });
+			void this.registry.upsertProject({ id: key, name, kind: 'imported', proFile, lastOpenedAt: Date.now(), sheetCount });
 			const loaded = await this.loadText(project.mainSchematic.data, 'schematic', project.mainSchematic.path);
 			if (loaded) {
-				this.statusBar.setStatus(`Imported project "${ file.name }" — ${ sheetCount } sheet(s) in hierarchy.`);
+				this.statusBar.setStatus(`Imported project "${ name }" — ${ sheetCount } sheet(s) in hierarchy.`);
 			}
 			return key;
 		}
@@ -989,8 +1066,8 @@ export class SessionController {
 			this.state.currentSheetNode = null;
 			this.dom.saveProjectButton.disabled = true;
 			this.dom.exportProjectZipButton.disabled = true;
-			this.statusBar.setStatus(
-				`Could not import zip — ${ error instanceof Error ? error.message : String(error) }`);
+			this.statusBar.dbg('openProjectZip failed (unexpected)', { name, error, entries: allEntries.slice(0, 25) });
+			this.statusBar.setStatus(`Could not import zip — ${ error instanceof Error ? error.message : String(error) }`);
 			return null;
 		}
 	}

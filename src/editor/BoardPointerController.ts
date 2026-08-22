@@ -8,7 +8,7 @@ import { shoveTrackPath } from '@kicad-render/router/RouterGeometry';
 import { buildClearanceHull } from '@kicad-render/router/PnsHull';
 import { walkaroundHull, pathLength } from '@kicad-render/router/PnsWalkaround';
 import { simplifyWalkedPath } from '@kicad-render/router/PnsOptimizer';
-import { dragSegment45, mergeCollinear, dragViaChain } from '@kicad-render/router/PnsDragger';
+import { dragViaChain, mergeCollinear } from '@kicad-render/router/PnsDragger';
 import { resolveNetClass, resolveClearanceMm, type NetClassRules } from '@kicad-layout/NetClassResolver';
 import type { RouterSettings } from '../app/ActiveDocument';
 
@@ -285,6 +285,7 @@ export class BoardPointerController {
 			return false;
 		}
 		this.pending.clear();
+		this.deps.getSession()?.getRouteTool().Cancel();
 		this.deps.getSession()?.setEditPreview(null);
 		this.deps.setStatus('Route finished.');
 		return true;
@@ -295,6 +296,7 @@ export class BoardPointerController {
 			return false;
 		}
 		this.pending.clear();
+		this.deps.getSession()?.getRouteTool().Cancel();
 		this.deps.getSession()?.setEditPreview(null);
 		this.deps.setStatus('Route cancelled.');
 		return true;
@@ -826,7 +828,70 @@ export class BoardPointerController {
 				this.captureUndoOnce(session, 'Move item');
 				session.beginBoardDragPerformance();
 				const usedFastPath = !!dragTargets && session.translateBoardDragFast(dragTargets, dx, dy);
+				console.info('translateBoardDragFast used (single):', usedFastPath);
 				session.noteBoardDragFrame(usedFastPath);
+				if (usedFastPath) {
+					try {
+						const movedIds = dragTargets?.itemIds ?? [];
+						// Track cumulative drag delta on the targets so previews can be
+						// positioned correctly even though session.scene isn't mutated
+						// by the fast GPU translate path.
+						if (dragTargets) {
+							if (typeof (dragTargets as any)._accumDx !== 'number') {
+								(dragTargets as any)._accumDx = 0;
+								(dragTargets as any)._accumDy = 0;
+							}
+							(dragTargets as any)._accumDx += dx;
+							(dragTargets as any)._accumDy += dy;
+						}
+						const netIds = new Set<number>();
+						const sceneAny = (session as any).scene;
+						if (sceneAny) {
+							for (const item of sceneAny.hitTestItems) {
+								if (item.kind !== 'pad' || item.netId == null) continue;
+								const ownerId = (item.id || '').split(':')[0];
+								if (movedIds.includes(ownerId) || movedIds.includes(item.id)) {
+									netIds.add(item.netId);
+								}
+							}
+						}
+let previewLines = session.computePreviewRatsnest(netIds);
+						// Adjust endpoints that snap to pads belonging to the moved
+						// footprints by the accumulated drag delta so the preview lines
+						// visually follow the fast-path translation.
+						try {
+							if (sceneAny && previewLines.length > 0) {
+								const padCenters = new Map<string, { x: number; y: number }>();
+								for (const item of sceneAny.hitTestItems) {
+									if (item.kind !== 'pad' || item.netId == null) continue;
+									const ownerId = (item.id || '').split(':')[0];
+									if (!movedIds.includes(ownerId) && !movedIds.includes(item.id)) continue;
+									padCenters.set(item.id, { x: item.bbox.x + item.bbox.w / 2, y: item.bbox.y + item.bbox.h / 2 });
+								}
+								const EPS = 1e-4;
+								const accumDx = (dragTargets as any)?._accumDx ?? 0;
+								const accumDy = (dragTargets as any)?._accumDy ?? 0;
+								for (const line of previewLines) {
+									for (const [padId, center] of padCenters) {
+										if (Math.hypot(line.from.x - center.x, line.from.y - center.y) <= EPS) {
+											line.from = new Vec2(center.x + accumDx, center.y + accumDy);
+										}
+										if (Math.hypot(line.to.x - center.x, line.to.y - center.y) <= EPS) {
+											line.to = new Vec2(center.x + accumDx, center.y + accumDy);
+										}
+									}
+								}
+							}
+						} catch (e) {
+							console.info('fast-path preview snap adjust failed', e);
+						}
+session.setPreviewRatsnest(previewLines, netIds);
+						session.scheduleRender();
+					}
+					catch (err) {
+						console.info('fast-path preview build failed (single)', err);
+					}
+				}
 				if (!usedFastPath) {
 					// Either resolveBoardDragTargets found nothing it can
 					// fast-path (a bare track/graphic/dimension-text paintId),
@@ -926,7 +991,67 @@ export class BoardPointerController {
 				this.captureUndoOnce(session, 'Move footprints');
 				session.beginBoardDragPerformance();
 				const usedFastPath = !!dragTargets && session.translateBoardDragFast(dragTargets, dx, dy);
+				console.info('translateBoardDragFast used (group):', usedFastPath, 'selectionSize=', session.selectionIds?.size ?? 0);
 				session.noteBoardDragFrame(usedFastPath);
+				if (usedFastPath) {
+					try {
+						const movedIds = dragTargets?.itemIds ?? [];
+						// Track cumulative drag delta so the preview can be snapped to
+						// moving pad centers even when the WebGL fast-path translates
+						// visuals without mutating session.scene.
+						if (dragTargets) {
+							if (typeof (dragTargets as any)._accumDx !== 'number') {
+								(dragTargets as any)._accumDx = 0;
+								(dragTargets as any)._accumDy = 0;
+							}
+							(dragTargets as any)._accumDx += dx;
+							(dragTargets as any)._accumDy += dy;
+						}
+						const netIds = new Set<number>();
+						const sceneAny = (session as any).scene;
+						if (sceneAny) {
+							for (const item of sceneAny.hitTestItems) {
+								if (item.kind !== 'pad' || item.netId == null) continue;
+								const ownerId = (item.id || '').split(':')[0];
+								if (movedIds.includes(ownerId) || movedIds.includes(item.id)) {
+									netIds.add(item.netId);
+								}
+							}
+						}
+let previewLines = session.computePreviewRatsnest(netIds);
+						try {
+							if (sceneAny && previewLines.length > 0) {
+								const padCenters = new Map<string, { x: number; y: number }>();
+								for (const item of sceneAny.hitTestItems) {
+									if (item.kind !== 'pad' || item.netId == null) continue;
+									const ownerId = (item.id || '').split(':')[0];
+									if (!movedIds.includes(ownerId) && !movedIds.includes(item.id)) continue;
+									padCenters.set(item.id, { x: item.bbox.x + item.bbox.w / 2, y: item.bbox.y + item.bbox.h / 2 });
+								}
+								const EPS = 1e-4;
+								const accumDx = (dragTargets as any)?._accumDx ?? 0;
+								const accumDy = (dragTargets as any)?._accumDy ?? 0;
+								for (const line of previewLines) {
+									for (const [padId, center] of padCenters) {
+										if (Math.hypot(line.from.x - center.x, line.from.y - center.y) <= EPS) {
+											line.from = new Vec2(center.x + accumDx, center.y + accumDy);
+										}
+										if (Math.hypot(line.to.x - center.x, line.to.y - center.y) <= EPS) {
+											line.to = new Vec2(center.x + accumDx, center.y + accumDy);
+										}
+									}
+								}
+							}
+						} catch (e) {
+							console.info('fast-path preview snap adjust failed', e);
+						}
+session.setPreviewRatsnest(previewLines, netIds);
+						session.scheduleRender();
+					}
+					catch (err) {
+						console.info('fast-path preview build failed (group)', err);
+					}
+				}
 				if (!usedFastPath) {
 					dragTargets = null;
 					if (!this.gesture.moved) {
@@ -1014,7 +1139,13 @@ export class BoardPointerController {
 			}
 			const target = this.snappedWorld(session, screenPos);
 			const cornerMode = this.deps.getCornerMode() === '90' ? '90' : '45';
-			const dragged = dragSegment45(line.points, dragIndex, target, cornerMode);
+			// Drive the canonical drag tool (wraps dragSegment45 + mergeCollinear
+			// behind a state machine) instead of calling the primitive directly.
+			const dragTool = session.getDragTool();
+			dragTool.Select(line.points, dragIndex, 'segment');
+			dragTool.SetCornerMode(cornerMode);
+			dragTool.SetWidth(line.width);
+			const dragged = dragTool.Move(target).path;
 			const settings = this.deps.getRouterSettings();
 			const clearanceFn = this.clearanceResolver(session);
 			const rawCollides = this.pathCollides(dragged, line.width, line.layer, line.netId, clearanceFn);
@@ -1770,15 +1901,19 @@ export class BoardPointerController {
 	}
 
 	protected routeClick(session: KicadRenderSession, screenPos: Vec2, finish: boolean): void {
-		const pending = this.pending.current;
-		if (pending.kind !== 'route') {
+		// Bind the canonical router's world + settings to the current scene.
+		const tool = session.prepareRouteTool() ?? session.getRouteTool();
+		const rs = this.deps.getRouterSettings();
+		tool.setClearanceResolver(this.clearanceResolver(session));
+		tool.SetMode(rs.mode);
+		tool.SetCornerMode(this.deps.getCornerMode());
+		tool.SetAllowDrcViolations(rs.allowDrcViolations);
+		if (!tool.IsRouting()) {
+			// Start a new route: snap to an anchor (pad/via/track-end), pick up
+			// its net; fall back to a ratsnest-endpoint if no copper is near.
 			const snap = this.routeAnchorSnap(session, screenPos);
 			let netId = snap.netId ?? session.netIdAtScreen(screenPos);
 			let startPoint = snap.point;
-			// Clicked empty copper, nowhere near an existing pad/via/track —
-			// try snapping to the nearest unrouted ratsnest airwire endpoint
-			// instead of starting a floating, netless route, matching real
-			// KiCad's ratsnest-driven routing entry point.
 			if (netId === null || netId <= 0) {
 				const near = session.nearestRatsnestPoint(startPoint, session.pickToleranceWorld * 3);
 				if (near) {
@@ -1786,6 +1921,11 @@ export class BoardPointerController {
 					startPoint = near.point;
 				}
 			}
+			if (netId !== null && netId > 0) {
+				tool.SetWidth(this.deps.getRoutingSizes(session.netNameForId(netId)).trackWidth);
+			}
+			tool.SetLayer(this.deps.getActiveLayer());
+			tool.SelectStart(startPoint, snap.snapped ? [{ pos: snap.point, netId: snap.netId, kind: 'track-end' }] : []);
 			this.pending.set({
 				kind: 'route',
 				netId,
@@ -1795,15 +1935,17 @@ export class BoardPointerController {
 			});
 			this.rebuildRouterNode(session);
 			this.updateRoutePreview(session, screenPos);
-			this.deps.setStatus(`Routing on ${ this.deps.getActiveLayer() } — click to add a corner.`);
+			this.deps.setStatus(`Routing on ${ this.deps.getActiveLayer() } — click to add a corner. Enter/double-click finishes.`);
+			return;
+		}
+		// Routing: fix the current corner via the canonical router, then chain.
+		const pending = this.pending.current;
+		if (pending.kind !== 'route') {
 			return;
 		}
 		const point = this.routeAnchorSnap(session, screenPos, pending.netId).point;
 		const { added, blocked } = this.commitRouteTo(session, pending, point);
 		if (blocked) {
-			// Stay on the current corner (don't advance/finish) — matches real
-			// KiCad refusing to fix a colliding line unless "Allow DRC
-			// violations" is checked, see commitRouteTo's doc comment.
 			this.deps.setStatus(`Routing on ${ pending.layer } — can't place here, clearance violation (enable "Allow DRC violations" in Router Settings to override).`);
 			return;
 		}
@@ -1826,22 +1968,25 @@ export class BoardPointerController {
 		if (pending.kind !== 'route') {
 			return;
 		}
-		const from = pending.corners[pending.corners.length - 1]!;
+		const tool = session.getRouteTool();
+		if (!tool.IsRouting()) {
+			session.setEditPreview(null);
+			return;
+		}
 		const cursor = this.routeAnchorSnap(session, screenPos, pending.netId).point;
+		const gesture = tool.MoveCursor(cursor);
 		const width = pending.connectedWidth ?? this.deps.getRoutingSizes(session.netNameForId(pending.netId)).trackWidth;
-		const { path, collides: rawCollides } = this.computeRoutePath(session, from, cursor, pending, width);
+		const points = tool.ghostPoints();
 		const settings = this.deps.getRouterSettings();
-		// Shove mode never mutates during preview (see attemptShove's doc
-		// comment) — a dry planShove run tells the preview whether the real
-		// shove-on-commit would resolve the collision, so the live view
-		// doesn't flash red for something that's about to be pushed aside.
-		const collides = rawCollides && settings.mode === 'shove'
-			? this.planShove(session, from, cursor, pending, width) === null
-			: rawCollides;
+		// Shove mode never mutates during preview — the canonical router's
+		// move() only reports whether a shove would resolve (detoured/collides),
+		// matching real KiCad's dry shove planning; the live view doesn't flash
+		// red for something that's about to be pushed aside at commit time.
+		const collides = gesture.collides && settings.mode === 'shove' ? false : gesture.collides;
 		session.setEditPreview({
 			kind: 'route',
-			points: path.slice(0, -1),
-			cursor: path[path.length - 1]!,
+			points: points.slice(0, -1),
+			cursor: points[points.length - 1] ?? cursor,
 			width,
 			collides
 		});
@@ -1868,42 +2013,6 @@ export class BoardPointerController {
 			}
 		}
 		return false;
-	}
-
-	/** The route tool's full "what path do I draw/commit" pipeline for one
-	 *  leg: try the corner-mode-straight path first; if it collides AND the
-	 *  active RouterSettings mode is 'walkaround', try walkAroundObstacles
-	 *  (real KiCad tries hard here — it doesn't give up after just one
-	 *  obstacle, see that method's doc comment); otherwise (or if no clear
-	 *  walk exists) return the flagged straight path. In 'shove' mode this
-	 *  is called AFTER attemptShove has already moved the obstacle out of
-	 *  the way at commit time, so the plain collision check here simply
-	 *  reflects whether that succeeded — no walkaround is attempted in that
-	 *  mode. Shared by updateRoutePreview and commitRouteTo so what gets
-	 *  drawn is exactly what gets placed. */
-	protected computeRoutePath(
-		session: KicadRenderSession, from: Vec2, to: Vec2,
-		pending: Extract<PendingShape, { kind: 'route' }>, width: number,
-	): { path: Vec2[]; collides: boolean } {
-		const straight = this.buildRoutePath(from, to);
-		if (!this.routerNode) {
-			return { path: straight, collides: false };
-		}
-		const clearanceFn = this.clearanceResolver(session);
-		if (!this.pathCollides(straight, width, pending.layer, pending.netId, clearanceFn)) {
-			return { path: straight, collides: false };
-		}
-		const mode = this.deps.getRouterSettings().mode;
-		if (mode === 'walkaround') {
-			const walked = this.walkAroundObstacles(session, from, to, straight, pending, width);
-			if (walked) {
-				return { path: walked, collides: false };
-			}
-		}
-		else {
-			this.deps.dbg('walkaround: skipped, mode is', mode);
-		}
-		return { path: straight, collides: true };
 	}
 
 	/** Iteratively walks around every obstacle the candidate path collides
@@ -1993,31 +2102,13 @@ export class BoardPointerController {
 		return null;
 	}
 
-	/** Shove planner: if the straight/corner-mode candidate path collides
-	 *  with an existing TRACK segment (never a pad/via — those are fixed by
-	 *  their footprint/drill, not something the router can relocate),
-	 *  computes a reroute of that one obstacle segment around the new route
-	 *  via RouterGeometry.shoveTrackPath. Pure/non-mutating — returns the
-	 *  obstacle element and its replacement segments, or null if the
-	 *  collision isn't with a track, shoveTrackPath can't find room for a
-	 *  jog, or the jogged result would itself collide with something else
-	 *  (this phase's scope is single-obstacle, no cascade — see
-	 *  shoveTrackPath's doc comment). Split from the old attemptShove so
-	 *  both the live preview (dry — just wants to know "would this
-	 *  resolve?") and commitRouteTo (applies it) share one computation. */
-	protected planShove(
-		session: KicadRenderSession, from: Vec2, to: Vec2,
-		pending: Extract<PendingShape, { kind: 'route' }>, width: number,
-	): { element: any; segments: { x1: number; y1: number; x2: number; y2: number }[] } | null {
-		return this.planShoveForPath(session, this.buildRoutePath(from, to), pending.layer, pending.netId, width);
-	}
-
-	/** Shared core of planShove — extracted so a mid-segment track drag
-	 *  (BoardPointerController's dragged-line preview, which already has its
-	 *  own candidate path from dragSegment45 and has no "from/to" to rebuild
-	 *  a corner-mode route between) can reuse the exact same shove-planning
-	 *  logic instead of a second copy. See planShove's own doc comment for
-	 *  what this computes and why it's single-obstacle/non-mutating. */
+	/** Shared core of the route/drag shove planner — extracted so a
+	 *  mid-segment track drag (BoardPointerController's dragged-line preview,
+	 *  which already has its own candidate path from dragSegment45 and has no
+	 *  "from/to" to rebuild a corner-mode route between) can reuse the exact
+	 *  same shove-planning logic instead of a second copy. Computes a reroute
+	 *  of the one colliding TRACK segment around the new route via
+	 *  RouterGeometry.shoveTrackPath, single-obstacle/non-mutating. */
 	protected planShoveForPath(
 		session: KicadRenderSession, path: Vec2[], layer: string, netId: number | null, width: number,
 	): { element: any; segments: { x1: number; y1: number; x2: number; y2: number }[] } | null {
@@ -2054,19 +2145,6 @@ export class BoardPointerController {
 		return null;
 	}
 
-	/** Applies planShove's result to the board — only ever called from
-	 *  commitRouteTo (a real click), never from the live preview, so a
-	 *  mouse move alone never nudges someone else's track. */
-	protected attemptShove(
-		session: KicadRenderSession, from: Vec2, to: Vec2,
-		pending: Extract<PendingShape, { kind: 'route' }>, width: number,
-	): void {
-		const plan = this.planShove(session, from, to, pending, width);
-		if (plan && session.shoveTrackSegment(plan.element, plan.segments)) {
-			this.rebuildRouterNode(session);
-		}
-	}
-
 	/** Builds a (candidateNetId, obstacleNetId) -> clearanceMm resolver for
 	 *  RouterNode's collision queries, backed by the project's real net
 	 *  classes (NetClassResolver.resolveClearanceMm) instead of one flat
@@ -2076,44 +2154,6 @@ export class BoardPointerController {
 	protected clearanceResolver(session: KicadRenderSession): (a: number | null, b: number | null) => number {
 		const rules = this.deps.getNetClassRules();
 		return (a, b) => resolveClearanceMm(session.netNameForId(a) ?? '', session.netNameForId(b) ?? '', rules);
-	}
-
-	/** Builds the candidate corner path for one route leg, per the active
-	 *  corner mode (real KiCad's placer setting — see ActiveDocument.
-	 *  routeCornerMode's doc comment): '45' mates the shorter orthogonal
-	 *  span with a diagonal (this app's original/default behavior), '90' is
-	 *  a plain right-angle L-bend, 'free' is one direct segment. */
-	protected buildRoutePath(from: Vec2, to: Vec2): Vec2[] {
-		const mode = this.deps.getCornerMode();
-		if (mode === 'free') {
-			return [from, to];
-		}
-		const dx = to.x - from.x;
-		const dy = to.y - from.y;
-		if (dx === 0 || dy === 0) {
-			return [from, to];
-		}
-		if (mode === '90') {
-			// Bend on whichever axis has the larger span first, matching real
-			// KiCad's own default orthogonal-placer corner choice — keeps the
-			// bend near the START for a mostly-horizontal drag and vice versa.
-			const corner = Math.abs(dx) >= Math.abs(dy) ? new Vec2(to.x, from.y) : new Vec2(from.x, to.y);
-			return [from, corner, to];
-		}
-		return this.miterPath(from, to);
-	}
-
-	protected miterPath(from: Vec2, to: Vec2): Vec2[] {
-		const dx = to.x - from.x;
-		const dy = to.y - from.y;
-		if (dx === 0 || dy === 0 || Math.abs(dx) === Math.abs(dy)) {
-			return [from, to];
-		}
-		const diagonal = Math.min(Math.abs(dx), Math.abs(dy));
-		const corner = new Vec2(
-			from.x + Math.sign(dx) * diagonal,
-			from.y + Math.sign(dy) * diagonal);
-		return [from, corner, to];
 	}
 
 	/** Rebuilds routerNode from the session's current board scene — call
@@ -2172,28 +2212,31 @@ export class BoardPointerController {
 		pending: Extract<PendingShape, { kind: 'route' }>,
 		point: Vec2
 	): { added: number; blocked: boolean } {
-		const from = pending.corners[pending.corners.length - 1] as Vec2;
-		const trackWidth = pending.connectedWidth ?? this.deps.getRoutingSizes(session.netNameForId(pending.netId)).trackWidth;
 		const settings = this.deps.getRouterSettings();
+		const tool = session.getRouteTool();
 		// Shove only actually moves copper here, at commit time — the live
-		// preview (computeRoutePath, called from updateRoutePreview too)
-		// deliberately never mutates the board, so a mouse move alone never
-		// nudges someone else's track; only actually clicking to place does.
-		// See RouterGeometry.shoveTrackPath's doc comment for this pass's
-		// single-segment, no-cascade scope.
-		if (settings.mode === 'shove') {
-			this.attemptShove(session, from, point, pending, trackWidth);
-		}
-		const { path, collides } = this.computeRoutePath(session, from, point, pending, trackWidth);
-		if (collides && !settings.allowDrcViolations) {
+		// preview (MoveCursor, called from updateRoutePreview too) deliberately
+		// never mutates the board, so a mouse move alone never nudges someone
+		// else's track; only actually clicking to place does. The router engine
+		// plans a shove during move() and applies it as part of fixRoute().
+		const commit = tool.Fix(point);
+		if (!commit) {
+			// Couldn't commit — the canonical router returns null when the
+			// final path still collides and "Allow DRC violations" is off, or
+			// the route is degenerate. Match real KiCad refusing a colliding
+			// fix regardless of mode.
 			return { added: 0, blocked: true };
 		}
+		// Apply shoved tracks (canonical router's committed shove plan).
+		for (const shoved of commit.shoved) {
+			session.shoveTrackSegment(shoved.obstacle.element, shoved.segments);
+		}
+		// Add the committed segments.
 		let added = 0;
-		for (let index = 1; index < path.length; index++) {
+		for (const seg of commit.segments) {
 			if (session.addTrackSegment(
-				path[index - 1]!.x, path[index - 1]!.y,
-				path[index]!.x, path[index]!.y,
-				trackWidth, this.deps.getActiveLayer(), pending.netId,
+				seg.x1, seg.y1, seg.x2, seg.y2,
+				seg.width, seg.layer, seg.netId,
 				added === 0)) {
 				added++;
 			}

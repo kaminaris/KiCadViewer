@@ -27,7 +27,7 @@ constraint requires a deliberate difference, keep it narrow and document the
 reason.
 
 The single most valuable implementation reference is the local KiCad source
-checkout at `C:\Projects\Personal\Electronic\kicad`. Consult it first when
+checkout at `shared/kicad-render/connectivity`. Consult it first when
 implementing or correcting an editor feature, especially for interaction
 state machines, defaults, serialization, geometry, and UI semantics. Treat
 existing code in this app as an implementation-in-progress, not as authority

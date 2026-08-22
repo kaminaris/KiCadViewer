@@ -60,6 +60,13 @@ export class ZipArchive {
 		return [...this.entries.keys()];
 	}
 
+	/** Returns debugging metadata for every entry discovered in the central
+	 *  directory. Useful for reporting diagnostics when a project import
+	 *  fails; callers should limit how much of this they surface to users. */
+	debugEntriesMeta(): ZipEntryMeta[] {
+		return [...this.entries.values()].map(e => ({ ...e }));
+	}
+
 	has(path: string): boolean {
 		return this.entries.has(path);
 	}
